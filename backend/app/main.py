@@ -1,3 +1,5 @@
+import asyncio
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,6 +8,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
 from app.api.terminal import router as terminal_router
 from app.core.database import Base, engine
+
+# Windows에서 subprocess 지원을 위한 이벤트 루프 설정
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 
 @asynccontextmanager

@@ -34,6 +34,21 @@
   color: #a0a0a0;
 }
 
+.logout-button {
+  background-color: #f44336;
+  color: #ffffff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.logout-button:hover {
+  background-color: #d32f2f;
+}
+
 .app-main {
   flex: 1;
   overflow: hidden;
