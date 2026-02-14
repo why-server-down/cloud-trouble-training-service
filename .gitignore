@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Vector DB
+ai-data/vector-db/*
+!ai-data/vector-db/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
