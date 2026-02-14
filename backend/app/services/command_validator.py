@@ -14,6 +14,7 @@ class CommandValidator:
     ALLOWED_COMMANDS = [
         "get", "describe", "logs", "edit", "apply", "delete",
         "exec", "port-forward", "top", "explain",
+        "help", "version", "api-resources", "api-versions",
     ]
 
     BLACKLIST_PATTERNS = [

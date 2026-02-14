@@ -1,14 +1,41 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
+import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
-const Terminal: React.FC = () => {
+interface TerminalProps {
+  sessionId?: string
+  token?: string
+}
+
+const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const currentLineRef = useRef<string>('')
+  const [confirmCommand, setConfirmCommand] = useState<string | null>(null)
+  const [terminalReady, setTerminalReady] = useState(false)
+  
+  // isConnected를 ref로도 관리
+  const isConnectedRef = useRef<boolean>(false)
+
+  // WebSocket 연결 - 터미널이 준비된 후에만 연결
+  const { isConnected, error, sendCommand } = useTerminalWebSocket({
+    sessionId: sessionId || '',
+    token: token || '',
+    terminal: terminalReady ? xtermRef.current : null,
+    onConfirmRequired: (command) => {
+      setConfirmCommand(command)
+    },
+  })
+  
+  // isConnected가 변경될 때 ref 업데이트
+  useEffect(() => {
+    isConnectedRef.current = isConnected
+    console.log('🔄 isConnected 업데이트:', isConnected)
+  }, [isConnected])
 
   useEffect(() => {
     if (!terminalRef.current) return
@@ -34,14 +61,21 @@ const Terminal: React.FC = () => {
 
     // 터미널을 DOM에 연결
     terminal.open(terminalRef.current)
-    fitAddon.fit()
+    
+    // fit()은 DOM이 완전히 렌더링된 후 실행
+    const fitTimer = setTimeout(() => {
+      try {
+        fitAddon.fit()
+      } catch (error) {
+        console.warn('FitAddon fit() failed:', error)
+      }
+    }, 100)
 
-    // 환영 메시지 출력
-    terminal.writeln('Welcome to K8s Survival Camp Terminal! 🚀')
-    terminal.writeln('Connected to namespace: user-demo')
-    terminal.writeln('Type kubectl commands to interact with your cluster.')
-    terminal.writeln('')
-    terminal.write('$ ')
+    // WebSocket 연결 전 안내 메시지
+    if (!sessionId || !token) {
+      terminal.writeln('⚠️  로그인이 필요합니다')
+      terminal.writeln('먼저 로그인을 해주세요.')
+    }
 
     // 사용자 입력 처리
     terminal.onData((data) => {
@@ -53,8 +87,16 @@ const Terminal: React.FC = () => {
         const command = currentLineRef.current.trim()
 
         if (command) {
-          // 명령어 실행 (현재는 로컬에서 시뮬레이션)
-          handleCommand(terminal, command)
+          // 디버깅: 연결 상태 확인 (ref 사용)
+          console.log('🔍 Debug - isConnected:', isConnectedRef.current, 'sessionId:', sessionId, 'token:', token ? 'exists' : 'missing')
+          
+          // WebSocket이 연결되어 있으면 서버로 전송
+          if (isConnectedRef.current && sessionId && token) {
+            sendCommand(command)
+          } else {
+            // 연결 안 되어 있으면 로컬 시뮬레이션
+            handleCommandLocal(terminal, command)
+          }
         }
 
         currentLineRef.current = ''
@@ -76,7 +118,15 @@ const Terminal: React.FC = () => {
 
     // 창 크기 변경 시 터미널 크기 조절
     const handleResize = () => {
-      fitAddon.fit()
+      if (fitAddonRef.current && xtermRef.current) {
+        setTimeout(() => {
+          try {
+            fitAddonRef.current?.fit()
+          } catch (error) {
+            console.warn('FitAddon resize failed:', error)
+          }
+        }, 100)
+      }
     }
     window.addEventListener('resize', handleResize)
 
@@ -84,22 +134,56 @@ const Terminal: React.FC = () => {
     xtermRef.current = terminal
     fitAddonRef.current = fitAddon
 
+    // 터미널 준비 완료 표시
+    setTerminalReady(true)
+
     // 정리 함수
     return () => {
+      clearTimeout(fitTimer)
       window.removeEventListener('resize', handleResize)
       terminal.dispose()
+      setTerminalReady(false)
     }
-  }, [])
+  }, []) // 의존성 배열 비우기 - 한 번만 실행
 
-  // 명령어 처리 함수 (시뮬레이션)
-  const handleCommand = (terminal: XTerm, command: string) => {
-    // kubectl 명령어인지 확인
+  // WebSocket 연결 상태 표시
+  useEffect(() => {
+    if (!xtermRef.current) return
+
+    if (isConnected) {
+      xtermRef.current.write('\r\n✅ 서버에 연결되었습니다!\r\n$ ')
+    } else if (error) {
+      xtermRef.current.write(`\r\n❌ ${error}\r\n`)
+    }
+  }, [isConnected, error])
+
+  // 삭제 확인 다이얼로그
+  useEffect(() => {
+    if (confirmCommand && xtermRef.current) {
+      const confirmed = window.confirm(
+        `정말로 이 명령어를 실행하시겠습니까?\n\n${confirmCommand}`
+      )
+
+      if (confirmed) {
+        sendCommand(confirmCommand, true)
+      } else {
+        xtermRef.current.write('\r\n취소되었습니다.\r\n$ ')
+      }
+
+      setConfirmCommand(null)
+    }
+  }, [confirmCommand, sendCommand])
+
+  // 로컬 시뮬레이션 (WebSocket 연결 전)
+  const handleCommandLocal = (terminal: XTerm, command: string) => {
     if (!command.startsWith('kubectl')) {
       terminal.writeln('\x1b[31mError: Only kubectl commands are allowed\x1b[0m')
       return
     }
 
-    // 간단한 시뮬레이션 응답
+    terminal.writeln('\x1b[33m⚠️  로컬 시뮬레이션 모드\x1b[0m')
+    terminal.writeln('\x1b[33m로그인하면 실제 클러스터에 연결됩니다.\x1b[0m')
+
     if (command.includes('get pods')) {
       terminal.writeln('NAME                     READY   STATUS    RESTARTS   AGE')
       terminal.writeln('web-app-7d8f9c5b6-x4k2m  1/1     Running   0          5m')
@@ -107,20 +191,21 @@ const Terminal: React.FC = () => {
     } else if (command.includes('get services')) {
       terminal.writeln('NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE')
       terminal.writeln('web-service   ClusterIP   10.96.0.1       <none>        80/TCP     5m')
-    } else if (command.includes('help')) {
-      terminal.writeln('Available commands:')
-      terminal.writeln('  kubectl get pods       - List all pods')
-      terminal.writeln('  kubectl get services   - List all services')
-      terminal.writeln('  kubectl describe pod   - Describe a pod')
-      terminal.writeln('  kubectl logs           - View pod logs')
     } else {
       terminal.writeln(`Executing: ${command}`)
-      terminal.writeln('\x1b[33m(Backend connection not implemented yet)\x1b[0m')
     }
   }
 
   return (
     <div className="terminal-container">
+      {/* 연결 상태 표시 */}
+      <div className="terminal-status">
+        {isConnected ? (
+          <span className="status-connected">🟢 연결됨</span>
+        ) : (
+          <span className="status-disconnected">🔴 연결 안 됨</span>
+        )}
+      </div>
       <div className="terminal-wrapper" ref={terminalRef}></div>
     </div>
   )

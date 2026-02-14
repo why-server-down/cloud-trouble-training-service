@@ -34,6 +34,7 @@ class WebSocketHandler:
         try:
             while True:
                 data = await websocket.receive_json()
+                print(f"📥 Received WebSocket message: {data}")
 
                 if data.get("type") == "command":
                     await self._handle_command(
@@ -61,12 +62,16 @@ class WebSocketHandler:
         if not command:
             return
 
+        print(f"🔍 Received command: {command}")
+
         # Validate
         parts = command.split()
         if len(parts) >= 2 and parts[1] == "delete" and confirmed:
             validation = self.command_validator.validate_delete(command, namespace, confirmed=True)
         else:
             validation = self.command_validator.validate_command(command, namespace)
+
+        print(f"🔍 Validation result: is_valid={validation.is_valid}, error={validation.error}")
 
         if not validation.is_valid:
             if validation.requires_confirmation:
@@ -75,8 +80,12 @@ class WebSocketHandler:
                 await self._send_error(websocket, validation.error)
             return
 
+        print(f"🔍 Executing command: {validation.command}")
+
         # Execute
         result = await self.command_executor.execute(validation.command)
+        
+        print(f"🔍 Execution result: exit_code={result.exit_code}, output={result.output[:100]}")
 
         # Send output
         await self._send_output(
@@ -105,9 +114,12 @@ class WebSocketHandler:
         exit_code: int = 0,
         execution_time: float = 0.0,
     ):
+        # 터미널 출력을 위해 \n을 \r\n으로 변환
+        formatted_data = data.replace('\n', '\r\n')
+        
         await websocket.send_json({
             "type": "output",
-            "data": data,
+            "data": formatted_data,
             "exit_code": exit_code,
             "execution_time": execution_time,
         })
