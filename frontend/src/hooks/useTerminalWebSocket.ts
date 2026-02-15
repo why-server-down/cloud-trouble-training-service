@@ -14,6 +14,7 @@ interface UseTerminalWebSocketProps {
   sessionId: string
   token: string
   terminal: Terminal | null
+  namespace?: string
   onConfirmRequired?: (command: string) => void
 }
 
@@ -21,11 +22,27 @@ export const useTerminalWebSocket = ({
   sessionId,
   token,
   terminal,
+  namespace,
   onConfirmRequired,
 }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const initialMessageReceivedRef = useRef(false)
+
+  // WebSocket Base URL - 환경변수에서 가져오기
+  const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+  
+  // 프롬프트 생성
+  const getPrompt = () => {
+    if (namespace) {
+      const shortNs = namespace.startsWith('user-') 
+        ? namespace.slice(0, 15) + '...' 
+        : namespace
+      return `[${shortNs}]$ `
+    }
+    return '$ '
+  }
 
   useEffect(() => {
     if (!sessionId || !token || !terminal) {
@@ -36,7 +53,7 @@ export const useTerminalWebSocket = ({
     console.log('🔌 WebSocket 연결 시작...')
 
     // WebSocket 연결
-    const wsUrl = `ws://localhost:8000/ws/terminal/${sessionId}?token=${token}`
+    const wsUrl = `${WS_BASE_URL}/ws/terminal/${sessionId}?token=${token}`
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
@@ -48,12 +65,28 @@ export const useTerminalWebSocket = ({
     ws.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data)
+        console.log('📥 Received WebSocket message:', message)
 
         switch (message.type) {
           case 'output':
             // 서버에서 받은 출력을 터미널에 표시
-            if (message.data) {
+            if (message.data && terminal) {
+              console.log('📝 Writing to terminal:', message.data.substring(0, 100))
+              console.log('📝 Full data length:', message.data.length)
+              console.log('📝 Full data:', message.data)
+              console.log('📝 Terminal ready:', !!terminal)
               terminal.write(message.data)
+              
+              // 초기 연결 메시지면 프롬프트 추가
+              if (message.data.includes('Connected to namespace:') && !initialMessageReceivedRef.current) {
+                initialMessageReceivedRef.current = true
+                terminal.write(getPrompt())
+              } else if (!message.data.includes('Connected to namespace:')) {
+                // 일반 명령어 응답이면 프롬프트 추가
+                terminal.write(`\r\n${getPrompt()}`)
+              }
+            } else {
+              console.warn('⚠️ Terminal not ready or no data')
             }
             break
 
@@ -98,6 +131,7 @@ export const useTerminalWebSocket = ({
     // 정리 함수
     return () => {
       console.log('🧹 WebSocket 정리 중...')
+      initialMessageReceivedRef.current = false
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close()
       }

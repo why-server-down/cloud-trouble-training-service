@@ -6,15 +6,18 @@ import './App.css'
 function App() {
   const [token, setToken] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [namespace, setNamespace] = useState<string | null>(null)
 
-  const handleLoginSuccess = (newToken: string, newSessionId: string) => {
+  const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
     setSessionId(newSessionId)
+    setNamespace(newNamespace || null)
   }
 
   const handleLogout = () => {
     setToken(null)
     setSessionId(null)
+    setNamespace(null)
   }
 
   // 로그인 전: 로그인 화면 표시
@@ -28,14 +31,18 @@ function App() {
       <header className="app-header">
         <h1>☁️ K8s Survival Camp - Terminal</h1>
         <div className="header-info">
-          <span className="namespace-badge">Session: {sessionId.slice(0, 8)}...</span>
+          {namespace && (
+            <span className="namespace-badge">
+              Namespace: {namespace.startsWith('user-') ? namespace.slice(0, 20) + '...' : namespace}
+            </span>
+          )}
           <button className="logout-button" onClick={handleLogout}>
             로그아웃
           </button>
         </div>
       </header>
       <main className="app-main">
-        <Terminal sessionId={sessionId} token={token} />
+        <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
       </main>
     </div>
   )

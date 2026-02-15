@@ -8,15 +8,37 @@ import './Terminal.css'
 interface TerminalProps {
   sessionId?: string
   token?: string
+  namespace?: string
 }
 
-const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
+const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const currentLineRef = useRef<string>('')
   const [confirmCommand, setConfirmCommand] = useState<string | null>(null)
   const [terminalReady, setTerminalReady] = useState(false)
+  
+  // 명령어 히스토리
+  const commandHistoryRef = useRef<string[]>([])
+  const historyIndexRef = useRef<number>(-1)
+  
+  // 자동완성 관련
+  const kubectlCommands = [
+    'kubectl get pods',
+    'kubectl get services',
+    'kubectl get deployments',
+    'kubectl get nodes',
+    'kubectl describe pod ',
+    'kubectl describe service ',
+    'kubectl logs ',
+    'kubectl delete pod ',
+    'kubectl apply -f ',
+    'kubectl version',
+    'kubectl help',
+    'kubectl get namespaces',
+    'kubectl get all',
+  ]
   
   // isConnected를 ref로도 관리
   const isConnectedRef = useRef<boolean>(false)
@@ -26,6 +48,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
     sessionId: sessionId || '',
     token: token || '',
     terminal: terminalReady ? xtermRef.current : null,
+    namespace: namespace,
     onConfirmRequired: (command) => {
       setConfirmCommand(command)
     },
@@ -36,6 +59,17 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
     isConnectedRef.current = isConnected
     console.log('🔄 isConnected 업데이트:', isConnected)
   }, [isConnected])
+  
+  // 프롬프트 생성 함수
+  const getPrompt = () => {
+    if (namespace) {
+      const shortNs = namespace.startsWith('user-') 
+        ? namespace.slice(0, 15) + '...' 
+        : namespace
+      return `[${shortNs}]$ `
+    }
+    return '$ '
+  }
 
   useEffect(() => {
     if (!terminalRef.current) return
@@ -87,20 +121,28 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
         const command = currentLineRef.current.trim()
 
         if (command) {
+          // 명령어 히스토리에 추가
+          commandHistoryRef.current.push(command)
+          historyIndexRef.current = commandHistoryRef.current.length
+          
           // 디버깅: 연결 상태 확인 (ref 사용)
           console.log('🔍 Debug - isConnected:', isConnectedRef.current, 'sessionId:', sessionId, 'token:', token ? 'exists' : 'missing')
           
           // WebSocket이 연결되어 있으면 서버로 전송
           if (isConnectedRef.current && sessionId && token) {
             sendCommand(command)
+            // 서버 응답을 기다리므로 여기서 프롬프트 출력 안 함
           } else {
             // 연결 안 되어 있으면 로컬 시뮬레이션
             handleCommandLocal(terminal, command)
+            terminal.write(getPrompt())
           }
+        } else {
+          // 빈 명령어면 프롬프트만 출력
+          terminal.write(getPrompt())
         }
 
         currentLineRef.current = ''
-        terminal.write('$ ')
       }
       // Backspace 키 (127)
       else if (code === 127) {
@@ -109,8 +151,83 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
           terminal.write('\b \b')
         }
       }
+      // 화살표 위 (27, 91, 65) - 이전 명령어
+      else if (data === '\x1b[A') {
+        if (historyIndexRef.current > 0) {
+          // 현재 입력 지우기
+          for (let i = 0; i < currentLineRef.current.length; i++) {
+            terminal.write('\b \b')
+          }
+          
+          // 이전 명령어 가져오기
+          historyIndexRef.current--
+          const prevCommand = commandHistoryRef.current[historyIndexRef.current]
+          currentLineRef.current = prevCommand
+          terminal.write(prevCommand)
+        }
+      }
+      // 화살표 아래 (27, 91, 66) - 다음 명령어
+      else if (data === '\x1b[B') {
+        if (historyIndexRef.current < commandHistoryRef.current.length - 1) {
+          // 현재 입력 지우기
+          for (let i = 0; i < currentLineRef.current.length; i++) {
+            terminal.write('\b \b')
+          }
+          
+          // 다음 명령어 가져오기
+          historyIndexRef.current++
+          const nextCommand = commandHistoryRef.current[historyIndexRef.current]
+          currentLineRef.current = nextCommand
+          terminal.write(nextCommand)
+        } else if (historyIndexRef.current === commandHistoryRef.current.length - 1) {
+          // 마지막 명령어에서 아래 누르면 빈 줄
+          for (let i = 0; i < currentLineRef.current.length; i++) {
+            terminal.write('\b \b')
+          }
+          historyIndexRef.current = commandHistoryRef.current.length
+          currentLineRef.current = ''
+        }
+      }
+      // Ctrl+C (3) - 현재 입력 취소
+      else if (code === 3) {
+        terminal.write(`^C\r\n${getPrompt()}`)
+        currentLineRef.current = ''
+      }
+      // Ctrl+L (12) - 화면 지우기
+      else if (code === 12) {
+        terminal.clear()
+        terminal.write(getPrompt())
+        currentLineRef.current = ''
+      }
+      // Tab (9) - 자동완성
+      else if (code === 9) {
+        const currentInput = currentLineRef.current
+        
+        // kubectl로 시작하는 명령어만 자동완성
+        if (currentInput.startsWith('kubectl') || currentInput === 'k') {
+          const matches = kubectlCommands.filter(cmd => 
+            cmd.startsWith(currentInput)
+          )
+          
+          if (matches.length === 1) {
+            // 정확히 하나 매칭되면 자동완성
+            const completion = matches[0]
+            const toAdd = completion.slice(currentInput.length)
+            
+            currentLineRef.current = completion
+            terminal.write(toAdd)
+          } else if (matches.length > 1) {
+            // 여러 개 매칭되면 목록 표시
+            terminal.write('\r\n')
+            matches.forEach(match => {
+              terminal.write(`  ${match}\r\n`)
+            })
+            terminal.write(getPrompt() + currentInput)
+          }
+        }
+      }
       // 일반 문자
-      else {
+      else if (code >= 32) {
         currentLineRef.current += data
         terminal.write(data)
       }
@@ -150,9 +267,8 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
   useEffect(() => {
     if (!xtermRef.current) return
 
-    if (isConnected) {
-      xtermRef.current.write('\r\n✅ 서버에 연결되었습니다!\r\n$ ')
-    } else if (error) {
+    // 에러만 표시 (연결 성공 메시지는 백엔드에서 전송)
+    if (error) {
       xtermRef.current.write(`\r\n❌ ${error}\r\n`)
     }
   }, [isConnected, error])
@@ -167,12 +283,12 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token }) => {
       if (confirmed) {
         sendCommand(confirmCommand, true)
       } else {
-        xtermRef.current.write('\r\n취소되었습니다.\r\n$ ')
+        xtermRef.current.write(`\r\n취소되었습니다.\r\n${getPrompt()}`)
       }
 
       setConfirmCommand(null)
     }
-  }, [confirmCommand, sendCommand])
+  }, [confirmCommand, sendCommand, namespace])
 
   // 로컬 시뮬레이션 (WebSocket 연결 전)
   const handleCommandLocal = (terminal: XTerm, command: string) => {
