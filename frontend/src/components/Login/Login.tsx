@@ -3,7 +3,7 @@ import { login, createTerminalSession } from '../../services/api'
 import './Login.css'
 
 interface LoginProps {
-  onLoginSuccess: (token: string, sessionId: string) => void
+  onLoginSuccess: (token: string, sessionId: string, namespace?: string) => void
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
@@ -25,9 +25,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       // 2. 터미널 세션 생성
       const sessionResponse = await createTerminalSession(token)
       const sessionId = sessionResponse.id
+      const namespace = sessionResponse.namespace
 
       // 3. 성공 콜백
-      onLoginSuccess(token, sessionId)
+      onLoginSuccess(token, sessionId, namespace)
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다')
     } finally {
