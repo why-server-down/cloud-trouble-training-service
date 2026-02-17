@@ -56,3 +56,49 @@ class ErrorMessage(BaseModel):
     type: str = "error"
     message: str
     code: str = "UNKNOWN"
+
+
+# Mission
+class MissionResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    level: int
+    description: str
+    chaos_type: str
+    base_score: int
+    time_limit: int
+    hint_penalty: int
+    is_unlocked: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class MissionAttemptCreate(BaseModel):
+    mission_id: uuid.UUID
+
+
+class MissionAttemptResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    mission_id: uuid.UUID
+    status: str
+    start_time: datetime
+    end_time: datetime | None
+    final_score: int | None
+    hints_used: int
+
+    class Config:
+        from_attributes = True
+
+
+class MissionStatusResponse(BaseModel):
+    attempt: MissionAttemptResponse
+    elapsed_seconds: int
+    remaining_seconds: int
+    current_score: int
+
+
+class MissionCompleteResponse(BaseModel):
+    attempt: MissionAttemptResponse
+    message: str
