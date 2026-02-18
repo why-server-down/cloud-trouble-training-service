@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Mission system
+    CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
+    VALIDATION_BACKEND: str = "mock"  # "mock" | "prometheus"
+    PROMETHEUS_URL: str = "http://localhost:9090"
+    MOCK_VALIDATION_AUTO_PASS: bool = False
+
     class Config:
         env_file = ".env"
 

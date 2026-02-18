@@ -15,28 +15,53 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 ```
 app/
 ├── main.py              # FastAPI 앱, 라우터 등록
-├── models.py            # SQLAlchemy 모델 (User, TerminalSession, CommandLog)
+├── models.py            # SQLAlchemy 모델 (User, TerminalSession, CommandLog, Mission, MissionAttempt)
 ├── schemas.py           # Pydantic 스키마 (요청/응답)
 ├── api/
 │   ├── deps.py          # 의존성 (get_db, get_current_user)
 │   ├── auth.py          # POST /api/auth/register, /api/auth/login
-│   └── terminal.py      # WS /ws/terminal/{session_id}, POST /api/terminal/sessions
+│   ├── terminal.py      # WS /ws/terminal/{session_id}, POST /api/terminal/sessions
+│   └── missions.py      # 미션 CRUD API (목록/시작/상태/확인/포기/힌트)
 ├── core/
-│   ├── config.py        # Settings (환경변수)
+│   ├── config.py        # Settings (환경변수, 미션 시스템 설정)
 │   ├── database.py      # async engine, session
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py  # kubectl 명령어 검증 (화이트리스트, 네임스페이스 격리)
-│   ├── command_executor.py   # kubectl 비동기 실행 (5초 타임아웃)
-│   └── websocket_handler.py  # WebSocket 연결, 명령어 파이프라인
+│   ├── command_validator.py   # kubectl 명령어 검증
+│   ├── command_executor.py    # kubectl 비동기 실행
+│   ├── websocket_handler.py   # WebSocket 연결
+│   ├── mission_service.py     # 미션 오케스트레이터 (시작/완료/포기/점수)
+│   ├── chaos_injector.py      # 장애 주입 (ABC + Mock 구현)
+│   ├── validation_service.py  # 해결 검증 (ABC + Mock 구현)
+│   ├── scoring_service.py     # 점수 계산 (시간/힌트 감점)
+│   ├── service_factory.py     # 환경변수 기반 서비스 팩토리
+│   └── seed_data.py           # 미션 초기 데이터 (4개 레벨)
 └── ai/                  # AI 튜터 (미구현)
 ```
 
 ## API 엔드포인트
+
+### 인증
 - `POST /api/auth/register` - 회원가입
 - `POST /api/auth/login` - 로그인 (JWT 발급)
+
+### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성
 - `WS /ws/terminal/{session_id}?token=JWT` - 웹 터미널
+
+### 미션
+- `GET /api/missions/` - 미션 목록 (잠금 상태 포함)
+- `POST /api/missions/start` - 미션 시작
+- `GET /api/missions/status` - 진행 중 미션 상태
+- `POST /api/missions/check` - 해결 여부 확인
+- `POST /api/missions/abandon` - 미션 포기
+- `POST /api/missions/hint` - 힌트 사용
+- `POST /api/missions/debug/resolve` - (Mock 전용) 수동 해결
+
+## 미션 시스템 아키텍처
+- Mock 패턴: Docker 환경에서는 MockChaosInjector, MockValidationService 사용
+- 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|prometheus`로 전환
+- K8s 이전 시 실제 구현체만 추가하면 코드 변경 없이 동작
 
 ## 컨벤션
 - PEP8 준수, 타입 힌트 필수
