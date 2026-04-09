@@ -25,12 +25,16 @@ export const login = async (
   username: string,
   password: string
 ): Promise<LoginResponse> => {
+  const formData = new URLSearchParams()
+  formData.append('username', username)
+  formData.append('password', password)
+
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: JSON.stringify({ username, password }),
+    body: formData,
   })
 
   if (!response.ok) {
@@ -90,5 +94,153 @@ export const createTerminalSession = async (
 // 헬스 체크
 export const healthCheck = async (): Promise<{ status: string }> => {
   const response = await fetch(`${API_BASE_URL}/health`)
+  return response.json()
+}
+
+// Mission 관련 타입
+interface MissionResponse {
+  id: string
+  name: string
+  level: number
+  description: string
+  chaos_type: string
+  base_score: number
+  time_limit: number
+  hint_penalty: number
+  is_unlocked: boolean
+}
+
+interface MissionAttemptResponse {
+  id: string
+  user_id: string
+  mission_id: string
+  status: string
+  start_time: string
+  end_time: string | null
+  final_score: number | null
+  hints_used: number
+}
+
+interface MissionStatusResponse {
+  attempt: MissionAttemptResponse
+  elapsed_seconds: number
+  remaining_seconds: number
+  current_score: number
+}
+
+interface MissionCompleteResponse {
+  attempt: MissionAttemptResponse
+  message: string
+}
+
+// 미션 목록 조회
+export const listMissions = async (token: string): Promise<MissionResponse[]> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error('미션 목록 조회 실패')
+  }
+
+  return response.json()
+}
+
+// 미션 시작
+export const startMission = async (
+  token: string,
+  missionId: string
+): Promise<MissionAttemptResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/start`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ mission_id: missionId }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '미션 시작 실패')
+  }
+
+  return response.json()
+}
+
+// 미션 상태 조회
+export const getMissionStatus = async (
+  token: string
+): Promise<MissionStatusResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/status`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '미션 상태 조회 실패')
+  }
+
+  return response.json()
+}
+
+// 미션 완료 확인
+export const checkMission = async (
+  token: string
+): Promise<MissionCompleteResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/check`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '미션 확인 실패')
+  }
+
+  return response.json()
+}
+
+// 미션 포기
+export const abandonMission = async (
+  token: string
+): Promise<MissionAttemptResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/abandon`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '미션 포기 실패')
+  }
+
+  return response.json()
+}
+
+// 힌트 사용
+export const useHint = async (
+  token: string
+): Promise<MissionAttemptResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/missions/hint`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '힌트 사용 실패')
+  }
+
   return response.json()
 }
