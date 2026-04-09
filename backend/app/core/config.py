@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     PROMETHEUS_URL: str = "http://localhost:9090"
     MOCK_VALIDATION_AUTO_PASS: bool = False
 
+    # AI Tutor
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    AI_BACKEND: str = "mock"  # "mock" | "openai"
+    CHROMA_PERSIST_DIR: str = "../ai-data/vector-db/chroma_data"
+    KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"
+
     class Config:
         env_file = ".env"
 

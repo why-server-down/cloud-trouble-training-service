@@ -558,7 +558,79 @@ const checkMission = async (token: string) => {
 
 ---
 
-## 6. 허용된 kubectl 명령어
+## 6. AI 튜터 채팅
+
+> 진행 중인 미션이 있어야 사용 가능합니다.
+
+### 6-1. AI 튜터에게 질문
+
+```
+POST /api/chat/
+Authorization: Bearer {token}
+Content-Type: application/json
+```
+
+**Request:**
+```json
+{
+  "message": "Pod가 안 떠요. 어디서부터 확인해야 하나요?",
+  "hint_level": 0
+}
+```
+
+**힌트 레벨 기준:**
+| 레벨 | 설명 | 예시 응답 |
+|------|------|-----------|
+| 0 | 방향만 제시 | "어떤 명령어로 Pod 상태를 볼 수 있을까요?" |
+| 1 | 확인할 리소스 지목 | "describe와 get 중 어떤 게 더 자세한 정보를 줄까요?" |
+| 2 | kubectl 명령어 제공 | "`kubectl describe pod <이름>`의 Events 섹션을 확인해보세요." |
+| 3 | 전체 해결 방법 | 단계별 해결 방법 전체 제공 |
+
+**Response (200):**
+```json
+{
+  "response": "좋은 질문이에요! 현재 클러스터에서 어떤 일이 벌어지는지 전체적으로 볼 수 있는 방법이 뭐가 있을까요?",
+  "hint_level": 0,
+  "mission_name": "사라진 웹페이지"
+}
+```
+
+**에러:**
+| 코드 | 상황 |
+|------|------|
+| 400 | 진행 중인 미션 없음 |
+| 401 | 인증 토큰 없음 |
+
+---
+
+### 6-2. 힌트 사용 + 채팅 연동 (프론트엔드 권장 패턴)
+
+힌트 버튼을 누를 때 감점 처리(`hint` API)와 AI 응답(`chat` API)을 동시에 호출합니다.
+
+```typescript
+const useHintWithChat = async (token: string, hintLevel: number) => {
+  // 1. 감점 처리
+  await fetch(`${API_BASE}/api/missions/hint`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  // 2. AI 튜터 응답 받기
+  const res = await fetch(`${API_BASE}/api/chat/`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: "힌트 주세요", hint_level: hintLevel }),
+  });
+  return res.json();
+};
+```
+
+---
+
+## 7. 허용된 kubectl 명령어
 
 | 명령어 | 설명 |
 |--------|------|

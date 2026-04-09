@@ -36,14 +36,16 @@ app/
 │   ├── scoring_service.py     # 점수 계산 (시간/힌트 감점)
 │   ├── service_factory.py     # 환경변수 기반 서비스 팩토리
 │   └── seed_data.py           # 미션 초기 데이터 (4개 레벨)
-└── ai/                  # AI 튜터 (미구현)
+└── ai/
+    ├── __init__.py
+    └── tutor_service.py      # AI 튜터 어댑터 (ai-data 연동, Mock/OpenAI 전환)
 ```
 
 ## API 엔드포인트
 
 ### 인증
 - `POST /api/auth/register` - 회원가입
-- `POST /api/auth/login` - 로그인 (JWT 발급)
+- `POST /api/auth/login` - 로그인 (JWT 발급, form-data 형식)
 
 ### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성
@@ -58,10 +60,23 @@ app/
 - `POST /api/missions/hint` - 힌트 사용
 - `POST /api/missions/debug/resolve` - (Mock 전용) 수동 해결
 
+### AI 튜터
+- `POST /api/chat/` - AI 튜터에게 질문 (소크라테스식 힌트)
+  - Request: `{ "message": str, "hint_level": 0~3 }`
+  - Response: `{ "response": str, "hint_level": int, "mission_name": str }`
+  - 진행 중인 미션이 있어야 사용 가능
+
 ## 미션 시스템 아키텍처
 - Mock 패턴: Docker 환경에서는 MockChaosInjector, MockValidationService 사용
 - 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|prometheus`로 전환
 - K8s 이전 시 실제 구현체만 추가하면 코드 변경 없이 동작
+
+## AI 튜터 아키텍처
+- `ai-data/` 모듈을 sys.path로 동적 import (별도 패키지 설치 불필요)
+- `AI_BACKEND=mock`: OpenAI 없이 고정 힌트 반환 (개발용)
+- `AI_BACKEND=openai`: ai-data의 AITutorEngine + RAG + GPT 사용
+- 힌트 레벨 0~3: 방향제시 → 리소스지목 → kubectl 명령어 → 전체 해결
+- 대화 히스토리: attempt_id 기준 인메모리 저장 (최근 5개 질문)
 
 ## 컨벤션
 - PEP8 준수, 타입 힌트 필수
