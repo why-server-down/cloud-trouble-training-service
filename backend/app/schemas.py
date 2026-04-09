@@ -102,3 +102,15 @@ class MissionStatusResponse(BaseModel):
 class MissionCompleteResponse(BaseModel):
     attempt: MissionAttemptResponse
     message: str
+
+
+# AI Chat
+class ChatRequest(BaseModel):
+    message: str
+    hint_level: int = 0  # 0~3 (소크라테스식 힌트 레벨)
+
+
+class ChatResponse(BaseModel):
+    response: str
+    hint_level: int
+    mission_name: str | None = None

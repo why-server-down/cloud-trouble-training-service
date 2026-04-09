@@ -10,9 +10,49 @@
 ## 기술 스택
 - Frontend: React (xterm.js 터미널, 채팅 UI)
 - Backend: FastAPI, SQLAlchemy async, PostgreSQL
-- AI: LangChain + OpenAI (소크라테스식 튜터)
+- AI: LangChain + OpenAI (소크라테스식 튜터), ChromaDB (RAG)
 - Infra: Kubernetes, Chaos Mesh
-- Monitoring: Prometheus
+- Monitoring: Prometheus, Grafana Cloud
+
+## 구현 현황 (2026-04-09 기준)
+- [x] 회원가입 / 로그인 (JWT)
+- [x] 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
+- [x] 미션 시스템 (목록/시작/상태/완료/포기/힌트, 4개 레벨)
+- [x] 점수 계산 (시간 감점 + 힌트 감점)
+- [x] AI 튜터 채팅 API (Mock 패턴, 시나리오별 소크라테스식 힌트)
+- [x] RAG AI 엔진 (ai-data/ - LangChain + ChromaDB + GPT)
+- [ ] Chaos Mesh 실제 연동 (현재 Mock)
+- [ ] Prometheus 검증 실제 연동 (현재 Mock)
+- [ ] AWS EKS 배포
+- [ ] AI 튜터 OpenAI 실제 연동
+
+## 브랜치 전략
+- `main` - 배포 브랜치
+- `dev` - 통합 브랜치
+- `feature/*` - 기능 브랜치 → dev PR
+
+## 로컬 실행
+```bash
+# DB 실행
+docker compose up postgres -d
+
+# 백엔드
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --port 8000
+
+# Swagger
+open http://localhost:8000/docs
+```
+
+## 환경변수 (.env)
+```
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
+AI_BACKEND=mock          # mock | openai
+OPENAI_API_KEY=          # openai 모드일 때 필요
+CHAOS_BACKEND=mock       # mock | chaos_mesh
+VALIDATION_BACKEND=mock  # mock | prometheus
+```
 
 ## 규칙
 - 항상 한국어로 응답
