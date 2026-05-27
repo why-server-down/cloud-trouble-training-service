@@ -102,7 +102,7 @@ else
     echo -e "${YELLOW}⚠️  Python 가상환경이 없습니다. 생성 중...${NC}"
     cd backend
     python3 -m venv venv
-    source venv/bin/activate
+    source venv/Scripts/activate
     pip install -r requirements.txt
     cd ..
     echo -e "${GREEN}✅ Python 가상환경 생성 완료${NC}"
