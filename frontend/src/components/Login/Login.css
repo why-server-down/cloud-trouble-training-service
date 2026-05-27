@@ -101,7 +101,22 @@
   text-align: center;
 }
 
-.login-footer p {
-  color: #a0a0a0;
-  font-size: 0.85rem;
+.toggle-mode-button {
+  background: none;
+  border: none;
+  color: #61dafb;
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  padding: 0.5rem;
+  transition: color 0.2s;
+}
+
+.toggle-mode-button:hover:not(:disabled) {
+  color: #4fa8c5;
+}
+
+.toggle-mode-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

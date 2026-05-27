@@ -130,7 +130,7 @@ async def use_hint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/debug/resolve", include_in_schema=False)
+@router.post("/debug/resolve")
 async def debug_resolve(
     current_user: User = Depends(get_current_user),
 ):
