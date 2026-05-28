@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chatbot Widget - Standalone Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      width: 100%;
+    }
+
+    .chat-widget {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 700px;
+    }
+
+    /* Header */
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bot-avatar {
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .header-info h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .header-info .status {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .hint-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .hint-level {
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 4px 12px;
+      border-radius: 12px;
+    }
+
+    .hints-used {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    /* Messages */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background: #f9fafb;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      display: flex;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message.assistant,
+    .message.system {
+      justify-content: flex-start;
+    }
+
+    .message-content {
+      max-width: 75%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      word-wrap: break-word;
+    }
+
+    .message.user .message-content {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .message-content {
+      background: white;
+      color: #1f2937;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .message.system .message-content {
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 13px;
+      max-width: 90%;
+      margin: 0 auto;
+    }
+
+    .hint-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .message-time {
+      display: block;
+      font-size: 11px;
+      opacity: 0.6;
+      margin-top: 6px;
+    }
+
+    /* Hint Panel */
+    .hint-panel {
+      background: white;
+      border-top: 1px solid #e5e7eb;
+      padding: 16px 20px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .hint-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .hint-panel-header h4 {
+      margin: 0;
+      font-size: 16px;
+      color: #1f2937;
+    }
+
+    .current-level {
+      font-size: 13px;
+      font-weight: 600;
+      color: #667eea;
+      background: #ede9fe;
+      padding: 4px 12px;
+      border-radius: 12px;
+    }
+
+    .hint-levels {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .hint-level-item {
+      padding: 12px;
+      border-left: 4px solid #e5e7eb;
+      background: #f9fafb;
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+
+    .hint-level-item.active {
+      background: #ede9fe;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+    }
+
+    .hint-level-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .level-badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: white;
+    }
+
+    .level-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: #1f2937;
+    }
+
+    .level-penalty {
+      margin-left: auto;
+      font-size: 12px;
+      color: #ef4444;
+      font-weight: 600;
+    }
+
+    .level-description {
+      margin: 0;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .hint-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .hint-button {
+      flex: 1;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .hint-button.increase {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .hint-button.increase:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .hint-button.reset {
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .hint-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Input */
+    .chat-input {
+      padding: 16px 20px;
+      background: white;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .input-container textarea {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      transition: all 0.2s;
+      min-height: 44px;
+      max-height: 120px;
+    }
+
+    .input-container textarea:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .send-button {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .send-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .send-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .input-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 8px 0;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      background: #94a3b8;
+      border-radius: 50%;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+      }
+      30% {
+        transform: translateY(-10px);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="chat-widget">
+      <!-- Header -->
+      <div class="chat-header">
+        <div class="header-left">
+          <div class="bot-avatar">🤖</div>
+          <div class="header-info">
+            <h3>AI Tutor</h3>
+            <span class="status">온라인</span>
+          </div>
+        </div>
+        <div class="hint-info">
+          <span class="hint-level" id="hint-level-display">Level 0: 일반 방향</span>
+          <span class="hints-used" id="hints-used-display">힌트 사용: 0회</span>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages" id="messages">
+        <div class="message assistant">
+          <div class="message-content">
+            <div>안녕하세요! 저는 Kubernetes 트러블슈팅을 도와드리는 AI 튜터입니다. 무엇을 도와드릴까요?</div>
+            <span class="message-time" id="initial-time"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hint Panel -->
+      <div class="hint-panel">
+        <div class="hint-panel-header">
+          <h4>💡 힌트 시스템</h4>
+          <span class="current-level" id="current-level">현재: Level 0</span>
+        </div>
+
+        <div class="hint-levels">
+          <div class="hint-level-item active" data-level="0" style="border-left-color: #10b981;">
+            <div class="hint-level-header">
+              <span class="level-badge" style="background: #10b981;">L0</span>
+              <span class="level-name">일반 방향</span>
+            </div>
+            <p class="level-description">문제 해결의 일반적인 방향 제시</p>
+          </div>
+
+          <div class="hint-level-item" data-level="1" style="border-left-color: #3b82f6;">
+            <div class="hint-level-header">
+              <span class="level-badge" style="background: #3b82f6;">L1</span>
+              <span class="level-name">구체적 조사</span>
+              <span class="level-penalty">-5점</span>
+            </div>
+            <p class="level-description">구체적인 조사 방법과 체크포인트</p>
+          </div>
+
+          <div class="hint-level-item" data-level="2" style="border-left-color: #f59e0b;">
+            <div class="hint-level-header">
+              <span class="level-badge" style="background: #f59e0b;">L2</span>
+              <span class="level-name">정확한 명령어</span>
+              <span class="level-penalty">-10점</span>
+            </div>
+            <p class="level-description">정확한 kubectl 명령어 제공</p>
+          </div>
+
+          <div class="hint-level-item" data-level="3" style="border-left-color: #ef4444;">
+            <div class="hint-level-header">
+              <span class="level-badge" style="background: #ef4444;">L3</span>
+              <span class="level-name">완전한 해결책</span>
+              <span class="level-penalty">-50점</span>
+            </div>
+            <p class="level-description">완전한 해결 방법과 설명</p>
+          </div>
+        </div>
+
+        <div class="hint-actions">
+          <button class="hint-button increase" id="increase-hint">
+            힌트 레벨 올리기 (5점 차감)
+          </button>
+          <button class="hint-button reset" id="reset-hint" disabled>
+            레벨 초기화
+          </button>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="chat-input">
+        <div class="input-container">
+          <textarea 
+            id="message-input" 
+            placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+            rows="1"
+          ></textarea>
+          <button class="send-button" id="send-button">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">💡 Tip: Shift+Enter로 줄바꿈, Enter로 전송</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let hintLevel = 0;
+    let hintsUsed = 0;
+    let isLoading = false;
+
+    const hintLevelNames = {
+      0: '일반 방향',
+      1: '구체적 조사',
+      2: '정확한 명령어',
+      3: '완전한 해결책'
+    };
+
+    const hintPenalties = { 0: 0, 1: 5, 2: 10, 3: 50 };
+    const hintColors = { 0: '#10b981', 1: '#3b82f6', 2: '#f59e0b', 3: '#ef4444' };
+
+    // Elements
+    const messagesContainer = document.getElementById('messages');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const increaseHintBtn = document.getElementById('increase-hint');
+    const resetHintBtn = document.getElementById('reset-hint');
+    const hintLevelDisplay = document.getElementById('hint-level-display');
+    const hintsUsedDisplay = document.getElementById('hints-used-display');
+    const currentLevelDisplay = document.getElementById('current-level');
+
+    // Initialize
+    document.getElementById('initial-time').textContent = formatTime(new Date());
+
+    // Functions
+    function formatTime(date) {
+      return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollToBottom() {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function addMessage(role, content, options = {}) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${role}`;
+      
+      let badgeHtml = '';
+      if (role === 'assistant' && options.hintLevel !== undefined) {
+        badgeHtml = `<span class="hint-badge" style="background: ${hintColors[options.hintLevel]}">L${options.hintLevel}</span>`;
+      }
+
+      messageDiv.innerHTML = `
+        <div class="message-content">
+          ${badgeHtml}
+          <div>${content.replace(/\n/g, '<br>')}</div>
+          <span class="message-time">${formatTime(new Date())}</span>
+        </div>
+      `;
+
+      messagesContainer.appendChild(messageDiv);
+      scrollToBottom();
+    }
+
+    function showTypingIndicator() {
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'message assistant';
+      typingDiv.id = 'typing-indicator';
+      typingDiv.innerHTML = `
+        <div class="message-content">
+          <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      `;
+      messagesContainer.appendChild(typingDiv);
+      scrollToBottom();
+    }
+
+    function hideTypingIndicator() {
+      const typingDiv = document.getElementById('typing-indicator');
+      if (typingDiv) typingDiv.remove();
+    }
+
+    function updateHintDisplay() {
+      hintLevelDisplay.textContent = `Level ${hintLevel}: ${hintLevelNames[hintLevel]}`;
+      hintsUsedDisplay.textContent = `힌트 사용: ${hintsUsed}회`;
+      currentLevelDisplay.textContent = `현재: Level ${hintLevel}`;
+
+      // Update hint level items
+      document.querySelectorAll('.hint-level-item').forEach(item => {
+        const level = parseInt(item.dataset.level);
+        item.classList.toggle('active', level === hintLevel);
+      });
+
+      // Update buttons
+      increaseHintBtn.disabled = hintLevel >= 3;
+      resetHintBtn.disabled = hintLevel === 0;
+
+      if (hintLevel < 3) {
+        increaseHintBtn.textContent = `힌트 레벨 올리기 (${hintPenalties[hintLevel + 1]}점 차감)`;
+      } else {
+        increaseHintBtn.textContent = '최대 레벨';
+      }
+    }
+
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message || isLoading) return;
+
+      // Add user message
+      addMessage('user', message);
+      messageInput.value = '';
+      isLoading = true;
+      sendButton.disabled = true;
+
+      // Show typing indicator
+      showTypingIndicator();
+
+      // Simulate AI response
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      hideTypingIndicator();
+
+      // Add AI response
+      const responses = {
+        0: `좋은 질문이네요! 먼저 문제의 근본 원인을 파악하는 것이 중요합니다.\n\n다음 질문들을 스스로에게 해보세요:\n1. 언제부터 이 문제가 발생했나요?\n2. 최근에 변경된 사항이 있나요?\n3. 로그에서 어떤 패턴을 발견할 수 있나요?\n\n더 구체적인 도움이 필요하면 힌트 레벨을 올려보세요!`,
+        1: `좋습니다! 이제 더 구체적으로 조사해봅시다.\n\n다음 단계를 따라해보세요:\n1. Pod의 상태를 확인하세요\n2. 이벤트 로그를 살펴보세요\n3. 리소스 사용량을 체크하세요\n\n어떤 명령어를 사용해야 할지 모르겠다면 힌트 레벨을 더 올려보세요.`,
+        2: `정확한 명령어를 알려드리겠습니다:\n\n\`\`\`bash\nkubectl get pods -n <namespace>\nkubectl describe pod <pod-name> -n <namespace>\nkubectl logs <pod-name> -n <namespace>\n\`\`\`\n\n이 명령어들을 실행해보고 결과를 분석해보세요!`,
+        3: `완전한 해결 방법을 알려드리겠습니다:\n\n**문제 진단:**\n1. \`kubectl get pods\`로 Pod 상태 확인\n2. \`kubectl describe pod\`로 상세 정보 확인\n3. \`kubectl logs\`로 로그 확인\n\n**해결 방법:**\n- 이미지 pull 실패: imagePullSecrets 확인\n- 리소스 부족: requests/limits 조정\n- 설정 오류: ConfigMap/Secret 확인\n\n이제 직접 해결해보세요!`
+      };
+
+      addMessage('assistant', responses[hintLevel] || responses[0], { hintLevel });
+
+      isLoading = false;
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
+
+    // Event Listeners
+    sendButton.addEventListener('click', sendMessage);
+
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    messageInput.addEventListener('input', () => {
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+    });
+
+    increaseHintBtn.addEventListener('click', () => {
+      if (hintLevel < 3) {
+        hintLevel++;
+        hintsUsed++;
+        updateHintDisplay();
+        addMessage('system', `힌트 레벨이 ${hintLevel}로 증가했습니다. (점수 -${hintPenalties[hintLevel]}점)`);
+      }
+    });
+
+    resetHintBtn.addEventListener('click', () => {
+      hintLevel = 0;
+      updateHintDisplay();
+      addMessage('system', '힌트 레벨이 0으로 초기화되었습니다.');
+    });
+
+    // Focus input on load
+    messageInput.focus();
+  </script>
+</body>
+</html>
