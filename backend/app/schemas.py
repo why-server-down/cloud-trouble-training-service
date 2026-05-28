@@ -24,6 +24,17 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class UserProfileResponse(BaseModel):
+    id: uuid.UUID
+    username: str
+    created_at: datetime
+    missions_completed: int
+    total_score: int
+
+    class Config:
+        from_attributes = True
+
+
 # Terminal
 class SessionCreate(BaseModel):
     pass
