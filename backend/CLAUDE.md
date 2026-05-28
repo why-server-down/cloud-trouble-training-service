@@ -46,6 +46,8 @@ app/
 ### 인증
 - `POST /api/auth/register` - 회원가입
 - `POST /api/auth/login` - 로그인 (JWT 발급, form-data 형식)
+- `GET /api/auth/me` - 프로필 조회 (완료 미션 수, 총 점수 포함) 🔒
+- `POST /api/auth/logout` - 로그아웃 (204 반환, 토큰 삭제는 클라이언트 처리) 🔒
 
 ### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성

@@ -14,8 +14,9 @@
 - Infra: Kubernetes, Chaos Mesh
 - Monitoring: Prometheus, Grafana Cloud
 
-## 구현 현황 (2026-04-09 기준)
+## 구현 현황 (2026-05-28 기준)
 - [x] 회원가입 / 로그인 (JWT)
+- [x] 로그아웃 / 프로필 조회 API
 - [x] 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
 - [x] 미션 시스템 (목록/시작/상태/완료/포기/힌트, 4개 레벨)
 - [x] 점수 계산 (시간 감점 + 힌트 감점)
