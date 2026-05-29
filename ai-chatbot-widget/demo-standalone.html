@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chatbot - 점수 시스템 데모</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      width: 100%;
+    }
+
+    .chat-widget {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 700px;
+    }
+
+    /* Header */
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bot-avatar {
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .header-info h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .header-info .status {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .score-display {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+
+    .current-score {
+      font-size: 24px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 6px 16px;
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+    }
+
+    .score-label {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    /* Messages */
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background: #f9fafb;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      display: flex;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.user {
+      justify-content: flex-end;
+    }
+
+    .message.assistant,
+    .message.system {
+      justify-content: flex-start;
+    }
+
+    .message-content {
+      max-width: 75%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      word-wrap: break-word;
+    }
+
+    .message.user .message-content {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .message-content {
+      background: white;
+      color: #1f2937;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .message.system .message-content {
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 13px;
+      max-width: 90%;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .message.system.penalty .message-content {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .message.system.zero-score .message-content {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .message-time {
+      display: block;
+      font-size: 11px;
+      opacity: 0.6;
+      margin-top: 6px;
+    }
+
+    /* Penalty Notice */
+    .penalty-notice {
+      background: #fef3c7;
+      border: 2px solid #fbbf24;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 16px 20px;
+      text-align: center;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.02);
+      }
+    }
+
+    .penalty-notice .penalty-text {
+      font-size: 18px;
+      font-weight: 700;
+      color: #92400e;
+      margin-bottom: 4px;
+    }
+
+    .penalty-notice .penalty-subtext {
+      font-size: 13px;
+      color: #78350f;
+    }
+
+    /* Action Panel */
+    .action-panel {
+      background: white;
+      border-top: 1px solid #e5e7eb;
+      padding: 16px 20px;
+    }
+
+    .answer-button {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid #ef4444;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: white;
+      color: #ef4444;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .answer-button:hover:not(:disabled) {
+      background: #ef4444;
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    }
+
+    .answer-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .answer-button .warning {
+      font-size: 12px;
+    }
+
+    .info-box {
+      background: #f0f9ff;
+      border: 1px solid #bae6fd;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      color: #0c4a6e;
+      margin-top: 12px;
+    }
+
+    .info-box ul {
+      margin: 8px 0 0 0;
+      padding-left: 20px;
+    }
+
+    .info-box li {
+      margin-bottom: 4px;
+    }
+
+    /* Input */
+    .chat-input {
+      padding: 16px 20px;
+      background: white;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .input-container {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .input-container textarea {
+      flex: 1;
+      padding: 12px 16px;
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      transition: all 0.2s;
+      min-height: 44px;
+      max-height: 120px;
+    }
+
+    .input-container textarea:focus {
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .send-button {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .send-button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .send-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .input-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 8px 0;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      background: #94a3b8;
+      border-radius: 50%;
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+      }
+      30% {
+        transform: translateY(-10px);
+        opacity: 1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="chat-widget">
+      <!-- Header -->
+      <div class="chat-header">
+        <div class="header-left">
+          <div class="bot-avatar">🤖</div>
+          <div class="header-info">
+            <h3>AI Tutor</h3>
+            <span class="status">온라인</span>
+          </div>
+        </div>
+        <div class="score-display">
+          <div class="current-score" id="score-display">100점</div>
+          <span class="score-label">현재 점수</span>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-messages" id="messages">
+        <div class="message assistant">
+          <div class="message-content">
+            <div>안녕하세요! 저는 Kubernetes 트러블슈팅을 도와드리는 AI 튜터입니다.<br><br>
+            <strong>점수 시스템:</strong><br>
+            • 시작 점수: 100점<br>
+            • 질문할 때마다 점수가 차감됩니다<br>
+            • 1회 질문: -5점<br>
+            • 2회 질문: -10점<br>
+            • 3회 질문: -20점<br>
+            • 4회 이상: -40점<br>
+            • 답 보기: 0점 처리<br><br>
+            무엇을 도와드릴까요?</div>
+            <span class="message-time" id="initial-time"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Penalty Notice -->
+      <div class="penalty-notice" id="penalty-notice">
+        <div class="penalty-text">다음 질문 시 <span id="next-penalty">5</span>점 차감</div>
+        <div class="penalty-subtext">질문 횟수: <span id="question-count">0</span>회</div>
+      </div>
+
+      <!-- Action Panel -->
+      <div class="action-panel">
+        <button class="answer-button" id="answer-btn">
+          <span>🔓 답 보기</span>
+          <span class="warning">(0점 처리)</span>
+        </button>
+
+        <div class="info-box">
+          <strong>📌 점수 시스템 안내</strong>
+          <ul>
+            <li>질문을 적게 할수록 높은 점수를 획득합니다</li>
+            <li>질문 횟수가 늘어날수록 차감 점수가 증가합니다</li>
+            <li>답 보기를 누르면 점수가 0점이 됩니다</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="chat-input">
+        <div class="input-container">
+          <textarea 
+            id="message-input" 
+            placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+            rows="1"
+          ></textarea>
+          <button class="send-button" id="send-button">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">💡 Tip: Shift+Enter로 줄바꿈, Enter로 전송</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let currentScore = 100;
+    let questionCount = 0;
+    let isLoading = false;
+    let showedAnswer = false;
+
+    const penalties = [5, 10, 20, 40];
+
+    // Elements
+    const messagesContainer = document.getElementById('messages');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const scoreDisplay = document.getElementById('score-display');
+    const penaltyNotice = document.getElementById('penalty-notice');
+    const nextPenaltyDisplay = document.getElementById('next-penalty');
+    const questionCountDisplay = document.getElementById('question-count');
+    const answerButton = document.getElementById('answer-btn');
+
+    // Initialize
+    document.getElementById('initial-time').textContent = formatTime(new Date());
+    updatePenaltyNotice();
+
+    // Functions
+    function formatTime(date) {
+      return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollToBottom() {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function getNextPenalty() {
+      if (questionCount >= penalties.length) {
+        return penalties[penalties.length - 1];
+      }
+      return penalties[questionCount];
+    }
+
+    function updatePenaltyNotice() {
+      if (showedAnswer) {
+        penaltyNotice.style.display = 'none';
+        return;
+      }
+
+      const nextPenalty = getNextPenalty();
+      nextPenaltyDisplay.textContent = nextPenalty;
+      questionCountDisplay.textContent = questionCount;
+    }
+
+    function updateScoreDisplay() {
+      scoreDisplay.textContent = `${currentScore}점`;
+      answerButton.disabled = showedAnswer;
+    }
+
+    function addMessage(role, content, options = {}) {
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${role}`;
+      
+      if (options.systemClass) {
+        messageDiv.className += ` ${options.systemClass}`;
+      }
+
+      messageDiv.innerHTML = `
+        <div class="message-content">
+          <div>${content.replace(/\n/g, '<br>')}</div>
+          <span class="message-time">${formatTime(new Date())}</span>
+        </div>
+      `;
+
+      messagesContainer.appendChild(messageDiv);
+      scrollToBottom();
+    }
+
+    function showTypingIndicator() {
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'message assistant';
+      typingDiv.id = 'typing-indicator';
+      typingDiv.innerHTML = `
+        <div class="message-content">
+          <div class="typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      `;
+      messagesContainer.appendChild(typingDiv);
+      scrollToBottom();
+    }
+
+    function hideTypingIndicator() {
+      const typingDiv = document.getElementById('typing-indicator');
+      if (typingDiv) typingDiv.remove();
+    }
+
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message || isLoading) return;
+
+      // Calculate penalty before incrementing
+      const penalty = getNextPenalty();
+
+      // Add user message
+      addMessage('user', message);
+      messageInput.value = '';
+      isLoading = true;
+      sendButton.disabled = true;
+
+      // Apply penalty if not showing answer
+      if (!showedAnswer) {
+        currentScore = Math.max(0, currentScore - penalty);
+        questionCount++;
+        
+        addMessage('system', `💬 질문 ${questionCount}회 (점수 -${penalty}점)`, { systemClass: 'penalty' });
+        
+        updateScoreDisplay();
+        updatePenaltyNotice();
+      }
+
+      // Show typing indicator
+      showTypingIndicator();
+
+      // Simulate AI response
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      hideTypingIndicator();
+
+      // Add AI response based on question count
+      let response = '';
+      if (showedAnswer) {
+        response = `[답 보기 사용]\n\n완전한 해결 방법:\n\n1. kubectl get pods로 Pod 상태 확인\n2. kubectl describe pod <pod-name>으로 상세 정보 확인\n3. kubectl logs <pod-name>으로 로그 확인\n\n문제 해결:\n- ImagePullBackOff: imagePullSecrets 확인\n- CrashLoopBackOff: 로그에서 에러 확인\n- Pending: 리소스 부족 확인\n\n이제 직접 해결해보세요!`;
+      } else if (questionCount === 1) {
+        response = `좋은 질문이네요! 먼저 문제의 근본 원인을 파악하는 것이 중요합니다.\n\n다음 질문들을 스스로에게 해보세요:\n1. 언제부터 이 문제가 발생했나요?\n2. 최근에 변경된 사항이 있나요?\n3. 로그에서 어떤 패턴을 발견할 수 있나요?\n\n더 구체적인 도움이 필요하면 추가로 질문해보세요!`;
+      } else if (questionCount === 2) {
+        response = `좋습니다! 이제 더 구체적으로 조사해봅시다.\n\n다음 단계를 따라해보세요:\n1. Pod의 상태를 확인하세요\n2. 이벤트 로그를 살펴보세요\n3. 리소스 사용량을 체크하세요\n\n어떤 명령어를 사용해야 할지 모르겠다면 추가로 질문하세요.`;
+      } else if (questionCount === 3) {
+        response = `더 구체적인 명령어를 알려드리겠습니다:\n\n기본 진단 명령어:\n- kubectl get pods -n <namespace>\n- kubectl describe pod <pod-name>\n- kubectl logs <pod-name>\n\n이 명령어들을 실행해보고 결과를 분석해보세요!`;
+      } else if (questionCount === 4) {
+        response = `상세한 진단 방법을 알려드리겠습니다:\n\n1. 상태 확인:\nkubectl get pods -o wide\n\n2. 상세 정보:\nkubectl describe pod <pod-name> | grep -A 10 Events\n\n3. 로그 확인:\nkubectl logs <pod-name> --tail=50\n\n4. 이전 컨테이너 로그:\nkubectl logs <pod-name> --previous\n\n이 정보들을 종합해서 문제를 해결해보세요!`;
+      } else {
+        response = `많은 정보를 제공했습니다.\n\n제공된 명령어들을 실행하고 결과를 분석해보세요.\n더 이상 질문이 필요하다면 "답 보기"를 사용할 수 있습니다.`;
+      }
+
+      addMessage('assistant', response);
+
+      isLoading = false;
+      sendButton.disabled = false;
+      messageInput.focus();
+    }
+
+    function showAnswer() {
+      if (showedAnswer) return;
+
+      showedAnswer = true;
+      currentScore = 0;
+
+      addMessage('system', `🔓 답 보기 사용 (점수 0점 처리)`, { systemClass: 'zero-score' });
+      
+      updateScoreDisplay();
+      updatePenaltyNotice();
+
+      // Show complete answer
+      setTimeout(() => {
+        addMessage('user', '답을 보여주세요.');
+        sendMessage();
+      }, 500);
+    }
+
+    // Event Listeners
+    sendButton.addEventListener('click', sendMessage);
+
+    messageInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    messageInput.addEventListener('input', () => {
+      messageInput.style.height = 'auto';
+      messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+    });
+
+    answerButton.addEventListener('click', showAnswer);
+
+    // Focus input on load
+    messageInput.focus();
+  </script>
+</body>
+</html>
