@@ -2,18 +2,26 @@
 RAG Service for AI Tutor System
 Handles document loading, chunking, embedding, and retrieval
 
-Task 2: Vector Database Setup
-- 2.2: Configure ChromaDB client with error handling
+Task 2: Vector Database Setup (Migrated to Qdrant)
+- 2.2: Configure Qdrant client with error handling
 - 2.3: Create collection for K8s docs with proper settings
 - 2.5: Add comprehensive error handling
 """
 
 import os
 import time
+import uuid
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-import chromadb
-from chromadb.config import Settings
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    Filter,
+    FieldCondition,
+    MatchValue
+)
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain.schema import Document
@@ -38,8 +46,8 @@ class RAGServiceError(Exception):
     pass
 
 
-class ChromaDBConnectionError(RAGServiceError):
-    """ChromaDB connection error"""
+class QdrantConnectionError(RAGServiceError):
+    """Qdrant connection error"""
     pass
 
 
@@ -56,43 +64,55 @@ class SearchError(RAGServiceError):
 class RAGService:
     """
     Retrieval-Augmented Generation service
-    Handles vector storage and semantic search
+    Handles vector storage and semantic search using Qdrant
     
     Task 2 Implementation:
-    - 2.2: ChromaDB client with config integration
+    - 2.2: Qdrant client with config integration
     - 2.3: K8s docs collection with metadata
     - 2.5: Comprehensive error handling
     """
     
+    # OpenAI text-embedding-ada-002 dimension
+    EMBEDDING_DIMENSION = 1536
+    
     def __init__(
         self,
         collection_name: str = "k8s_docs",
-        persist_directory: Optional[str] = None
+        qdrant_url: Optional[str] = None,
+        qdrant_api_key: Optional[str] = None,
+        use_memory: bool = False
     ):
         """
-        Initialize RAG service with ChromaDB
+        Initialize RAG service with Qdrant
         
         Args:
             collection_name: Name of the collection
-            persist_directory: Directory to persist data (defaults to config)
+            qdrant_url: Qdrant server URL (defaults to localhost:6333)
+            qdrant_api_key: API key for Qdrant Cloud (optional)
+            use_memory: Use in-memory mode instead of server connection
         
         Raises:
-            ChromaDBConnectionError: If ChromaDB initialization fails
+            QdrantConnectionError: If Qdrant initialization fails
         """
         self.collection_name = collection_name
-        self.persist_directory = persist_directory or config.CHROMADB_PERSIST_DIR
         
         try:
-            # Task 2.2: Initialize ChromaDB client with proper settings
-            os.makedirs(self.persist_directory, exist_ok=True)
-            
-            self.client = chromadb.PersistentClient(
-                path=self.persist_directory,
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
+            # Task 2.2: Initialize Qdrant client
+            if use_memory:
+                # In-memory mode for testing
+                self.client = QdrantClient(":memory:")
+            elif qdrant_url:
+                # Connect to Qdrant server (local or cloud)
+                self.client = QdrantClient(
+                    url=qdrant_url,
+                    api_key=qdrant_api_key
                 )
-            )
+            else:
+                # Default: connect to local Qdrant server
+                self.client = QdrantClient(
+                    host="localhost",
+                    port=6333
+                )
             
             # Task 2.2: Initialize OpenAI embeddings with error handling
             api_key = config.OPENAI_API_KEY
@@ -104,19 +124,37 @@ class RAGService:
                 model="text-embedding-ada-002"
             )
             
-            # Task 2.3: Get or create collection with K8s-specific metadata
-            self.collection = self.client.get_or_create_collection(
-                name=collection_name,
-                metadata={
-                    "description": "Kubernetes documentation and troubleshooting guides",
-                    "type": "k8s_knowledge",
-                    "embedding_model": "text-embedding-ada-002",
-                    "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                }
-            )
+            # Task 2.3: Create collection if it doesn't exist
+            self._ensure_collection_exists()
             
         except Exception as e:
-            raise ChromaDBConnectionError(f"Failed to initialize ChromaDB: {str(e)}")
+            raise QdrantConnectionError(f"Failed to initialize Qdrant: {str(e)}")
+    
+    def _ensure_collection_exists(self):
+        """
+        Ensure collection exists with proper configuration
+        Creates collection if it doesn't exist
+        """
+        try:
+            # Check if collection exists
+            collections = self.client.get_collections().collections
+            collection_names = [col.name for col in collections]
+            
+            if self.collection_name not in collection_names:
+                # Create collection with vector configuration
+                self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(
+                        size=self.EMBEDDING_DIMENSION,
+                        distance=Distance.COSINE  # Cosine similarity
+                    )
+                )
+                print(f"Created collection: {self.collection_name}")
+            else:
+                print(f"Collection already exists: {self.collection_name}")
+                
+        except Exception as e:
+            raise QdrantConnectionError(f"Failed to ensure collection exists: {str(e)}")
     
     def load_documents(self, directory: str = "./knowledge-base") -> List[Document]:
         """
@@ -210,7 +248,7 @@ class RAGService:
     
     def ingest_documents(self, documents: List[Document]) -> int:
         """
-        Generate embeddings and store in ChromaDB
+        Generate embeddings and store in Qdrant
         
         Args:
             documents: List of documents to ingest
@@ -225,8 +263,6 @@ class RAGService:
             return 0
         
         try:
-            # Prepare data for ChromaDB
-            ids = [f"doc_{i}_{int(time.time())}" for i in range(len(documents))]
             texts = [doc.page_content for doc in documents]
             metadatas = [doc.metadata for doc in documents]
             
@@ -243,12 +279,37 @@ class RAGService:
                     else:
                         raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
             
-            # Add to collection
-            self.collection.add(
-                ids=ids,
-                documents=texts,
-                embeddings=embeddings_list,
-                metadatas=metadatas
+            # Prepare points for Qdrant
+            points = []
+            for i, (text, embedding, metadata) in enumerate(zip(texts, embeddings_list, metadatas)):
+                point_id = str(uuid.uuid4())
+                
+                # Prepare payload (metadata + content)
+                payload = {
+                    "content": text,
+                    "source": metadata.get("source", "unknown"),
+                    "type": metadata.get("type", "document"),
+                    "filepath": metadata.get("filepath", ""),
+                    "ingested_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                # Add any additional metadata fields
+                for key, value in metadata.items():
+                    if key not in payload:
+                        payload[key] = value
+                
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=embedding,
+                        payload=payload
+                    )
+                )
+            
+            # Upsert points to Qdrant
+            self.client.upsert(
+                collection_name=self.collection_name,
+                points=points
             )
             
             return len(documents)
@@ -262,15 +323,17 @@ class RAGService:
         self,
         query: str,
         top_k: Optional[int] = None,
-        min_similarity: Optional[float] = None
+        min_similarity: Optional[float] = None,
+        filter_source: Optional[str] = None
     ) -> List[RetrievedDocument]:
         """
-        Search vector DB for relevant documents
+        Search vector DB for relevant documents using Qdrant
         
         Args:
             query: User query
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
+            filter_source: Optional filter by source metadata
         
         Returns:
             List of retrieved documents with similarity scores
@@ -285,31 +348,36 @@ class RAGService:
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)
             
-            # Search similar documents
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=top_k
+            # Prepare filter if source is specified
+            query_filter = None
+            if filter_source:
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="source",
+                            match=MatchValue(value=filter_source)
+                        )
+                    ]
+                )
+            
+            # Search similar documents in Qdrant
+            search_results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                limit=top_k,
+                query_filter=query_filter,
+                score_threshold=min_similarity  # Qdrant's built-in threshold
             )
             
-            # Filter by similarity threshold and format results
+            # Format results
             documents = []
-            
-            if results['documents'] and results['documents'][0]:
-                for i, (doc, distance, metadata) in enumerate(zip(
-                    results['documents'][0],
-                    results['distances'][0],
-                    results['metadatas'][0]
-                )):
-                    # Convert distance to similarity (ChromaDB uses L2 distance)
-                    similarity = 1 / (1 + distance)
-                    
-                    if similarity >= min_similarity:
-                        documents.append(RetrievedDocument(
-                            content=doc,
-                            similarity=similarity,
-                            source=metadata.get('source', 'unknown'),
-                            metadata=metadata
-                        ))
+            for result in search_results:
+                documents.append(RetrievedDocument(
+                    content=result.payload.get("content", ""),
+                    similarity=result.score,  # Cosine similarity (0-1)
+                    source=result.payload.get("source", "unknown"),
+                    metadata=result.payload
+                ))
             
             return documents
             
@@ -353,26 +421,31 @@ class RAGService:
     
     def clear_collection(self):
         """Clear all documents from collection"""
-        self.client.delete_collection(self.collection_name)
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"description": "Kubernetes documentation and troubleshooting guides"}
-        )
+        try:
+            self.client.delete_collection(self.collection_name)
+            self._ensure_collection_exists()
+            print(f"Collection {self.collection_name} cleared and recreated")
+        except Exception as e:
+            raise RAGServiceError(f"Failed to clear collection: {str(e)}")
     
     def get_collection_stats(self) -> Dict:
         """Get statistics about the collection"""
-        count = self.collection.count()
-        return {
-            "collection_name": self.collection_name,
-            "document_count": count,
-            "persist_directory": self.persist_directory
-        }
+        try:
+            collection_info = self.client.get_collection(self.collection_name)
+            return {
+                "collection_name": self.collection_name,
+                "document_count": collection_info.points_count,
+                "vector_dimension": self.EMBEDDING_DIMENSION,
+                "distance_metric": "cosine"
+            }
+        except Exception as e:
+            raise RAGServiceError(f"Failed to get collection stats: {str(e)}")
 
 
 def main():
-    """Example usage of RAG service"""
-    # Initialize service
-    rag = RAGService()
+    """Example usage of RAG service with Qdrant"""
+    # Initialize service (use in-memory mode for demo)
+    rag = RAGService(use_memory=True)
     
     # Load documents
     print("Loading documents...")
@@ -385,7 +458,7 @@ def main():
     print(f"Created {len(chunks)} chunks")
     
     # Ingest into vector DB
-    print("Ingesting into ChromaDB...")
+    print("Ingesting into Qdrant...")
     count = rag.ingest_documents(chunks)
     print(f"Ingested {count} chunks")
     
