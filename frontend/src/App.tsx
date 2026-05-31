@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import Terminal from './components/Terminal/Terminal'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
+import ProfileDetails from './components/Profile/ProfileDetails'
+import Terminal from './components/Terminal/Terminal'
 import {
   AUTH_EXPIRED_EVENT,
   createTerminalSession,
@@ -16,6 +17,8 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [namespace, setNamespace] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
+  const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
   const clearAuthState = useCallback(() => {
@@ -23,6 +26,7 @@ function App() {
     setSessionId(null)
     setNamespace(null)
     setProfile(null)
+    setIsProfileOpen(false)
     localStorage.removeItem('token')
     localStorage.removeItem('sessionId')
     localStorage.removeItem('namespace')
@@ -61,21 +65,26 @@ function App() {
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, clearAuthState)
   }, [clearAuthState])
 
-  useEffect(() => {
+  const loadProfile = useCallback(async () => {
     if (!token) return
 
-    const loadProfile = async () => {
-      try {
-        setProfile(await getProfile(token))
-      } catch (error) {
-        console.error('프로필 조회 실패:', error)
-      }
+    setIsProfileLoading(true)
+    try {
+      setProfile(await getProfile(token))
+    } catch (error) {
+      console.error('프로필 조회 실패:', error)
+    } finally {
+      setIsProfileLoading(false)
     }
+  }, [token])
+
+  useEffect(() => {
+    if (!token) return
 
     void loadProfile()
     const interval = setInterval(loadProfile, 15000)
     return () => clearInterval(interval)
-  }, [token])
+  }, [loadProfile, token])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
@@ -115,9 +124,9 @@ function App() {
         <h1>K8s Survival Camp</h1>
         <div className="header-info">
           {profile && (
-            <span className="profile-summary">
+            <button className="profile-summary" type="button" onClick={() => setIsProfileOpen(true)}>
               {profile.username} | 완료 {profile.missions_completed} | 총점 {profile.total_score}
-            </span>
+            </button>
           )}
           {namespace && (
             <span className="namespace-badge">
@@ -130,14 +139,23 @@ function App() {
         </div>
       </header>
       <main className="app-main">
-        <div className="app-layout">
-          <div className="mission-section">
-            <MissionList token={token} />
+        {isProfileOpen && profile ? (
+          <ProfileDetails
+            profile={profile}
+            loading={isProfileLoading}
+            onBack={() => setIsProfileOpen(false)}
+            onRefresh={() => void loadProfile()}
+          />
+        ) : (
+          <div className="app-layout">
+            <div className="mission-section">
+              <MissionList token={token} />
+            </div>
+            <div className="terminal-section">
+              <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
+            </div>
           </div>
-          <div className="terminal-section">
-            <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
-          </div>
-        </div>
+        )}
       </main>
     </div>
   )

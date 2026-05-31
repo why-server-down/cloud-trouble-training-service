@@ -10,6 +10,7 @@ Code changes for these tasks must stay under `frontend/`.
 - [x] Phase 3: Unify mission status and hint score updates
 - [x] Phase 4: Improve authentication lifecycle
 - [x] Phase 5: Improve terminal connection feedback
+- [x] Phase 6: Add a profile details page
 
 ## Phase 1: Restore A Clean Frontend Build
 
@@ -54,6 +55,15 @@ and returns to the login screen. Profile statistics refresh every 15 seconds.
 
 WebSocket disconnects retry up to 3 times with a 2-second delay. Reloading with a stored token
 creates a fresh terminal session instead of reusing a potentially stale session ID.
+
+## Phase 6: Add A Profile Details Page
+
+- [x] Open the profile details page from the header summary.
+- [x] Display account information and the statistics available from `GET /api/auth/me`.
+- [x] Calculate the average completed-mission score from backend profile statistics.
+- [x] Allow the user to refresh profile statistics manually.
+
+Mission history and per-mission statistics need a backend API before they can be displayed.
 
 ## Backend And AI Follow-ups
 

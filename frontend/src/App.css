@@ -36,8 +36,18 @@
 }
 
 .profile-summary {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
   color: #ddd;
+  cursor: pointer;
   font-size: 0.9rem;
+  padding: 0.45rem 0.65rem;
+}
+
+.profile-summary:hover {
+  border-color: #61dafb;
+  color: #61dafb;
 }
 
 .namespace-badge {
