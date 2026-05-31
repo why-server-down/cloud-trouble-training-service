@@ -5,41 +5,50 @@
   max-height: 100%;
   flex-direction: column;
   overflow: hidden;
-  border-radius: 8px;
-  background-color: #1e1e1e;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: #090d0c;
+  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
 }
 
 .terminal-status {
+  display: flex;
   flex-shrink: 0;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid #3e3e3e;
-  background-color: #2d2d2d;
-  font-size: 0.85rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+}
+
+.terminal-label {
+  color: var(--faint);
 }
 
 .status-connected {
-  color: #4caf50;
+  color: var(--ok);
 }
 
 .status-disconnected {
-  color: #f44336;
+  color: var(--danger);
 }
 
 .status-connecting {
-  color: #ff9800;
+  color: var(--warning);
 }
 
 .terminal-wrapper {
-  flex: 1;
   min-height: 0;
+  flex: 1;
   overflow: hidden;
 }
 
-/* xterm.js container customization */
 .terminal-wrapper .xterm {
   height: 100%;
-  padding: 0.5rem;
+  padding: 0.7rem;
 }
 
 .terminal-wrapper .xterm-viewport {

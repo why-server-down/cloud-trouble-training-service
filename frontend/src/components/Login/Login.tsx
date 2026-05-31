@@ -54,6 +54,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   return (
     <div className="login-container">
       <div className="login-box">
+        <span className="login-eyebrow">OPS TRAINING / ACCESS GATE</span>
         <h1>K8s Survival Camp</h1>
         <p className="login-subtitle">
           {isRegisterMode ? '새 계정을 만들어주세요.' : '터미널에 접속하려면 로그인하세요.'}

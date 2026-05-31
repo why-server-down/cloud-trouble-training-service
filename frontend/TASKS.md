@@ -13,6 +13,7 @@ Code changes for these tasks must stay under `frontend/`.
 - [x] Phase 6: Add a profile details page
 - [x] Phase 7: Improve UI text and feedback
 - [x] Phase 8: Add responsive workspace layout
+- [x] Phase 9: Redesign the frontend as an incident drill console
 
 ## Phase 1: Restore A Clean Frontend Build
 
@@ -81,6 +82,14 @@ Mission history and per-mission statistics need a backend API before they can be
 - [x] Add mission and terminal tabs for smaller screens.
 - [x] Keep both panels mounted while switching tabs so the terminal connection remains active.
 - [x] Adjust the header, mission cards, and action buttons for smaller screens.
+
+## Phase 9: Redesign As An Incident Drill Console
+
+- [x] Replace the generic dashboard styling with an operations-workbench visual language.
+- [x] Use restrained incident colors, technical labels, and squared panel geometry.
+- [x] Apply the visual system consistently to login, missions, terminal, profile, modal, and toast UI.
+- [x] Preserve the responsive split layout and mobile workspace tabs.
+- [x] Self-host `IBM Plex Sans KR` for Korean UI typography while keeping monospace technical labels.
 
 ## Backend And AI Follow-ups
 

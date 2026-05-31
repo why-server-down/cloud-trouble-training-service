@@ -61,7 +61,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
       cursorBlink: true,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: { background: '#1e1e1e', foreground: '#ffffff', cursor: '#61dafb', selectionBackground: '#3e3e3e' },
+      theme: { background: '#090d0c', foreground: '#e5dfd0', cursor: '#e88745', selectionBackground: '#3a281d' },
       rows: 30,
       cols: 100,
     })
@@ -164,6 +164,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   return (
     <div className="terminal-container">
       <div className="terminal-status">
+        <span className="terminal-label">SHELL / KUBECTL</span>
         {connectionStatus === 'connected' && <span className="status-connected">연결됨</span>}
         {connectionStatus === 'connecting' && <span className="status-connecting">연결 중...</span>}
         {connectionStatus === 'disconnected' && <span className="status-disconnected">연결 끊김</span>}

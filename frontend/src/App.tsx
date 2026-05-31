@@ -120,7 +120,11 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>K8s Survival Camp</h1>
+        <div className="brand-lockup">
+          <span className="brand-index">OPS / 01</span>
+          <h1>K8s Survival Camp</h1>
+          <span className="brand-subtitle">Incident drill console</span>
+        </div>
         <div className="header-info">
           {profile && (
             <button className="profile-summary" type="button" onClick={() => setIsProfileOpen(true)}>

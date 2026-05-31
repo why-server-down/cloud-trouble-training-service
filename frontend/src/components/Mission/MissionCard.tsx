@@ -48,7 +48,7 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
     disabled={!mission.is_unlocked || isActive}
   >
     <span className="mission-card-header">
-      <span className="mission-title">{!mission.is_unlocked && '잠김 | '}{copy.name}</span>
+      <span className="mission-title">{!mission.is_unlocked && 'LOCKED / '}{copy.name}</span>
       <span className="mission-level">Level {mission.level}</span>
     </span>
     <span className="mission-description">{copy.description}</span>
@@ -57,7 +57,7 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
       <span>기본 {mission.base_score}점</span>
       <span>힌트 -{mission.hint_penalty}점</span>
     </span>
-    {isActive && <span className="mission-active-label">진행 중</span>}
+    {isActive && <span className="mission-active-label">LIVE INCIDENT</span>}
   </button>
   )
 }

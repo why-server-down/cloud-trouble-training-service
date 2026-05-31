@@ -187,7 +187,10 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
 
   return (
     <div className="mission-panel">
-      <div className="mission-header"><h2>미션 목록</h2></div>
+      <div className="mission-header">
+        <span className="panel-index">RUNBOOK / INCIDENT QUEUE</span>
+        <h2>미션 목록</h2>
+      </div>
       <div className="mission-list">
         {error && <div className="mission-error">{error}</div>}
         {missions.length === 0 ? <div className="empty-state">미션을 불러오는 중...</div> : missions.map((mission) => (
