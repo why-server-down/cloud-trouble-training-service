@@ -11,6 +11,8 @@ Code changes for these tasks must stay under `frontend/`.
 - [x] Phase 4: Improve authentication lifecycle
 - [x] Phase 5: Improve terminal connection feedback
 - [x] Phase 6: Add a profile details page
+- [x] Phase 7: Improve UI text and feedback
+- [x] Phase 8: Add responsive workspace layout
 
 ## Phase 1: Restore A Clean Frontend Build
 
@@ -64,6 +66,21 @@ creates a fresh terminal session instead of reusing a potentially stale session 
 - [x] Allow the user to refresh profile statistics manually.
 
 Mission history and per-mission statistics need a backend API before they can be displayed.
+
+## Phase 7: Improve UI Text And Feedback
+
+- [x] Clean up broken Korean text in the login, mission, tutor, and terminal screens.
+- [x] Replace mission `alert()` calls with in-app toast messages.
+- [x] Replace mission and terminal `confirm()` calls with an in-app confirmation modal.
+- [x] Remove terminal debug logging and stale local simulation output.
+- [x] Provide readable frontend copy for mission seed data that currently contains broken text.
+
+## Phase 8: Add Responsive Workspace Layout
+
+- [x] Keep the desktop mission and terminal split layout.
+- [x] Add mission and terminal tabs for smaller screens.
+- [x] Keep both panels mounted while switching tabs so the terminal connection remains active.
+- [x] Adjust the header, mission cards, and action buttons for smaller screens.
 
 ## Backend And AI Follow-ups
 

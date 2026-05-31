@@ -12,11 +12,14 @@ import {
 } from './services/api'
 import './App.css'
 
+type WorkspaceTab = 'missions' | 'terminal'
+
 function App() {
   const [token, setToken] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [namespace, setNamespace] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('missions')
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -26,6 +29,7 @@ function App() {
     setSessionId(null)
     setNamespace(null)
     setProfile(null)
+    setActiveTab('missions')
     setIsProfileOpen(false)
     localStorage.removeItem('token')
     localStorage.removeItem('sessionId')
@@ -80,11 +84,15 @@ function App() {
 
   useEffect(() => {
     if (!token) return
-
     void loadProfile()
-    const interval = setInterval(loadProfile, 15000)
-    return () => clearInterval(interval)
+    const interval = window.setInterval(loadProfile, 15000)
+    return () => window.clearInterval(interval)
   }, [loadProfile, token])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 0)
+    return () => window.clearTimeout(timeout)
+  }, [activeTab])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
@@ -92,10 +100,7 @@ function App() {
     setNamespace(newNamespace || null)
     localStorage.setItem('token', newToken)
     localStorage.setItem('sessionId', newSessionId)
-
-    if (newNamespace) {
-      localStorage.setItem('namespace', newNamespace)
-    }
+    if (newNamespace) localStorage.setItem('namespace', newNamespace)
   }
 
   const handleLogout = async () => {
@@ -106,17 +111,11 @@ function App() {
         console.error('로그아웃 요청 실패:', error)
       }
     }
-
     clearAuthState()
   }
 
-  if (isLoading) {
-    return <div className="app-loading">불러오는 중...</div>
-  }
-
-  if (!token || !sessionId) {
-    return <Login onLoginSuccess={handleLoginSuccess} />
-  }
+  if (isLoading) return <div className="app-loading">불러오는 중...</div>
+  if (!token || !sessionId) return <Login onLoginSuccess={handleLoginSuccess} />
 
   return (
     <div className="app">
@@ -128,31 +127,22 @@ function App() {
               {profile.username} | 완료 {profile.missions_completed} | 총점 {profile.total_score}
             </button>
           )}
-          {namespace && (
-            <span className="namespace-badge">
-              Namespace: {namespace.startsWith('user-') ? namespace.slice(0, 20) + '...' : namespace}
-            </span>
-          )}
-          <button className="logout-button" onClick={handleLogout}>
-            로그아웃
-          </button>
+          {namespace && <span className="namespace-badge">Namespace: {namespace.startsWith('user-') ? namespace.slice(0, 20) + '...' : namespace}</span>}
+          <button className="logout-button" type="button" onClick={handleLogout}>로그아웃</button>
         </div>
       </header>
       <main className="app-main">
         {isProfileOpen && profile ? (
-          <ProfileDetails
-            profile={profile}
-            loading={isProfileLoading}
-            onBack={() => setIsProfileOpen(false)}
-            onRefresh={() => void loadProfile()}
-          />
+          <ProfileDetails profile={profile} loading={isProfileLoading} onBack={() => setIsProfileOpen(false)} onRefresh={() => void loadProfile()} />
         ) : (
-          <div className="app-layout">
-            <div className="mission-section">
-              <MissionList token={token} />
-            </div>
-            <div className="terminal-section">
-              <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
+          <div className="workspace">
+            <nav className="workspace-tabs" aria-label="작업 화면">
+              <button className={activeTab === 'missions' ? 'active' : ''} type="button" onClick={() => setActiveTab('missions')}>미션</button>
+              <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
+            </nav>
+            <div className="app-layout">
+              <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`}><MissionList token={token} /></div>
+              <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}><Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} /></div>
             </div>
           </div>
         )}

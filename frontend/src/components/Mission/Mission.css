@@ -26,6 +26,8 @@
 }
 
 .mission-card {
+  display: block;
+  width: 100%;
   background: #2a2a2a;
   border: 1px solid #444;
   border-radius: 8px;
@@ -33,6 +35,7 @@
   margin-bottom: 1rem;
   cursor: pointer;
   transition: all 0.2s;
+  text-align: left;
 }
 
 .mission-card:hover:not(.locked):not(.active) {
@@ -73,6 +76,7 @@
 }
 
 .mission-description {
+  display: block;
   color: #ccc;
   font-size: 0.9rem;
   line-height: 1.4;
@@ -185,6 +189,19 @@
   font-size: 0.9rem;
 }
 
+.mission-active-label {
+  display: block;
+  margin-top: 0.5rem;
+  color: #4caf50;
+  font-weight: bold;
+}
+
+.mission-error {
+  padding: 1rem;
+  color: #f44336;
+  text-align: center;
+}
+
 .tutor-panel {
   display: flex;
   flex-direction: column;
@@ -284,4 +301,28 @@
 .chat-form button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .mission-panel {
+    border-right: none;
+  }
+
+  .mission-list {
+    padding: 0.75rem;
+  }
+
+  .mission-info {
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
+  }
+
+  .status-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .btn {
+    padding: 0.6rem 0.35rem;
+  }
 }

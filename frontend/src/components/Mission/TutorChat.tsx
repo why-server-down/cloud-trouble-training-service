@@ -12,12 +12,7 @@ interface ChatMessage {
   text: string
 }
 
-const initialMessages: ChatMessage[] = [
-  {
-    role: 'assistant',
-    text: '막힌 지점을 질문해 주세요. 정답보다는 다음에 확인할 순서를 먼저 제안합니다.',
-  },
-]
+const initialMessages: ChatMessage[] = [{ role: 'assistant', text: '막힌 지점을 질문해 주세요. 정답보다 다음 확인 순서를 먼저 제안합니다.' }]
 
 const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
@@ -34,7 +29,6 @@ const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) =>
 
   const submitQuestion = async (event: React.FormEvent) => {
     event.preventDefault()
-
     const question = input.trim()
     if (!question || loading) return
 
@@ -45,12 +39,9 @@ const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) =>
 
     try {
       const response = await askTutor(token, question, hintLevel)
-      setMessages((current) => [
-        ...current,
-        { role: 'assistant', text: response.response },
-      ])
+      setMessages((current) => [...current, { role: 'assistant', text: response.response }])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다')
+      setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다.')
     } finally {
       setLoading(false)
     }
@@ -58,32 +49,15 @@ const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) =>
 
   return (
     <section className="tutor-panel">
-      <div className="tutor-header">
-        <span>AI 튜터</span>
-        <span className="tutor-hint-level">힌트 단계 {hintLevel}</span>
-      </div>
-
+      <div className="tutor-header"><span>AI 튜터</span><span className="tutor-hint-level">힌트 단계 {hintLevel}</span></div>
       <div className="chat-messages" aria-live="polite">
-        {messages.map((message, index) => (
-          <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-            {message.text}
-          </div>
-        ))}
+        {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>{message.text}</div>)}
         {loading && <div className="chat-message assistant">답변을 준비하고 있습니다...</div>}
       </div>
-
       {error && <div className="chat-error">{error}</div>}
-
       <form className="chat-form" onSubmit={submitQuestion}>
-        <input
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="어떤 명령으로 원인을 찾아야 하나요?"
-          disabled={loading}
-        />
-        <button type="submit" disabled={loading || !input.trim()}>
-          질문
-        </button>
+        <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="어떤 명령으로 원인을 찾아야 하나요?" disabled={loading} />
+        <button type="submit" disabled={loading || !input.trim()}>질문</button>
       </form>
     </section>
   )

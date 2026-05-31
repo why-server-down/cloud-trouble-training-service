@@ -18,41 +18,47 @@ interface MissionCardProps {
   onStart: (missionId: string) => void
 }
 
-const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart }) => {
-  const handleClick = () => {
-    if (!mission.is_unlocked || isActive) return
-    onStart(mission.id)
-  }
+const missionCopy: Record<string, { name: string; description: string }> = {
+  pod_failure: {
+    name: '사라진 애플리케이션',
+    description: 'Nginx Pod가 ImagePullBackOff 상태입니다. 이미지 이름을 수정하여 Pod를 정상 상태로 복구하세요.',
+  },
+  memory_stress: {
+    name: '메모리 부족',
+    description: '애플리케이션 Pod가 메모리 부족으로 종료됩니다. 리소스 제한을 확인하고 조정하세요.',
+  },
+  service_misconfig: {
+    name: '끊어진 연결',
+    description: 'Service 설정 오류로 트래픽이 Pod에 전달되지 않습니다. selector 설정을 확인하세요.',
+  },
+  network_latency: {
+    name: '응답 없는 서버',
+    description: 'Pod에 지속적인 장애가 발생합니다. 상태 확인 설정을 점검하고 자동 복구되도록 구성하세요.',
+  },
+}
 
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60)
-    return `${minutes}분`
-  }
+const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart }) => {
+  const copy = missionCopy[mission.chaos_type] || { name: mission.name, description: mission.description }
 
   return (
-    <div
-      className={`mission-card ${!mission.is_unlocked ? 'locked' : ''} ${isActive ? 'active' : ''}`}
-      onClick={handleClick}
-    >
-      <div className="mission-card-header">
-        <span className="mission-title">
-          {!mission.is_unlocked && '🔒 '}
-          {mission.name}
-        </span>
-        <span className="mission-level">Level {mission.level}</span>
-      </div>
-      <p className="mission-description">{mission.description}</p>
-      <div className="mission-info">
-        <span>⏱️ {formatTime(mission.time_limit)}</span>
-        <span>⭐ {mission.base_score}점</span>
-        <span>💡 -{mission.hint_penalty}점</span>
-      </div>
-      {isActive && (
-        <div style={{ marginTop: '0.5rem', color: '#4caf50', fontWeight: 'bold' }}>
-          ▶ 진행 중
-        </div>
-      )}
-    </div>
+  <button
+    className={`mission-card ${!mission.is_unlocked ? 'locked' : ''} ${isActive ? 'active' : ''}`}
+    type="button"
+    onClick={() => onStart(mission.id)}
+    disabled={!mission.is_unlocked || isActive}
+  >
+    <span className="mission-card-header">
+      <span className="mission-title">{!mission.is_unlocked && '잠김 | '}{copy.name}</span>
+      <span className="mission-level">Level {mission.level}</span>
+    </span>
+    <span className="mission-description">{copy.description}</span>
+    <span className="mission-info">
+      <span>제한 시간 {Math.floor(mission.time_limit / 60)}분</span>
+      <span>기본 {mission.base_score}점</span>
+      <span>힌트 -{mission.hint_penalty}점</span>
+    </span>
+    {isActive && <span className="mission-active-label">진행 중</span>}
+  </button>
   )
 }
 

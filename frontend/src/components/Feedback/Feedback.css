@@ -1,0 +1,92 @@
+.modal-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.confirm-modal {
+  width: min(420px, 100%);
+  padding: 1.25rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  background: #252525;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.confirm-modal h3 {
+  color: #61dafb;
+}
+
+.confirm-modal p {
+  margin-top: 0.75rem;
+  color: #ccc;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.modal-button {
+  padding: 0.55rem 0.85rem;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.modal-button.secondary {
+  background: #4a4a4a;
+}
+
+.modal-button.primary {
+  background: #176b87;
+}
+
+.modal-button.danger {
+  background: #d32f2f;
+}
+
+.toast {
+  position: fixed;
+  z-index: 30;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  display: flex;
+  max-width: min(420px, calc(100vw - 2.5rem));
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 6px;
+  background: #2d2d2d;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  border-color: #4caf50;
+}
+
+.toast.info {
+  border-color: #61dafb;
+}
+
+.toast.error {
+  border-color: #f44336;
+}
+
+.toast button {
+  border: none;
+  background: transparent;
+  color: #aaa;
+  cursor: pointer;
+}
