@@ -1,7 +1,16 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import MissionCard from './MissionCard'
 import MissionStatus from './MissionStatus'
-import { listMissions, startMission, checkMission, abandonMission, useHint } from '../../services/api'
+import TutorChat from './TutorChat'
+import {
+  abandonMission,
+  checkMission,
+  getMissionStatus,
+  listMissions,
+  MissionStatusResponse,
+  startMission,
+  useHint,
+} from '../../services/api'
 import './Mission.css'
 
 interface Mission {
@@ -23,49 +32,36 @@ interface MissionListProps {
 const MissionList: React.FC<MissionListProps> = ({ token }) => {
   const [missions, setMissions] = useState<Mission[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
+  const [hintsUsed, setHintsUsed] = useState(0)
+  const [statusRefreshKey, setStatusRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchMissions = async () => {
+  const fetchMissions = useCallback(async () => {
     try {
       const data = await listMissions(token)
       setMissions(data)
 
-      // 진행 중인 미션이 있는지 확인
       try {
-        const statusResponse = await fetch('http://localhost:8000/api/missions/status', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-
-        if (statusResponse.ok) {
-          const statusData = await statusResponse.json()
-          // 진행 중인 미션이 있으면 활성화
-          setActiveMissionId(statusData.attempt.mission_id)
-        } else {
-          // 진행 중인 미션이 없으면 초기화
-          setActiveMissionId(null)
-        }
-      } catch (err) {
-        // 진행 중인 미션이 없는 경우 (404 등)
+        const status = await getMissionStatus(token)
+        setActiveMissionId(status.attempt.mission_id)
+        setHintsUsed(status.attempt.hints_used)
+      } catch {
         setActiveMissionId(null)
+        setHintsUsed(0)
       }
     } catch (err) {
       console.error('미션 목록 조회 실패:', err)
-      setError('미션 목록을 불러올 수 없습니다')
+      setError('미션 목록을 불러오지 못했습니다')
     }
-  }
-
-  useEffect(() => {
-    fetchMissions()
   }, [token])
 
-  const handleStartMission = async (missionId: string) => {
-    if (loading) return
+  useEffect(() => {
+    void fetchMissions()
+  }, [fetchMissions])
 
-    const confirmed = window.confirm('이 미션을 시작하시겠습니까?')
-    if (!confirmed) return
+  const handleStartMission = async (missionId: string) => {
+    if (loading || !window.confirm('미션을 시작하시겠습니까?')) return
 
     setLoading(true)
     setError(null)
@@ -73,11 +69,14 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
     try {
       await startMission(token, missionId)
       setActiveMissionId(missionId)
+      setHintsUsed(0)
+      setStatusRefreshKey((current) => current + 1)
       await fetchMissions()
-      alert('미션이 시작되었습니다! 터미널에서 문제를 해결하세요.')
-    } catch (err: any) {
-      setError(err.message || '미션 시작 실패')
-      alert(err.message || '미션 시작에 실패했습니다')
+      alert('미션을 시작했습니다. 터미널에서 문제를 해결해 보세요.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '미션 시작 실패'
+      setError(message)
+      alert(message)
     } finally {
       setLoading(false)
     }
@@ -95,21 +94,20 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
 
       if (result.attempt.status === 'completed') {
         setActiveMissionId(null)
+        setHintsUsed(0)
         await fetchMissions()
       }
-    } catch (err: any) {
-      setError(err.message || '미션 확인 실패')
-      alert(err.message || '미션 확인에 실패했습니다')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '미션 확인 실패'
+      setError(message)
+      alert(message)
     } finally {
       setLoading(false)
     }
   }
 
   const handleAbandonMission = async () => {
-    if (loading) return
-
-    const confirmed = window.confirm('정말로 미션을 포기하시겠습니까? (0점 처리)')
-    if (!confirmed) return
+    if (loading || !window.confirm('미션을 포기하시겠습니까? 점수는 0점으로 처리됩니다.')) return
 
     setLoading(true)
     setError(null)
@@ -117,40 +115,52 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
     try {
       await abandonMission(token)
       setActiveMissionId(null)
+      setHintsUsed(0)
       await fetchMissions()
-      alert('미션을 포기했습니다')
-    } catch (err: any) {
-      setError(err.message || '미션 포기 실패')
-      alert(err.message || '미션 포기에 실패했습니다')
+      alert('미션을 포기했습니다.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '미션 포기 실패'
+      setError(message)
+      alert(message)
     } finally {
       setLoading(false)
     }
   }
 
   const handleUseHint = async () => {
-    if (loading) return
-
-    const confirmed = window.confirm('힌트를 사용하시겠습니까? (점수 감점)')
-    if (!confirmed) return
+    if (loading || !window.confirm('힌트를 사용하시겠습니까? 점수가 차감됩니다.')) return
 
     setLoading(true)
     setError(null)
 
     try {
-      await useHint(token)
-      alert('힌트가 사용되었습니다. 점수가 감점되었습니다.')
-    } catch (err: any) {
-      setError(err.message || '힌트 사용 실패')
-      alert(err.message || '힌트 사용에 실패했습니다')
+      const attempt = await useHint(token)
+      setHintsUsed(attempt.hints_used)
+      setStatusRefreshKey((current) => current + 1)
+      alert('힌트를 사용했습니다. 점수가 차감되었습니다.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '힌트 사용 실패'
+      setError(message)
+      alert(message)
     } finally {
       setLoading(false)
     }
   }
 
+  const handleStatusChange = useCallback((status: MissionStatusResponse) => {
+    setHintsUsed(status.attempt.hints_used)
+  }, [])
+
+  const handleMissionEnd = useCallback(() => {
+    setActiveMissionId(null)
+    setHintsUsed(0)
+    void fetchMissions()
+  }, [fetchMissions])
+
   return (
     <div className="mission-panel">
       <div className="mission-header">
-        <h2>🎯 미션 목록</h2>
+        <h2>미션 목록</h2>
       </div>
 
       <div className="mission-list">
@@ -175,13 +185,19 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
       </div>
 
       {activeMissionId && (
-        <MissionStatus
-          token={token}
-          onRefresh={fetchMissions}
-          onCheck={handleCheckMission}
-          onAbandon={handleAbandonMission}
-          onHint={handleUseHint}
-        />
+        <>
+          <MissionStatus
+            token={token}
+            refreshKey={statusRefreshKey}
+            loading={loading}
+            onStatusChange={handleStatusChange}
+            onMissionEnd={handleMissionEnd}
+            onCheck={handleCheckMission}
+            onAbandon={handleAbandonMission}
+            onHint={handleUseHint}
+          />
+          <TutorChat token={token} missionId={activeMissionId} hintsUsed={hintsUsed} />
+        </>
       )}
     </div>
   )

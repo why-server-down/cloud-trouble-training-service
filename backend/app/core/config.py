@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
     AI_BACKEND: str = "mock"  # "mock" | "openai"
-    CHROMA_PERSIST_DIR: str = "../ai-data/vector-db/chroma_data"
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""
     KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"
 
     class Config:

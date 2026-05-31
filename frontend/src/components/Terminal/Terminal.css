@@ -26,6 +26,10 @@
   color: #f44336;
 }
 
+.status-connecting {
+  color: #ff9800;
+}
+
 .terminal-wrapper {
   flex: 1;
   min-height: 0;

@@ -44,7 +44,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   const isConnectedRef = useRef<boolean>(false)
 
   // WebSocket 연결 - 터미널이 준비된 후에만 연결
-  const { isConnected, error, sendCommand } = useTerminalWebSocket({
+  const { isConnected, connectionStatus, error, sendCommand } = useTerminalWebSocket({
     sessionId: sessionId || '',
     token: token || '',
     terminal: terminalReady ? xtermRef.current : null,
@@ -132,6 +132,8 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
           if (isConnectedRef.current && sessionId && token) {
             sendCommand(command)
             // 서버 응답을 기다리므로 여기서 프롬프트 출력 안 함
+          } else if (sessionId && token) {
+            terminal.write(`\x1b[33m터미널 연결을 기다리는 중입니다.\x1b[0m\r\n${getPrompt()}`)
           } else {
             // 연결 안 되어 있으면 로컬 시뮬레이션
             handleCommandLocal(terminal, command)
@@ -269,7 +271,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
 
     // 에러만 표시 (연결 성공 메시지는 백엔드에서 전송)
     if (error) {
-      xtermRef.current.write(`\r\n❌ ${error}\r\n`)
+      xtermRef.current.write(`\r\n\x1b[33m${error}\x1b[0m\r\n${getPrompt()}`)
     }
   }, [isConnected, error])
 
@@ -316,10 +318,14 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
     <div className="terminal-container">
       {/* 연결 상태 표시 */}
       <div className="terminal-status">
-        {isConnected ? (
-          <span className="status-connected">🟢 연결됨</span>
-        ) : (
-          <span className="status-disconnected">🔴 연결 안 됨</span>
+        {connectionStatus === 'connected' && (
+          <span className="status-connected">연결됨</span>
+        )}
+        {connectionStatus === 'connecting' && (
+          <span className="status-connecting">연결 중...</span>
+        )}
+        {connectionStatus === 'disconnected' && (
+          <span className="status-disconnected">연결 끊김</span>
         )}
       </div>
       <div className="terminal-wrapper" ref={terminalRef}></div>

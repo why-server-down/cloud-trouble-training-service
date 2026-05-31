@@ -1,80 +1,124 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Terminal from './components/Terminal/Terminal'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
+import {
+  AUTH_EXPIRED_EVENT,
+  createTerminalSession,
+  getProfile,
+  logoutUser,
+  UserProfileResponse,
+} from './services/api'
 import './App.css'
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [namespace, setNamespace] = useState<string | null>(null)
+  const [profile, setProfile] = useState<UserProfileResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // 컴포넌트 마운트 시 localStorage에서 토큰 복원
+  const clearAuthState = useCallback(() => {
+    setToken(null)
+    setSessionId(null)
+    setNamespace(null)
+    setProfile(null)
+    localStorage.removeItem('token')
+    localStorage.removeItem('sessionId')
+    localStorage.removeItem('namespace')
+  }, [])
+
   useEffect(() => {
     const savedToken = localStorage.getItem('token')
-    const savedSessionId = localStorage.getItem('sessionId')
     const savedNamespace = localStorage.getItem('namespace')
 
-    if (savedToken && savedSessionId) {
-      setToken(savedToken)
-      setSessionId(savedSessionId)
-      setNamespace(savedNamespace)
+    const restoreSession = async () => {
+      if (!savedToken) {
+        setIsLoading(false)
+        return
+      }
+
+      try {
+        const session = await createTerminalSession(savedToken)
+        setToken(savedToken)
+        setSessionId(session.id)
+        setNamespace(session.namespace || savedNamespace)
+        localStorage.setItem('sessionId', session.id)
+        localStorage.setItem('namespace', session.namespace)
+      } catch (error) {
+        console.error('터미널 세션 복원 실패:', error)
+        clearAuthState()
+      } finally {
+        setIsLoading(false)
+      }
     }
-    setIsLoading(false)
-  }, [])
+
+    void restoreSession()
+  }, [clearAuthState])
+
+  useEffect(() => {
+    window.addEventListener(AUTH_EXPIRED_EVENT, clearAuthState)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, clearAuthState)
+  }, [clearAuthState])
+
+  useEffect(() => {
+    if (!token) return
+
+    const loadProfile = async () => {
+      try {
+        setProfile(await getProfile(token))
+      } catch (error) {
+        console.error('프로필 조회 실패:', error)
+      }
+    }
+
+    void loadProfile()
+    const interval = setInterval(loadProfile, 15000)
+    return () => clearInterval(interval)
+  }, [token])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
     setSessionId(newSessionId)
     setNamespace(newNamespace || null)
-
-    // localStorage에 저장
     localStorage.setItem('token', newToken)
     localStorage.setItem('sessionId', newSessionId)
+
     if (newNamespace) {
       localStorage.setItem('namespace', newNamespace)
     }
   }
 
-  const handleLogout = () => {
-    setToken(null)
-    setSessionId(null)
-    setNamespace(null)
+  const handleLogout = async () => {
+    if (token) {
+      try {
+        await logoutUser(token)
+      } catch (error) {
+        console.error('로그아웃 요청 실패:', error)
+      }
+    }
 
-    // localStorage에서 제거
-    localStorage.removeItem('token')
-    localStorage.removeItem('sessionId')
-    localStorage.removeItem('namespace')
+    clearAuthState()
   }
 
-  // 로딩 중
   if (isLoading) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        background: '#1e1e1e',
-        color: '#61dafb'
-      }}>
-        로딩 중...
-      </div>
-    )
+    return <div className="app-loading">불러오는 중...</div>
   }
 
-  // 로그인 전: 로그인 화면 표시
   if (!token || !sessionId) {
     return <Login onLoginSuccess={handleLoginSuccess} />
   }
 
-  // 로그인 후: 미션 + 터미널 화면 표시
   return (
     <div className="app">
       <header className="app-header">
-        <h1>☁️ K8s Survival Camp</h1>
+        <h1>K8s Survival Camp</h1>
         <div className="header-info">
+          {profile && (
+            <span className="profile-summary">
+              {profile.username} | 완료 {profile.missions_completed} | 총점 {profile.total_score}
+            </span>
+          )}
           {namespace && (
             <span className="namespace-badge">
               Namespace: {namespace.startsWith('user-') ? namespace.slice(0, 20) + '...' : namespace}

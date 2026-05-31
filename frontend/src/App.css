@@ -26,6 +26,20 @@
   align-items: center;
 }
 
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: #61dafb;
+  background: #1e1e1e;
+}
+
+.profile-summary {
+  color: #ddd;
+  font-size: 0.9rem;
+}
+
 .namespace-badge {
   background-color: #3e3e3e;
   padding: 0.5rem 1rem;

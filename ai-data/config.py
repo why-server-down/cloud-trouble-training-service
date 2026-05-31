@@ -20,10 +20,9 @@ class Config:
     OPENAI_MAX_TOKENS: int = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
     OPENAI_TIMEOUT: int = int(os.getenv("OPENAI_TIMEOUT", "10"))
     
-    # ChromaDB Configuration
-    CHROMADB_HOST: str = os.getenv("CHROMADB_HOST", "localhost")
-    CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", "8000"))
-    CHROMADB_PERSIST_DIR: str = os.getenv("CHROMADB_PERSIST_DIR", "./vector-db/chroma_data")
+    # Qdrant Configuration
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
     
     # RAG Configuration
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
@@ -60,9 +59,7 @@ class Config:
         print(f"OpenAI Timeout: {cls.OPENAI_TIMEOUT}s")
         print(f"OpenAI API Key: {'✓ Set' if cls.OPENAI_API_KEY and cls.OPENAI_API_KEY != 'your_openai_api_key_here' else '✗ Not Set'}")
         print()
-        print(f"ChromaDB Host: {cls.CHROMADB_HOST}")
-        print(f"ChromaDB Port: {cls.CHROMADB_PORT}")
-        print(f"ChromaDB Persist Dir: {cls.CHROMADB_PERSIST_DIR}")
+        print(f"Qdrant URL: {cls.QDRANT_URL}")
         print()
         print(f"RAG Top K: {cls.RAG_TOP_K}")
         print(f"RAG Min Similarity: {cls.RAG_MIN_SIMILARITY}")

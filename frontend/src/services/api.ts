@@ -1,7 +1,6 @@
-// API Base URL - 환경변수에서 가져오기
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
-// API 응답 타입 정의
 interface LoginResponse {
   access_token: string
   token_type: string
@@ -20,11 +19,73 @@ interface RegisterResponse {
   created_at: string
 }
 
-// 로그인
-export const login = async (
-  username: string,
-  password: string
-): Promise<LoginResponse> => {
+export interface UserProfileResponse {
+  id: string
+  username: string
+  created_at: string
+  missions_completed: number
+  total_score: number
+}
+
+interface MissionResponse {
+  id: string
+  name: string
+  level: number
+  description: string
+  chaos_type: string
+  base_score: number
+  time_limit: number
+  hint_penalty: number
+  is_unlocked: boolean
+}
+
+export interface MissionAttemptResponse {
+  id: string
+  user_id: string
+  mission_id: string
+  status: string
+  start_time: string
+  end_time: string | null
+  final_score: number | null
+  hints_used: number
+}
+
+export interface MissionStatusResponse {
+  attempt: MissionAttemptResponse
+  elapsed_seconds: number
+  remaining_seconds: number
+  current_score: number
+}
+
+interface MissionCompleteResponse {
+  attempt: MissionAttemptResponse
+  message: string
+}
+
+interface ChatResponse {
+  response: string
+  hint_level: number
+  mission_name: string | null
+}
+
+const notifyIfUnauthorized = (response: Response) => {
+  if (response.status === 401) {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  }
+}
+
+const getErrorDetail = async (response: Response, fallback: string) => {
+  notifyIfUnauthorized(response)
+
+  try {
+    const error = await response.json()
+    return error.detail || fallback
+  } catch {
+    return fallback
+  }
+}
+
+export const login = async (username: string, password: string): Promise<LoginResponse> => {
   const formData = new URLSearchParams()
   formData.append('username', username)
   formData.append('password', password)
@@ -38,20 +99,13 @@ export const login = async (
   })
 
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('아이디 또는 비밀번호가 잘못되었습니다')
-    }
-    throw new Error('로그인에 실패했습니다')
+    throw new Error(response.status === 401 ? '아이디 또는 비밀번호가 올바르지 않습니다' : '로그인에 실패했습니다')
   }
 
   return response.json()
 }
 
-// 회원가입
-export const register = async (
-  username: string,
-  password: string
-): Promise<RegisterResponse> => {
+export const register = async (username: string, password: string): Promise<RegisterResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: 'POST',
     headers: {
@@ -61,19 +115,13 @@ export const register = async (
   })
 
   if (!response.ok) {
-    if (response.status === 409) {
-      throw new Error('이미 존재하는 사용자명입니다')
-    }
-    throw new Error('회원가입에 실패했습니다')
+    throw new Error(response.status === 409 ? '이미 존재하는 사용자명입니다' : '회원가입에 실패했습니다')
   }
 
   return response.json()
 }
 
-// 터미널 세션 생성
-export const createTerminalSession = async (
-  token: string
-): Promise<SessionResponse> => {
+export const createTerminalSession = async (token: string): Promise<SessionResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/terminal/sessions`, {
     method: 'POST',
     headers: {
@@ -82,58 +130,44 @@ export const createTerminalSession = async (
   })
 
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('인증이 필요합니다')
-    }
-    throw new Error('세션 생성에 실패했습니다')
+    throw new Error(await getErrorDetail(response, '터미널 세션 생성에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 헬스 체크
 export const healthCheck = async (): Promise<{ status: string }> => {
   const response = await fetch(`${API_BASE_URL}/health`)
   return response.json()
 }
 
-// Mission 관련 타입
-interface MissionResponse {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
+export const getProfile = async (token: string): Promise<UserProfileResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorDetail(response, '프로필을 불러오지 못했습니다'))
+  }
+
+  return response.json()
 }
 
-interface MissionAttemptResponse {
-  id: string
-  user_id: string
-  mission_id: string
-  status: string
-  start_time: string
-  end_time: string | null
-  final_score: number | null
-  hints_used: number
+export const logoutUser = async (token: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorDetail(response, '로그아웃에 실패했습니다'))
+  }
 }
 
-interface MissionStatusResponse {
-  attempt: MissionAttemptResponse
-  elapsed_seconds: number
-  remaining_seconds: number
-  current_score: number
-}
-
-interface MissionCompleteResponse {
-  attempt: MissionAttemptResponse
-  message: string
-}
-
-// 미션 목록 조회
 export const listMissions = async (token: string): Promise<MissionResponse[]> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/`, {
     headers: {
@@ -142,17 +176,13 @@ export const listMissions = async (token: string): Promise<MissionResponse[]> =>
   })
 
   if (!response.ok) {
-    throw new Error('미션 목록 조회 실패')
+    throw new Error(await getErrorDetail(response, '미션 목록 조회에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 미션 시작
-export const startMission = async (
-  token: string,
-  missionId: string
-): Promise<MissionAttemptResponse> => {
+export const startMission = async (token: string, missionId: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/start`, {
     method: 'POST',
     headers: {
@@ -163,17 +193,13 @@ export const startMission = async (
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '미션 시작 실패')
+    throw new Error(await getErrorDetail(response, '미션 시작에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 미션 상태 조회
-export const getMissionStatus = async (
-  token: string
-): Promise<MissionStatusResponse> => {
+export const getMissionStatus = async (token: string): Promise<MissionStatusResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/status`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -181,17 +207,13 @@ export const getMissionStatus = async (
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '미션 상태 조회 실패')
+    throw new Error(await getErrorDetail(response, '미션 상태 조회에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 미션 완료 확인
-export const checkMission = async (
-  token: string
-): Promise<MissionCompleteResponse> => {
+export const checkMission = async (token: string): Promise<MissionCompleteResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/check`, {
     method: 'POST',
     headers: {
@@ -200,17 +222,13 @@ export const checkMission = async (
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '미션 확인 실패')
+    throw new Error(await getErrorDetail(response, '미션 확인에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 미션 포기
-export const abandonMission = async (
-  token: string
-): Promise<MissionAttemptResponse> => {
+export const abandonMission = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/abandon`, {
     method: 'POST',
     headers: {
@@ -219,17 +237,13 @@ export const abandonMission = async (
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '미션 포기 실패')
+    throw new Error(await getErrorDetail(response, '미션 포기에 실패했습니다'))
   }
 
   return response.json()
 }
 
-// 힌트 사용
-export const useHint = async (
-  token: string
-): Promise<MissionAttemptResponse> => {
+export const useHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/hint`, {
     method: 'POST',
     headers: {
@@ -238,8 +252,24 @@ export const useHint = async (
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || '힌트 사용 실패')
+    throw new Error(await getErrorDetail(response, '힌트 사용에 실패했습니다'))
+  }
+
+  return response.json()
+}
+
+export const askTutor = async (token: string, message: string, hintLevel: number = 0): Promise<ChatResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/chat/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, hint_level: hintLevel }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorDetail(response, 'AI 튜터 응답을 받지 못했습니다'))
   }
 
   return response.json()

@@ -12,7 +12,7 @@ from app.core.config import settings
 
 # ai-data 경로를 Python path에 추가
 _AI_DATA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../../ai-data")
+    os.path.join(os.path.dirname(__file__), "../../../ai-data")
 )
 if _AI_DATA_PATH not in sys.path:
     sys.path.insert(0, _AI_DATA_PATH)
