@@ -332,6 +332,69 @@
       text-align: center;
     }
 
+    /* Config Panel */
+    .config-panel {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+      min-width: 250px;
+    }
+
+    .config-panel h4 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      color: #1f2937;
+    }
+
+    .config-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .config-option label {
+      font-size: 13px;
+      color: #4b5563;
+      cursor: pointer;
+    }
+
+    .config-option input[type="checkbox"] {
+      cursor: pointer;
+    }
+
+    .config-status {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .config-status .status-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .config-status .status-value {
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .config-status .status-value.connected {
+      color: #10b981;
+    }
+
+    .config-status .status-value.disconnected {
+      color: #ef4444;
+    }
+
     .typing-indicator {
       display: flex;
       gap: 4px;
@@ -367,6 +430,25 @@
   </style>
 </head>
 <body>
+  <!-- Config Panel -->
+  <div class="config-panel">
+    <h4>⚙️ 설정</h4>
+    <div class="config-option">
+      <input type="checkbox" id="demo-mode-toggle" checked>
+      <label for="demo-mode-toggle">데모 모드 (시뮬레이션)</label>
+    </div>
+    <div class="config-status">
+      <div class="status-item">
+        <span>상태:</span>
+        <span class="status-value" id="connection-status">데모</span>
+      </div>
+      <div class="status-item">
+        <span>API:</span>
+        <span class="status-value" id="api-url">localhost:8000</span>
+      </div>
+    </div>
+  </div>
+
   <div class="container">
     <div class="chat-widget">
       <!-- Header -->
@@ -446,12 +528,25 @@
     </div>
   </div>
 
+  <!-- API Client -->
+  <script src="./src/api-client.js"></script>
+
   <script>
+    // Configuration
+    const API_BASE_URL = 'http://localhost:8000';
+    const DEMO_MODE = true; // true: 시뮬레이션, false: 실제 API 연동
+
+    // API Client
+    let apiClient = null;
+    let authToken = null;
+
     // State
     let currentScore = 100;
     let questionCount = 0;
     let isLoading = false;
     let showedAnswer = false;
+    let currentMissionName = null;
+    let hintLevel = 0; // 0~3
 
     const penalties = [5, 10, 20, 40];
 
@@ -468,8 +563,129 @@
     // Initialize
     document.getElementById('initial-time').textContent = formatTime(new Date());
     updatePenaltyNotice();
+    initializeApp();
+
+    // Config panel event listener
+    document.getElementById('demo-mode-toggle').addEventListener('change', (e) => {
+      const newDemoMode = e.target.checked;
+      if (confirm(`${newDemoMode ? '데모' : '실제 API'} 모드로 전환하시겠습니까? 페이지가 새로고침됩니다.`)) {
+        localStorage.setItem('demo_mode', newDemoMode ? 'true' : 'false');
+        location.reload();
+      } else {
+        e.target.checked = !newDemoMode;
+      }
+    });
+
+    // Load demo mode preference
+    const savedDemoMode = localStorage.getItem('demo_mode');
+    if (savedDemoMode !== null) {
+      DEMO_MODE = savedDemoMode === 'true';
+      document.getElementById('demo-mode-toggle').checked = DEMO_MODE;
+    }
+
+    // Update connection status
+    function updateConnectionStatus(connected) {
+      const statusEl = document.getElementById('connection-status');
+      if (DEMO_MODE) {
+        statusEl.textContent = '데모';
+        statusEl.className = 'status-value';
+      } else {
+        statusEl.textContent = connected ? '연결됨' : '연결 안됨';
+        statusEl.className = `status-value ${connected ? 'connected' : 'disconnected'}`;
+      }
+    }
 
     // Functions
+    async function initializeApp() {
+      // Initialize API client
+      apiClient = new ChatAPIClient(API_BASE_URL, authToken);
+
+      if (!DEMO_MODE) {
+        // 실제 API 모드: 토큰 확인 및 미션 상태 조회
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          apiClient.setToken(token);
+          authToken = token;
+          
+          try {
+            // 연결 테스트
+            const isConnected = await apiClient.testConnection();
+            updateConnectionStatus(isConnected);
+            
+            if (!isConnected) {
+              showConnectionError();
+              return;
+            }
+
+            // 미션 상태 조회
+            await loadMissionStatus();
+          } catch (error) {
+            console.error('초기화 실패:', error);
+            updateConnectionStatus(false);
+            showConnectionError();
+          }
+        } else {
+          // 토큰이 없으면 로그인 필요
+          updateConnectionStatus(false);
+          showLoginPrompt();
+        }
+      } else {
+        // 데모 모드: 시뮬레이션
+        updateConnectionStatus(true);
+        console.log('🎮 데모 모드로 실행 중 (시뮬레이션)');
+      }
+    }
+
+    async function loadMissionStatus() {
+      try {
+        const status = await apiClient.getMissionStatus();
+        
+        // 미션 정보 업데이트
+        currentMissionName = status.attempt?.mission_name || '미션 진행 중';
+        currentScore = status.current_score || 100;
+        questionCount = status.attempt?.hints_used || 0;
+        
+        updateScoreDisplay();
+        updatePenaltyNotice();
+        
+        // 헤더에 미션명 표시
+        document.querySelector('.header-info h3').textContent = currentMissionName;
+        
+        console.log('✅ 미션 상태 로드 완료:', status);
+      } catch (error) {
+        if (error.code === 'NOT_FOUND') {
+          // 진행 중인 미션이 없음
+          addMessage('system', '⚠️ 진행 중인 미션이 없습니다. 미션을 시작한 후 질문해주세요.', { systemClass: 'penalty' });
+          sendButton.disabled = true;
+          answerButton.disabled = true;
+        } else {
+          console.error('미션 상태 로드 실패:', error);
+          showError('미션 상태를 불러올 수 없습니다.');
+        }
+      }
+    }
+
+    function showLoginPrompt() {
+      addMessage('system', '🔐 로그인이 필요합니다. 토큰을 입력해주세요.', { systemClass: 'penalty' });
+      
+      // 간단한 토큰 입력 UI (실제로는 별도 로그인 페이지 사용)
+      const token = prompt('JWT 토큰을 입력하세요:');
+      if (token) {
+        localStorage.setItem('auth_token', token);
+        location.reload();
+      }
+    }
+
+    function showConnectionError() {
+      addMessage('system', '❌ Backend API에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.', { systemClass: 'penalty' });
+      sendButton.disabled = true;
+      answerButton.disabled = true;
+    }
+
+    function showError(message) {
+      addMessage('system', `❌ ${message}`, { systemClass: 'penalty' });
+    }
+
     function formatTime(date) {
       return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
     }
@@ -546,14 +762,86 @@
       const message = messageInput.value.trim();
       if (!message || isLoading) return;
 
-      // Calculate penalty before incrementing
-      const penalty = getNextPenalty();
-
       // Add user message
       addMessage('user', message);
       messageInput.value = '';
       isLoading = true;
       sendButton.disabled = true;
+
+      // Show typing indicator
+      showTypingIndicator();
+
+      try {
+        if (DEMO_MODE) {
+          // 데모 모드: 시뮬레이션 응답
+          await sendMessageDemo(message);
+        } else {
+          // 실제 API 모드
+          await sendMessageAPI(message);
+        }
+      } catch (error) {
+        hideTypingIndicator();
+        console.error('메시지 전송 실패:', error);
+        
+        if (error instanceof APIError) {
+          showError(error.message);
+          
+          // 인증 오류 시 로그인 프롬프트
+          if (error.code === 'UNAUTHORIZED') {
+            localStorage.removeItem('auth_token');
+            setTimeout(() => showLoginPrompt(), 1000);
+          }
+        } else {
+          showError('메시지 전송 중 오류가 발생했습니다.');
+        }
+      } finally {
+        isLoading = false;
+        sendButton.disabled = false;
+        messageInput.focus();
+      }
+    }
+
+    async function sendMessageAPI(message) {
+      try {
+        // Backend API 호출
+        const response = await apiClient.sendMessage(message, hintLevel);
+        
+        hideTypingIndicator();
+        
+        // AI 응답 표시
+        addMessage('assistant', response.response);
+        
+        // 미션 정보 업데이트
+        if (response.mission_name) {
+          currentMissionName = response.mission_name;
+          document.querySelector('.header-info h3').textContent = currentMissionName;
+        }
+        
+        // 힌트 레벨 증가 (0 -> 1 -> 2 -> 3)
+        hintLevel = Math.min(3, hintLevel + 1);
+        
+        // 질문 횟수 증가 및 점수 차감
+        if (!showedAnswer) {
+          const penalty = getNextPenalty();
+          currentScore = Math.max(0, currentScore - penalty);
+          questionCount++;
+          
+          addMessage('system', `💬 질문 ${questionCount}회 (점수 -${penalty}점)`, { systemClass: 'penalty' });
+          
+          updateScoreDisplay();
+          updatePenaltyNotice();
+        }
+        
+        console.log('✅ AI 응답 수신:', response);
+      } catch (error) {
+        hideTypingIndicator();
+        throw error;
+      }
+    }
+
+    async function sendMessageDemo(message) {
+      // Calculate penalty before incrementing
+      const penalty = getNextPenalty();
 
       // Apply penalty if not showing answer
       if (!showedAnswer) {
@@ -565,9 +853,6 @@
         updateScoreDisplay();
         updatePenaltyNotice();
       }
-
-      // Show typing indicator
-      showTypingIndicator();
 
       // Simulate AI response
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -591,10 +876,6 @@
       }
 
       addMessage('assistant', response);
-
-      isLoading = false;
-      sendButton.disabled = false;
-      messageInput.focus();
     }
 
     function showAnswer() {
@@ -602,6 +883,7 @@
 
       showedAnswer = true;
       currentScore = 0;
+      hintLevel = 3; // 최대 힌트 레벨
 
       addMessage('system', `🔓 답 보기 사용 (점수 0점 처리)`, { systemClass: 'zero-score' });
       
@@ -610,7 +892,7 @@
 
       // Show complete answer
       setTimeout(() => {
-        addMessage('user', '답을 보여주세요.');
+        messageInput.value = '답을 보여주세요.';
         sendMessage();
       }, 500);
     }
