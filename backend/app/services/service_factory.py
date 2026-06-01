@@ -1,5 +1,5 @@
 from app.core.config import settings
-from app.services.chaos_injector import BaseChaosInjector, MockChaosInjector
+from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.mission_service import MissionService
 from app.services.scoring_service import ScoringService
 from app.services.validation_service import BaseValidationService, MockValidationService
@@ -8,6 +8,8 @@ from app.services.validation_service import BaseValidationService, MockValidatio
 def create_chaos_injector() -> BaseChaosInjector:
     if settings.CHAOS_BACKEND == "mock":
         return MockChaosInjector()
+    if settings.CHAOS_BACKEND == "chaos_mesh":
+        return ChaosMeshInjector()
     raise ValueError(f"Unknown CHAOS_BACKEND: {settings.CHAOS_BACKEND}")
 
 

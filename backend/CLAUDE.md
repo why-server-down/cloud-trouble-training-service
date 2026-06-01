@@ -49,6 +49,9 @@ app/
 - `GET /api/auth/me` - 프로필 조회 (완료 미션 수, 총 점수 포함) 🔒
 - `POST /api/auth/logout` - 로그아웃 (204 반환, 토큰 삭제는 클라이언트 처리) 🔒
 
+### K8s 세션
+- `POST /api/terminal/sessions` - 터미널 세션 생성 + K8s 네임스페이스/nginx Pod 자동 생성 🔒
+
 ### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성
 - `WS /ws/terminal/{session_id}?token=JWT` - 웹 터미널
@@ -69,9 +72,17 @@ app/
   - 진행 중인 미션이 있어야 사용 가능
 
 ## 미션 시스템 아키텍처
-- Mock 패턴: Docker 환경에서는 MockChaosInjector, MockValidationService 사용
 - 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|prometheus`로 전환
-- K8s 이전 시 실제 구현체만 추가하면 코드 변경 없이 동작
+- `POST /api/terminal/sessions` 호출 시 K8s 네임스페이스(`user-{uuid}`) + nginx Deployment 자동 생성 (k8s_setup.py)
+- 미션 시작 시 해당 네임스페이스에 chaos 주입
+
+### Chaos Mesh 장애 주입 방식 (chaos_injector.py)
+| chaos_type | 방식 | 사용자 Fix |
+|---|---|---|
+| `pod_failure` | nginx 이미지를 `nginx:wrongtag`로 패치 → ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
+| `memory_stress` | nginx 메모리 limit을 10Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
+| `network_latency` | NetworkChaos로 2초 지연 주입 | Liveness Probe 추가 |
+| `service_misconfig` | webapp Deployment + 잘못된 selector의 Service 생성 | Service selector 수정 |
 
 ## AI 튜터 아키텍처
 - `ai-data/` 모듈을 sys.path로 동적 import (별도 패키지 설치 불필요)

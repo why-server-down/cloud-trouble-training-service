@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models import TerminalSession, User
 from app.schemas import SessionResponse
+from app.services.k8s_setup import get_k8s_setup_service
 from app.services.websocket_handler import WebSocketHandler
 
 router = APIRouter(tags=["terminal"])
@@ -20,9 +21,14 @@ async def create_session(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    namespace = f"user-{current_user.id}"
+
+    k8s = get_k8s_setup_service()
+    await k8s.setup_user_namespace(namespace)
+
     session = TerminalSession(
         user_id=current_user.id,
-        namespace=f"user-{current_user.id}",
+        namespace=namespace,
     )
     db.add(session)
     await db.commit()
