@@ -5,6 +5,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
         VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8000}
+        VITE_GRAFANA_BASE_URL: ${VITE_GRAFANA_BASE_URL:-http://localhost:3001}
     ports:
       - "3000:80"
     depends_on:
@@ -21,7 +22,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/k8s_survival
       SECRET_KEY: ${SECRET_KEY:-local-dev-secret-key}
       CHAOS_BACKEND: ${CHAOS_BACKEND:-mock}
-      VALIDATION_BACKEND: ${VALIDATION_BACKEND:-mock}
+      VALIDATION_BACKEND: ${VALIDATION_BACKEND:-prometheus}
+      PROMETHEUS_URL: http://prometheus:9090
       MOCK_VALIDATION_AUTO_PASS: ${MOCK_VALIDATION_AUTO_PASS:-false}
       AI_BACKEND: ${AI_BACKEND:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -82,8 +84,41 @@ services:
     profiles: ["monitoring"]
     ports:
       - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
     volumes:
       - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/recording_rules.yml:/etc/prometheus/recording_rules.yml:ro
+      - ./infra/monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    restart: unless-stopped
+
+  kube-state-metrics:
+    image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
+    profiles: ["monitoring"]
+    command:
+      - --kubeconfig=/etc/kubeconfig/config
+    volumes:
+      - ./.runtime/kubeconfig:/etc/kubeconfig/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  kube-api-proxy:
+    build: ./backend
+    profiles: ["monitoring"]
+    command:
+      - kubectl
+      - proxy
+      - --address=0.0.0.0
+      - --accept-hosts=.*
+      - --kubeconfig=/app/.kube/config
+    volumes:
+      - ./.runtime/kubeconfig:/app/.kube/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   grafana:
@@ -93,10 +128,55 @@ services:
       - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+      - loki
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.2
+    profiles: ["monitoring"]
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./infra/monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.5.0
+    profiles: ["monitoring"]
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/monitoring/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: ["monitoring"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infra/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
     restart: unless-stopped
 
 volumes:
   postgres_data:
   qdrant_data:
+  prometheus_data:
+  loki_data:
+  alertmanager_data:

@@ -1,8 +1,10 @@
 import React from 'react'
 import { UserProfileResponse } from '../../services/api'
+import DashboardOverview from './DashboardOverview'
 import './Profile.css'
 
 interface ProfileDetailsProps {
+  token: string
   profile: UserProfileResponse
   loading: boolean
   onBack: () => void
@@ -16,7 +18,7 @@ const formatDate = (date: string) =>
     day: 'numeric',
   }).format(new Date(date))
 
-const ProfileDetails: React.FC<ProfileDetailsProps> = ({ profile, loading, onBack, onRefresh }) => {
+const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading, onBack, onRefresh }) => {
   const averageScore =
     profile.missions_completed > 0 ? Math.round(profile.total_score / profile.missions_completed) : 0
 
@@ -77,6 +79,7 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ profile, loading, onBac
           </div>
         </dl>
       </div>
+      <DashboardOverview token={token} />
     </section>
   )
 }

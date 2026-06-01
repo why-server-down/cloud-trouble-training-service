@@ -5,6 +5,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Mission, MissionAttempt, User
+from app.core.metrics import MISSION_COMPLETIONS
 from app.services.chaos_injector import BaseChaosInjector
 from app.services.scoring_service import ScoringService
 from app.services.validation_service import BaseValidationService
@@ -162,6 +163,7 @@ class MissionService:
                 mission.base_score, attempt.start_time, now,
                 attempt.hints_used, mission.hint_penalty,
             )
+            MISSION_COMPLETIONS.labels(str(mission.level)).inc()
             await self._cleanup_chaos(attempt.id)
             await db.commit()
             await db.refresh(attempt)

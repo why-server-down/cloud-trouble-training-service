@@ -2,7 +2,12 @@ from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.mission_service import MissionService
 from app.services.scoring_service import ScoringService
-from app.services.validation_service import BaseValidationService, MockValidationService, K8sValidationService
+from app.services.validation_service import (
+    BaseValidationService,
+    K8sValidationService,
+    MockValidationService,
+    PrometheusValidationService,
+)
 
 
 def create_chaos_injector() -> BaseChaosInjector:
@@ -18,6 +23,8 @@ def create_validation_service() -> BaseValidationService:
         return MockValidationService(auto_pass=settings.MOCK_VALIDATION_AUTO_PASS)
     if settings.VALIDATION_BACKEND == "k8s":
         return K8sValidationService()
+    if settings.VALIDATION_BACKEND == "prometheus":
+        return PrometheusValidationService(settings.PROMETHEUS_URL)
     raise ValueError(f"Unknown VALIDATION_BACKEND: {settings.VALIDATION_BACKEND}")
 
 

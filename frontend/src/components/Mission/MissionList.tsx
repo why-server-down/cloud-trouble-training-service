@@ -29,6 +29,7 @@ interface Mission {
 
 interface MissionListProps {
   token: string
+  onActiveMissionChange: (hasActiveMission: boolean) => void
 }
 
 interface Confirmation {
@@ -39,7 +40,7 @@ interface Confirmation {
   action: () => Promise<void>
 }
 
-const MissionList: React.FC<MissionListProps> = ({ token }) => {
+const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange }) => {
   const [missions, setMissions] = useState<Mission[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
   const [hintsUsed, setHintsUsed] = useState(0)
@@ -54,21 +55,24 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
   const fetchMissions = useCallback(async () => {
     try {
       setError(null)
-      setMissions(await listMissions(token))
+      const missionList = await listMissions(token)
+      setMissions(missionList)
 
       try {
         const status = await getMissionStatus(token)
         setActiveMissionId(status.attempt.mission_id)
         setHintsUsed(status.attempt.hints_used)
+        onActiveMissionChange(true)
       } catch {
         setActiveMissionId(null)
         setHintsUsed(0)
+        onActiveMissionChange(false)
       }
     } catch (err) {
       console.error('미션 목록 조회 실패:', err)
       setError('미션 목록을 불러오지 못했습니다.')
     }
-  }, [token])
+  }, [onActiveMissionChange, token])
 
   useEffect(() => {
     void fetchMissions()
@@ -98,6 +102,7 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
           await startMission(token, missionId)
           setActiveMissionId(missionId)
           setHintsUsed(0)
+          onActiveMissionChange(true)
           setStatusRefreshKey((current) => current + 1)
           await fetchMissions()
           showToast('success', '미션을 시작했습니다. 터미널에서 문제를 해결해 보세요.')
@@ -125,6 +130,7 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
       if (result.attempt.status === 'completed') {
         setActiveMissionId(null)
         setHintsUsed(0)
+        onActiveMissionChange(false)
         await fetchMissions()
       }
     } catch (err) {
@@ -147,6 +153,7 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
           await abandonMission(token)
           setActiveMissionId(null)
           setHintsUsed(0)
+          onActiveMissionChange(false)
           await fetchMissions()
           showToast('info', '미션을 포기했습니다.')
         } catch (err) {
@@ -182,8 +189,9 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
   const handleMissionEnd = useCallback(() => {
     setActiveMissionId(null)
     setHintsUsed(0)
+    onActiveMissionChange(false)
     void fetchMissions()
-  }, [fetchMissions])
+  }, [fetchMissions, onActiveMissionChange])
 
   return (
     <div className="mission-panel">

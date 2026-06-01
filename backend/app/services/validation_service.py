@@ -1,5 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import asyncio
+import re
+
+import httpx
 
 
 RETRY_MESSAGE = "틀렸습니다. 다시 시도해 주세요."
@@ -44,6 +48,82 @@ class MockValidationService(BaseValidationService):
         self._resolved_namespaces.discard(namespace)
 
 
+class MissionValidationQueries:
+    NGINX_ROLLOUT_HEALTHY = """
+        kube_deployment_status_replicas_updated{{namespace="{namespace}",deployment="nginx"}}
+          == kube_deployment_spec_replicas{{namespace="{namespace}",deployment="nginx"}}
+        and kube_deployment_status_replicas_available{{namespace="{namespace}",deployment="nginx"}}
+          == kube_deployment_spec_replicas{{namespace="{namespace}",deployment="nginx"}}
+        and kube_deployment_status_replicas_unavailable{{namespace="{namespace}",deployment="nginx"}} == 0
+    """
+
+    QUERIES = {
+        "pod_failure": NGINX_ROLLOUT_HEALTHY,
+        "memory_stress": f"""
+            {NGINX_ROLLOUT_HEALTHY}
+            and on() (min(kube_pod_container_resource_limits{{
+                namespace="{{namespace}}",container="nginx",resource="memory"
+            }}) > 10 * 1024 * 1024)
+        """,
+        "service_misconfig": """
+            sum(kube_endpoint_address{
+                namespace="{namespace}",endpoint="webapp-svc",ready="true"
+            }) > 0
+        """,
+        "network_latency": """
+            sum(increase(prober_probe_total{
+                namespace="{namespace}",probe_type="Liveness",result="successful"
+            }[1m])) > 0
+        """,
+    }
+
+    @classmethod
+    def get_query(cls, chaos_type: str, namespace: str) -> str:
+        template = cls.QUERIES.get(chaos_type)
+        if not template:
+            raise ValueError(f"Unknown chaos_type: {chaos_type}")
+        if not re.fullmatch(r"[a-z0-9-]+", namespace):
+            raise ValueError("Invalid namespace")
+        query = template.replace("{namespace}", namespace)
+        return " ".join(query.replace("{{", "{").replace("}}", "}").split())
+
+
+class PrometheusClient:
+    def __init__(self, base_url: str):
+        self._base_url = base_url.rstrip("/")
+
+    async def query(self, query: str) -> dict:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(
+                f"{self._base_url}/api/v1/query",
+                params={"query": query},
+            )
+            response.raise_for_status()
+            return response.json()
+
+
+class PrometheusValidationService(BaseValidationService):
+    def __init__(self, base_url: str):
+        self._prometheus = PrometheusClient(base_url)
+
+    async def check_resolution(self, chaos_type: str, namespace: str) -> ValidationResult:
+        try:
+            query = MissionValidationQueries.get_query(chaos_type, namespace)
+            result = await self._prometheus.query(query)
+            if self._is_resolved(result):
+                return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
+        except Exception as e:
+            print(f"[Validation] Prometheus query failed for {chaos_type} in {namespace}: {e}")
+        return ValidationResult(is_resolved=False, message=RETRY_MESSAGE)
+
+    @staticmethod
+    def _is_resolved(result: dict) -> bool:
+        if result.get("status") != "success":
+            return False
+        values = result.get("data", {}).get("result", [])
+        return bool(values) and all(float(item["value"][1]) > 0 for item in values)
+
+
 class K8sValidationService(BaseValidationService):
     """Kubernetes API를 통해 실제 리소스 상태를 점검하여 장애 해결 여부를 판단"""
 
@@ -66,7 +146,6 @@ class K8sValidationService(BaseValidationService):
         return ValidationResult(is_resolved=False, message=RETRY_MESSAGE)
 
     async def check_resolution(self, chaos_type: str, namespace: str) -> ValidationResult:
-        import asyncio
         loop = asyncio.get_event_loop()
         try:
             result = await loop.run_in_executor(

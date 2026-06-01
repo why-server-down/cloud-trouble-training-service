@@ -105,6 +105,61 @@ export const login = async (username: string, password: string): Promise<LoginRe
   return response.json()
 }
 
+export interface TierInfo {
+  name: string
+  min_score: number
+  max_score: number | null
+  color: string
+  progress: number
+  next_tier: string | null
+}
+
+export interface DashboardStatsResponse {
+  username: string
+  total_score: number
+  missions_completed: number
+  total_time_spent: number
+  hints_used: number
+  current_tier: TierInfo
+  skill_scores: Record<'troubleshooting' | 'resource' | 'network' | 'ops', number>
+}
+
+export interface LearningCurveEntry {
+  attempt_id: string
+  mission_id: string
+  mission_name: string
+  attempt_number: number
+  completion_time: number
+  score: number
+  hints_used: number
+  completed_at: string
+}
+
+export interface LeaderboardEntry {
+  rank: number
+  user_id: string
+  username: string
+  total_score: number
+  missions_completed: number
+  is_current_user: boolean
+}
+
+export interface AchievementItem {
+  id: string
+  name: string
+  description: string
+  points_bonus: number
+  is_hidden: boolean
+  unlocked: boolean
+}
+
+export interface AchievementsResponse {
+  unlocked: number
+  total: number
+  progress: number
+  items: AchievementItem[]
+}
+
 export const register = async (username: string, password: string): Promise<RegisterResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
     method: 'POST',
@@ -274,3 +329,29 @@ export const askTutor = async (token: string, message: string, hintLevel: number
 
   return response.json()
 }
+
+const getAuthorizedJson = async <T>(token: string, path: string, fallback: string): Promise<T> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorDetail(response, fallback))
+  }
+
+  return response.json()
+}
+
+export const getDashboardStats = (token: string) =>
+  getAuthorizedJson<DashboardStatsResponse>(token, '/api/dashboard/stats', 'Failed to load dashboard stats.')
+
+export const getLearningCurve = (token: string) =>
+  getAuthorizedJson<LearningCurveEntry[]>(token, '/api/dashboard/learning-curve', 'Failed to load learning curve.')
+
+export const getLeaderboard = (token: string) =>
+  getAuthorizedJson<LeaderboardEntry[]>(token, '/api/leaderboard?limit=10', 'Failed to load leaderboard.')
+
+export const getAchievements = (token: string) =>
+  getAuthorizedJson<AchievementsResponse>(token, '/api/achievements', 'Failed to load achievements.')
