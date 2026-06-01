@@ -12,7 +12,7 @@ class ValidationResult:
 
 class CommandValidator:
     ALLOWED_COMMANDS = [
-        "get", "describe", "logs", "edit", "apply", "delete",
+        "get", "describe", "logs", "edit", "apply", "delete", "set", "patch",
         "exec", "port-forward", "top", "explain",
         "help", "version", "api-resources", "api-versions",
     ]

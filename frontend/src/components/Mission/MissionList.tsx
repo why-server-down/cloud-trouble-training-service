@@ -200,7 +200,7 @@ const MissionList: React.FC<MissionListProps> = ({ token }) => {
       {activeMissionId && (
         <>
           <MissionStatus token={token} refreshKey={statusRefreshKey} loading={loading} onStatusChange={handleStatusChange} onMissionEnd={handleMissionEnd} onCheck={handleCheckMission} onAbandon={handleAbandonMission} onHint={handleUseHint} />
-          <TutorChat token={token} missionId={activeMissionId} hintsUsed={hintsUsed} />
+          <TutorChat token={token} missionId={activeMissionId} hintsUsed={hintsUsed} disabled={loading} />
         </>
       )}
       {confirmation && <ConfirmModal title={confirmation.title} message={confirmation.message} confirmLabel={confirmation.confirmLabel} danger={confirmation.danger} onConfirm={() => void runConfirmedAction()} onCancel={() => setConfirmation(null)} />}
