@@ -14,15 +14,15 @@
 - Infra: Kubernetes, Chaos Mesh
 - Monitoring: Prometheus, Grafana Cloud
 
-## 구현 현황 (2026-05-28 기준)
+## 구현 현황 (2026-06-01 기준)
 - [x] 회원가입 / 로그인 (JWT)
 - [x] 로그아웃 / 프로필 조회 API
 - [x] 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
 - [x] 미션 시스템 (목록/시작/상태/완료/포기/힌트, 4개 레벨)
 - [x] 점수 계산 (시간 감점 + 힌트 감점)
 - [x] AI 튜터 채팅 API (Mock 패턴, 시나리오별 소크라테스식 힌트)
-- [x] RAG AI 엔진 (ai-data/ - LangChain + ChromaDB + GPT)
-- [ ] Chaos Mesh 실제 연동 (현재 Mock)
+- [x] RAG AI 엔진 (ai-data/ - LangChain + Qdrant + GPT)
+- [x] Chaos Mesh 연동 (로그인 시 사용자 네임스페이스 + nginx Pod 자동 생성)
 - [ ] Prometheus 검증 실제 연동 (현재 Mock)
 - [ ] AWS EKS 배포
 - [ ] AI 튜터 OpenAI 실제 연동

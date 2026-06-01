@@ -74,21 +74,46 @@ npm run dev
 
 ## 🛠️ 기술 스택
 
-- **Frontend**: React, Next.js
-- **Backend**: FastAPI, Python
-- **AI**: LangChain, ChromaDB (RAG)
+- **Frontend**: React, xterm.js
+- **Backend**: FastAPI, Python, SQLAlchemy async, PostgreSQL
+- **AI**: LangChain, Qdrant (RAG), OpenAI GPT
 - **Infrastructure**: Kubernetes, Chaos Mesh
-- **Monitoring**: Prometheus, Grafana, Loki
+- **Monitoring**: Prometheus, Grafana Cloud
 - **Container**: Docker, Docker Compose
 
 ## 📚 주요 기능
 
-- ⚡ Chaos Engineering 기반 장애 시뮬레이션
-- 🤖 AI 기반 장애 분석 및 대응 가이드
-- 📊 실시간 모니터링 및 메트릭 수집
-- 💰 FinOps 최적화 제안
-- 🔄 자동 복구(Self-Healing) 기능
+- ⚡ Chaos Mesh 기반 실제 K8s 장애 주입 (pod_failure / memory_stress / network_latency / service_misconfig)
+- 🤖 AI 튜터 (소크라테스식 힌트, RAG 기반 지식 검색)
+- 🖥️ 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
+- 🎮 미션 시스템 (4개 레벨, 점수 계산, 힌트 감점)
+- 👤 사용자별 전용 K8s 네임스페이스 자동 생성
+
+## 🚀 빠른 시작 (로컬)
+
+**사전 요구사항:**
+- Docker Desktop (Kubernetes 활성화)
+- Helm
+
+```bash
+# 1. Chaos Mesh 설치 (최초 1회)
+helm repo add chaos-mesh https://charts.chaos-mesh.org
+helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-testing --create-namespace \
+  --set chaosDaemon.runtime=containerd \
+  --set chaosDaemon.socketPath=/run/containerd/containerd.sock
+
+# 2. PostgreSQL 실행
+docker compose up postgres -d
+
+# 3. 백엔드 실행
+cd backend
+pip install -r requirements.txt
+echo "CHAOS_BACKEND=chaos_mesh" > .env
+uvicorn app.main:app --reload --reload-dir app --port 8000
+```
 
 ## 📖 문서
 
-자세한 내용은 [docs/proposal.md](docs/proposal.md)를 참고하세요.
+- API 연동 가이드: [docs/api-guide.md](docs/api-guide.md)
+- 백엔드 구조: [backend/CLAUDE.md](backend/CLAUDE.md)
+- 기획서: [docs/proposal.md](docs/proposal.md)

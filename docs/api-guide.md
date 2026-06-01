@@ -65,7 +65,38 @@ username=student1&password=mypassword123
 
 ---
 
-### 1-3. 인증 토큰 사용법
+### 1-3. 로그아웃
+
+```
+POST /api/auth/logout
+Authorization: Bearer {token}
+```
+
+**Response (204):** 빈 응답. 프론트엔드에서 localStorage의 토큰을 삭제해야 합니다.
+
+---
+
+### 1-4. 프로필 조회
+
+```
+GET /api/auth/me
+Authorization: Bearer {token}
+```
+
+**Response (200):**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "student1",
+  "created_at": "2026-02-14T12:00:00Z",
+  "missions_completed": 3,
+  "total_score": 270
+}
+```
+
+---
+
+### 1-5. 인증 토큰 사용법
 
 로그인 후 받은 `access_token`을 모든 인증 필요 API에 헤더로 전달:
 
@@ -82,6 +113,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ### 2-1. 세션 생성
 
 터미널 WebSocket 연결 전에 반드시 세션을 먼저 생성해야 합니다.
+
+> **K8s 자동 설정 포함:** 호출 시 사용자 전용 K8s 네임스페이스(`user-{uuid}`)와 nginx Deployment가 자동으로 생성됩니다. 이미 존재하면 스킵합니다.
 
 ```
 POST /api/terminal/sessions
@@ -651,16 +684,43 @@ const useHintWithChat = async (token: string, hintLevel: number) => {
 
 ---
 
-## 7. 로컬 개발 환경 실행
+## 7. 허용된 kubectl 명령어 (set image 추가)
+
+| 명령어 | 설명 |
+|--------|------|
+| `kubectl get` | 리소스 목록 조회 |
+| `kubectl describe` | 리소스 상세 정보 |
+| `kubectl logs` | 파드 로그 조회 |
+| `kubectl edit` | 리소스 편집 |
+| `kubectl apply` | 리소스 적용 |
+| `kubectl delete` | 리소스 삭제 (확인 필요) |
+| `kubectl exec` | 파드 내 명령 실행 |
+| `kubectl port-forward` | 포트 포워딩 |
+| `kubectl top` | 리소스 사용량 |
+| `kubectl explain` | 리소스 필드 설명 |
+| `kubectl set image` | 컨테이너 이미지 변경 (pod_failure 미션 fix용) |
+| `kubectl patch` | 리소스 부분 수정 (memory_stress 미션 fix용) |
+
+---
+
+## 8. 로컬 개발 환경 실행
+
+**사전 요구사항:**
+- Docker Desktop (Kubernetes 활성화 필수)
+- Chaos Mesh 설치: `helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-testing`
 
 ```bash
 # 프로젝트 루트에서
-docker-compose up -d postgres
+docker compose up postgres -d
 
 # 백엔드 실행
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+
+# backend/.env 파일 생성
+echo "CHAOS_BACKEND=chaos_mesh" > .env
+
+uvicorn app.main:app --reload --reload-dir app --port 8000
 
 # 확인
 curl http://localhost:8000/health
