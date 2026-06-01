@@ -1,17 +1,50 @@
+:root {
+  font-family: "IBM Plex Sans KR", "Segoe UI", Arial, sans-serif;
+  color: #e5dfd0;
+  background: #0d1110;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --bg: #0d1110;
+  --surface: #141a18;
+  --surface-raised: #1a211f;
+  --line: #303a36;
+  --line-strong: #4b5b54;
+  --text: #e5dfd0;
+  --muted: #8f9a93;
+  --faint: #65716c;
+  --accent: #e88745;
+  --accent-soft: #3a281d;
+  --ok: #8eae73;
+  --danger: #d46a5c;
+  --warning: #d5a34a;
+  --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
 * {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #1e1e1e;
-  color: #ffffff;
+  color: var(--text);
+  background:
+    linear-gradient(rgba(110, 132, 123, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(110, 132, 123, 0.045) 1px, transparent 1px),
+    var(--bg);
+  background-size: 24px 24px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 #root {

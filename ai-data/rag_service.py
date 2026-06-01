@@ -101,11 +101,11 @@ class RAGService:
             if use_memory:
                 # In-memory mode for testing
                 self.client = QdrantClient(":memory:")
-            elif qdrant_url:
+            elif qdrant_url or config.QDRANT_URL:
                 # Connect to Qdrant server (local or cloud)
                 self.client = QdrantClient(
-                    url=qdrant_url,
-                    api_key=qdrant_api_key
+                    url=qdrant_url or config.QDRANT_URL,
+                    api_key=qdrant_api_key or config.QDRANT_API_KEY or None
                 )
             else:
                 # Default: connect to local Qdrant server
