@@ -7,7 +7,7 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 - Python 3.11, FastAPI, Pydantic v2
 - SQLAlchemy async + PostgreSQL (asyncpg)
 - JWT 인증 (python-jose, passlib)
-- LangChain + ChromaDB (RAG)
+- LangChain + Qdrant (RAG)
 - Kubernetes Python Client
 - WebSocket (실시간 터미널)
 
@@ -31,9 +31,11 @@ app/
 │   ├── command_executor.py    # kubectl 비동기 실행
 │   ├── websocket_handler.py   # WebSocket 연결
 │   ├── mission_service.py     # 미션 오케스트레이터 (시작/완료/포기/점수)
-│   ├── chaos_injector.py      # 장애 주입 (ABC + Mock 구현)
-│   ├── validation_service.py  # 해결 검증 (ABC + Mock 구현)
+│   ├── chaos_injector.py      # 장애 주입 (Mock | ChaosMesh)
+│   ├── validation_service.py  # 해결 검증 (Mock | K8s API | Prometheus)
 │   ├── scoring_service.py     # 점수 계산 (시간/힌트 감점)
+│   ├── analytics_service.py   # 대시보드/리더보드/업적/티어 계산
+│   ├── k8s_setup.py           # 사용자 K8s 네임스페이스 자동 생성
 │   ├── service_factory.py     # 환경변수 기반 서비스 팩토리
 │   └── seed_data.py           # 미션 초기 데이터 (4개 레벨)
 └── ai/
@@ -49,11 +51,8 @@ app/
 - `GET /api/auth/me` - 프로필 조회 (완료 미션 수, 총 점수 포함) 🔒
 - `POST /api/auth/logout` - 로그아웃 (204 반환, 토큰 삭제는 클라이언트 처리) 🔒
 
-### K8s 세션
-- `POST /api/terminal/sessions` - 터미널 세션 생성 + K8s 네임스페이스/nginx Pod 자동 생성 🔒
-
 ### 터미널
-- `POST /api/terminal/sessions` - 터미널 세션 생성
+- `POST /api/terminal/sessions` - 터미널 세션 생성 + K8s 네임스페이스/nginx Pod 자동 생성 🔒
 - `WS /ws/terminal/{session_id}?token=JWT` - 웹 터미널
 
 ### 미션
@@ -65,6 +64,12 @@ app/
 - `POST /api/missions/hint` - 힌트 사용
 - `POST /api/missions/debug/resolve` - (Mock 전용) 수동 해결
 
+### 대시보드 / 게이미피케이션
+- `GET /api/dashboard/stats` - 내 통계 (총 점수, 티어, 스킬 점수) 🔒
+- `GET /api/dashboard/learning-curve` - 미션 시도 히스토리 🔒
+- `GET /api/leaderboard` - 전체 리더보드 🔒
+- `GET /api/achievements` - 업적 목록 및 달성 여부 🔒
+
 ### AI 튜터
 - `POST /api/chat/` - AI 튜터에게 질문 (소크라테스식 힌트)
   - Request: `{ "message": str, "hint_level": 0~3 }`
@@ -72,7 +77,7 @@ app/
   - 진행 중인 미션이 있어야 사용 가능
 
 ## 미션 시스템 아키텍처
-- 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|prometheus`로 전환
+- 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|k8s|prometheus`로 전환
 - `POST /api/terminal/sessions` 호출 시 K8s 네임스페이스(`user-{uuid}`) + nginx Deployment 자동 생성 (k8s_setup.py)
 - 미션 시작 시 해당 네임스페이스에 chaos 주입
 
@@ -80,9 +85,21 @@ app/
 | chaos_type | 방식 | 사용자 Fix |
 |---|---|---|
 | `pod_failure` | nginx 이미지를 `nginx:wrongtag`로 패치 → ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
-| `memory_stress` | nginx 메모리 limit을 10Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
+| `memory_stress` | nginx 메모리 limit을 6Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
 | `network_latency` | NetworkChaos로 2초 지연 주입 | Liveness Probe 추가 |
 | `service_misconfig` | webapp Deployment + 잘못된 selector의 Service 생성 | Service selector 수정 |
+
+### 검증 백엔드 (validation_service.py)
+| VALIDATION_BACKEND | 설명 |
+|---|---|
+| `mock` | 인메모리 수동 해결 (개발용, MOCK_VALIDATION_AUTO_PASS=true 가능) |
+| `k8s` | Kubernetes API로 실제 리소스 상태 검증 |
+| `prometheus` | Prometheus PromQL로 메트릭 기반 검증 |
+
+### 게이미피케이션 (analytics_service.py)
+- 티어: Bronze(0) → Silver(201) → Gold(501) → Platinum(1001) → DevOps Master(2001+)
+- 업적: First Recovery, Environmentalist(힌트 없이 클리어), Speed Runner(5분 이내), Persistent Resolver(10회 시도)
+- 스킬 점수: troubleshooting / resource / network / ops 카테고리별 계산
 
 ## AI 튜터 아키텍처
 - `ai-data/` 모듈을 sys.path로 동적 import (별도 패키지 설치 불필요)
@@ -106,8 +123,9 @@ uvicorn app.main:app --reload --port 8000
 
 ## 의존 서비스
 - PostgreSQL: localhost:5432 (k8s_survival DB)
-- ChromaDB: localhost:8001 (벡터 DB)
-- Prometheus: localhost:9090 (메트릭)
+- Qdrant: localhost:6333 (벡터 DB)
+- Prometheus: localhost:9090 (메트릭, 모니터링 프로필 실행 시)
+- Grafana: localhost:3001 (대시보드, 모니터링 프로필 실행 시)
 
 ## 테스트
 ```bash

@@ -10,11 +10,11 @@
 ## 기술 스택
 - Frontend: React (xterm.js 터미널, 채팅 UI)
 - Backend: FastAPI, SQLAlchemy async, PostgreSQL
-- AI: LangChain + OpenAI (소크라테스식 튜터), ChromaDB (RAG)
+- AI: LangChain + OpenAI (소크라테스식 튜터), Qdrant (RAG)
 - Infra: Kubernetes, Chaos Mesh
-- Monitoring: Prometheus, Grafana Cloud
+- Monitoring: Prometheus, Grafana, Loki, Promtail, AlertManager
 
-## 구현 현황 (2026-06-01 기준)
+## 구현 현황 (2026-06-03 기준)
 - [x] 회원가입 / 로그인 (JWT)
 - [x] 로그아웃 / 프로필 조회 API
 - [x] 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
@@ -23,7 +23,11 @@
 - [x] AI 튜터 채팅 API (Mock 패턴, 시나리오별 소크라테스식 힌트)
 - [x] RAG AI 엔진 (ai-data/ - LangChain + Qdrant + GPT)
 - [x] Chaos Mesh 연동 (로그인 시 사용자 네임스페이스 + nginx Pod 자동 생성)
-- [ ] Prometheus 검증 실제 연동 (현재 Mock)
+- [x] K8s API 기반 실제 검증 (K8sValidationService)
+- [x] Prometheus 기반 검증 (PrometheusValidationService)
+- [x] 대시보드 / 리더보드 / 업적 시스템
+- [x] 티어 시스템 (Bronze → Silver → Gold → Platinum → DevOps Master)
+- [x] 모니터링 스택 (Prometheus + Grafana + Loki + Promtail + AlertManager)
 - [ ] AWS EKS 배포
 - [ ] AI 튜터 OpenAI 실제 연동
 
@@ -49,10 +53,25 @@ open http://localhost:8000/docs
 ## 환경변수 (.env)
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
-AI_BACKEND=mock          # mock | openai
-OPENAI_API_KEY=          # openai 모드일 때 필요
-CHAOS_BACKEND=mock       # mock | chaos_mesh
-VALIDATION_BACKEND=mock  # mock | prometheus
+AI_BACKEND=mock              # mock | openai
+OPENAI_API_KEY=              # openai 모드일 때 필요
+CHAOS_BACKEND=mock           # mock | chaos_mesh
+VALIDATION_BACKEND=mock      # mock | k8s | prometheus
+MOCK_VALIDATION_AUTO_PASS=false
+
+# 프론트엔드 (Vite 빌드 시)
+VITE_API_BASE_URL=http://localhost:8000
+VITE_WS_BASE_URL=ws://localhost:8000
+VITE_GRAFANA_BASE_URL=http://localhost:3001
+```
+
+## 모니터링 스택 실행
+```bash
+# 모니터링 프로필로 실행 (Prometheus + Grafana + Loki 포함)
+docker compose --profile monitoring up -d
+
+# Grafana: http://localhost:3001 (admin/admin)
+# Prometheus: http://localhost:9090
 ```
 
 ## 규칙
