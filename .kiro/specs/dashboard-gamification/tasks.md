@@ -1,5 +1,37 @@
 # Dashboard & Gamification System - Tasks
 
+## Current Implementation Status
+
+### Implemented
+- [x] Calculate dashboard statistics from existing `mission_attempts` records
+- [x] Calculate normalized skill scores for troubleshooting, resources, network, and operations
+- [x] Calculate Bronze, Silver, Gold, Platinum, and DevOps Master tiers with progress
+- [x] Return completion-time learning curve data
+- [x] Return all-time leaderboard data and highlight the current user
+- [x] Evaluate first recovery, no-hints, speed-runner, and retry achievements
+- [x] Expose dashboard stats, learning curve, leaderboard, and achievement APIs
+- [x] Render tier progress, SVG skill radar, learning curve, Top 10 leaderboard, and achievements
+- [x] Refresh the learning dashboard every 15 seconds
+- [x] Show the learning dashboard in the main workspace when no mission is active
+- [x] Show Grafana observability panels in the same workspace slot while a mission is active
+- [x] Add tier boundary and progress tests
+
+### Remaining Work
+- [ ] Persist `UserStats`, `MissionCompletion`, `Achievement`, `UserAchievement`, and `LeaderboardEntry` tables
+- [ ] Add Alembic migrations and indexes for persisted statistics
+- [ ] Add Redis caching for leaderboard queries
+- [ ] Add weekly and monthly leaderboard periods
+- [ ] Persist achievement unlock events and apply bonus points to the user score
+- [ ] Add tier-upgrade and achievement-unlock notifications
+- [ ] Replace 15-second polling with WebSocket score updates
+- [ ] Add score deduction and completion celebration animations
+- [ ] Add learning-curve hint bars, tooltips, percentile rank, and improvement percentages
+- [ ] Add skill-radar tooltips and related-mission drill-down
+- [ ] Add leaderboard period selector and Top 100 pagination
+- [ ] Add frontend component tests, API integration tests, and property-based tests
+
+> The sections below preserve the original implementation checklist. Completed items above describe the current usable first version; unchecked items below remain the target architecture where they are more detailed.
+
 ## Phase 1: Database Setup
 
 ### Task 1: Database Schema Implementation

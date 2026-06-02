@@ -100,3 +100,10 @@ scope, so they are recorded here for coordination.
 - [x] Align Qdrant usage in `ai-data` with backend dependencies and Docker Compose services.
 - [x] Replace the Compose frontend `NEXT_PUBLIC_API_URL` variable with Vite build configuration.
 - [ ] Validate WebSocket terminal session ownership on the backend.
+
+## Phase 10: Mock/Debug Support & Integration Alignments
+
+- [x] **Add Developer Mode Mock Resolution**: Add API helper in `src/services/api.ts` for `POST /api/missions/debug/resolve` and add a "Mock Resolve" button visible under mock validation settings to improve frontend manual flow testing without Chaos Mesh.
+- [x] **Tutor Input Lockdown on Inactive Missions**: Disable user input field and submit button in `TutorChat.tsx` when no active mission is in progress to prevent API errors (400 Bad Request).
+- [ ] **Refine Dynamic WebSocket Scheme Mapping**: Allow `useTerminalWebSocket` to fallback dynamically to WebSocket protocol based on `window.location` if `VITE_WS_BASE_URL` is omitted, simplifying cross-environment setups.
+

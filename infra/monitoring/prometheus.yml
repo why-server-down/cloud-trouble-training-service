@@ -1,7 +1,37 @@
 global:
-  scrape_interval: 15s
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    cluster: k8s-survival-camp
+
+rule_files:
+  - /etc/prometheus/recording_rules.yml
+  - /etc/prometheus/alert_rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
 
 scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  - job_name: kube-state-metrics
+    static_configs:
+      - targets: ["kube-state-metrics:8080"]
+
+  - job_name: backend
+    static_configs:
+      - targets: ["backend:8000"]
+
+  - job_name: kubernetes-cadvisor
+    metrics_path: /api/v1/nodes/desktop-control-plane/proxy/metrics/cadvisor
+    static_configs:
+      - targets: ["kube-api-proxy:8001"]
+
+  - job_name: kubernetes-kubelet-probes
+    metrics_path: /api/v1/nodes/desktop-control-plane/proxy/metrics/probes
+    static_configs:
+      - targets: ["kube-api-proxy:8001"]

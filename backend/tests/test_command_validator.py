@@ -36,6 +36,20 @@ class TestAllowedCommands:
         result = validator.validate_command("kubectl explain pod", NAMESPACE)
         assert result.is_valid
 
+    def test_set_image(self, validator):
+        result = validator.validate_command(
+            "kubectl set image deployment/nginx nginx=nginx:latest", NAMESPACE
+        )
+        assert result.is_valid
+        assert f"-n {NAMESPACE}" in result.command
+
+    def test_patch(self, validator):
+        result = validator.validate_command(
+            'kubectl patch deployment/nginx -p "{\\"spec\\": {}}"', NAMESPACE
+        )
+        assert result.is_valid
+        assert f"-n {NAMESPACE}" in result.command
+
 
 class TestBlockedCommands:
     def test_non_kubectl(self, validator):

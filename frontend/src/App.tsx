@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
+import DashboardOverview from './components/Profile/DashboardOverview'
 import ProfileDetails from './components/Profile/ProfileDetails'
 import Terminal from './components/Terminal/Terminal'
 import {
@@ -13,6 +14,11 @@ import {
 import './App.css'
 
 type WorkspaceTab = 'missions' | 'terminal'
+const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
+const DASHBOARD_UID = 'k8s-survival-overview'
+
+const getGrafanaUrl = (namespace: string | null) =>
+  `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/${DASHBOARD_UID}?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
@@ -23,12 +29,16 @@ function App() {
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [hasActiveMission, setHasActiveMission] = useState(false)
+  const [isGrafanaLoading, setIsGrafanaLoading] = useState(false)
+  const grafanaUrl = getGrafanaUrl(namespace)
 
   const clearAuthState = useCallback(() => {
     setToken(null)
     setSessionId(null)
     setNamespace(null)
     setProfile(null)
+    setHasActiveMission(false)
     setActiveTab('missions')
     setIsProfileOpen(false)
     localStorage.removeItem('token')
@@ -94,6 +104,10 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [activeTab])
 
+  useEffect(() => {
+    setIsGrafanaLoading(hasActiveMission)
+  }, [grafanaUrl, hasActiveMission])
+
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
     setSessionId(newSessionId)
@@ -137,7 +151,7 @@ function App() {
       </header>
       <main className="app-main">
         {isProfileOpen && profile ? (
-          <ProfileDetails profile={profile} loading={isProfileLoading} onBack={() => setIsProfileOpen(false)} onRefresh={() => void loadProfile()} />
+          <ProfileDetails token={token} profile={profile} loading={isProfileLoading} onBack={() => setIsProfileOpen(false)} onRefresh={() => void loadProfile()} />
         ) : (
           <div className="workspace">
             <nav className="workspace-tabs" aria-label="작업 화면">
@@ -145,8 +159,72 @@ function App() {
               <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
             </nav>
             <div className="app-layout">
-              <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`}><MissionList token={token} /></div>
-              <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}><Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} /></div>
+              <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`}><MissionList token={token} onActiveMissionChange={setHasActiveMission} /></div>
+              <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
+                <div className="terminal-workspace">
+                  {hasActiveMission ? (
+                    <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
+                  ) : (
+                    <section className="tutorial-panel">
+                      <div className="tutorial-panel-header">
+                        <span className="terminal-label">GETTING STARTED / FIELD GUIDE</span>
+                      </div>
+                      <div className="tutorial-content">
+                        <span className="tutorial-kicker">K8s SURVIVAL CAMP</span>
+                        <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
+                        <p>왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다. 오른쪽 대시보드와 Kubernetes 명령을 함께 사용해 원인을 찾아보세요.</p>
+                        <div className="tutorial-steps">
+                          <article>
+                            <strong>01 / 미션 선택</strong>
+                            <span>왼쪽에서 잠금 해제된 미션을 고르고 시작합니다.</span>
+                          </article>
+                          <article>
+                            <strong>02 / 상태 조사</strong>
+                            <span>Pod, Deployment, Service 상태와 이벤트를 차례로 확인합니다.</span>
+                          </article>
+                          <article>
+                            <strong>03 / 복구 및 검증</strong>
+                            <span>원인을 수정한 뒤 미션 패널에서 완료 확인을 실행합니다.</span>
+                          </article>
+                        </div>
+                        <div className="tutorial-commands">
+                          <span>INVESTIGATION STARTERS</span>
+                          <code>kubectl get pods</code>
+                          <code>kubectl get deployments</code>
+                          <code>kubectl get services</code>
+                          <code>kubectl get events --sort-by=.metadata.creationTimestamp</code>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                  <section className="grafana-panel">
+                    <div className="grafana-panel-header">
+                      <span className="terminal-label">{hasActiveMission ? 'OBSERVABILITY / GRAFANA' : 'PROFILE / LEARNING DASHBOARD'}</span>
+                      {hasActiveMission && <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>}
+                    </div>
+                    {hasActiveMission ? (
+                      <div className="grafana-frame-wrap">
+                        <iframe
+                          className="grafana-frame"
+                          src={grafanaUrl}
+                          title="Grafana dashboard"
+                          onLoad={() => setIsGrafanaLoading(false)}
+                        />
+                        {isGrafanaLoading && (
+                          <div className="grafana-loading-overlay" role="status" aria-live="polite">
+                            <strong>대시보드를 불러오고 있습니다.</strong>
+                            <span>잠시만 기다려주세요..</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="workspace-dashboard">
+                        <DashboardOverview token={token} />
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </div>
             </div>
           </div>
         )}

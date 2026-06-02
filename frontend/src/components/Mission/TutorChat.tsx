@@ -5,6 +5,7 @@ interface TutorChatProps {
   token: string
   missionId: string
   hintsUsed: number
+  disabled?: boolean
 }
 
 interface ChatMessage {
@@ -14,12 +15,13 @@ interface ChatMessage {
 
 const initialMessages: ChatMessage[] = [{ role: 'assistant', text: '막힌 지점을 질문해 주세요. 정답보다 다음 확인 순서를 먼저 제안합니다.' }]
 
-const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) => {
+const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed, disabled }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const hintLevel = Math.min(hintsUsed, 3)
+  const isChatDisabled = loading || !missionId || disabled
 
   useEffect(() => {
     setMessages(initialMessages)
@@ -30,7 +32,7 @@ const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) =>
   const submitQuestion = async (event: React.FormEvent) => {
     event.preventDefault()
     const question = input.trim()
-    if (!question || loading) return
+    if (!question || isChatDisabled) return
 
     setInput('')
     setLoading(true)
@@ -56,8 +58,8 @@ const TutorChat: React.FC<TutorChatProps> = ({ token, missionId, hintsUsed }) =>
       </div>
       {error && <div className="chat-error">{error}</div>}
       <form className="chat-form" onSubmit={submitQuestion}>
-        <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="어떤 명령으로 원인을 찾아야 하나요?" disabled={loading} />
-        <button type="submit" disabled={loading || !input.trim()}>질문</button>
+        <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={isChatDisabled ? "질문할 수 없는 상태입니다 (API 통신 중 등)" : "어떤 명령으로 원인을 찾아야 하나요?"} disabled={isChatDisabled} />
+        <button type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
       </form>
     </section>
   )

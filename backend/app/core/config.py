@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
-    VALIDATION_BACKEND: str = "mock"  # "mock" | "prometheus"
+    VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
     PROMETHEUS_URL: str = "http://localhost:9090"
     MOCK_VALIDATION_AUTO_PASS: bool = False
 
