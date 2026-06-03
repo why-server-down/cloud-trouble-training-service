@@ -1,5 +1,25 @@
 # AI Agent Implementation Plan
 
+## 캡스톤 로드맵
+
+이 구현 계획은 캡스톤 1과 캡스톤 2로 나뉜다.
+
+### 캡스톤 1 - Kubernetes 완성
+
+- 기존 4개 고정 미션 튜토리얼로 유지
+- AI 장애 생성 모드 추가 (이 문서의 핵심)
+- Grafana 패널 실무형 완성 (cAdvisor 추가로 CPU/Memory/Network 실사용 메트릭)
+- 검증 안정화 (`VALIDATION_BACKEND=k8s` 실 테스트)
+- 미션 4 (network_latency) 재설계
+
+### 캡스톤 2 - 멀티 환경 고도화
+
+- 탭 분리: Kubernetes / Docker-only / Linux / Application
+- 각 환경별 `BaseChaosInjector` 구현체 추가
+- 현재 ABC 구조가 확장을 고려해 설계되어 있어 캡스톤 2 진입 시 자연스럽게 붙인다
+
+---
+
 ## 목표
 
 이 프로젝트를 정적 미션 기반의 Kubernetes 장애 훈련 서비스에서, AI가 장애 시나리오 생성, 장애 주입 계획, 검증 조건 생성, 로그 기반 튜터링, RAG 지식 검색까지 담당하는 동적 클라우드 장애 대응 훈련 플랫폼으로 개편한다.
@@ -42,6 +62,31 @@
 6. 사용자는 기존과 같은 터미널, 튜터, 검증 버튼으로 문제를 푼다.
 
 즉 정적 미션을 대체하지 않고, 기본 미션 완료 후 계속 연습할 수 있는 무한 문제 생성 모드로 붙인다.
+
+**잠금 해제 조건**: 기본 4개 미션을 모두 완료한 사용자에게만 `AI 문제 더 풀기` 버튼이 활성화된다. 미완료 상태에서는 버튼이 비활성화되고 "기본 미션을 먼저 완료하세요" 메시지를 보여준다.
+
+## 캡스톤 1 선행 작업 (AI 구현 전 해결 필요)
+
+### 미션 4 (network_latency) 재설계 필요
+
+현재 미션 4의 해결 방식에 근본적인 문제가 있다.
+
+- **현재 장애**: Chaos Mesh `NetworkChaos`로 2초 지연 주입
+- **현재 정답**: Liveness Probe 추가 (`kubectl patch deployment/nginx`)
+- **문제점**: Liveness Probe를 추가해도 NetworkChaos가 유지되는 한 지연은 사라지지 않는다. 사용자 입장에서 체감 가능한 "문제 해결"이 일어나지 않는다.
+
+재설계 방향 후보:
+1. NetworkChaos를 제거하는 것 자체를 정답으로 바꿈 (`kubectl delete networkchaos`) 단, 사용자에게 chaos namespace 접근 권한이 있어야 함
+2. 네트워크 지연 대신 DNS misconfig 또는 잘못된 service port로 교체
+3. 현재 `CHAOS_BACKEND=mock` 환경에서 미션 4를 포기 미션으로 처리하고 새 장애로 교체
+
+### cAdvisor 구축 필요
+
+현재 Grafana 패널 중 Pod CPU/Memory 사용량, 네트워크 I/O 패널이 No Data로 표시된다. kube-state-metrics는 K8s 오브젝트 상태 메트릭만 제공하며 실제 리소스 사용량은 cAdvisor가 담당한다.
+
+`docker-compose.yml`에 cAdvisor 서비스 추가가 필요하다. 이 패널이 있어야 AI가 클러스터 상태를 판단하기 위한 충분한 신호를 Prometheus에서 가져올 수 있다.
+
+---
 
 ## 핵심 원칙
 
