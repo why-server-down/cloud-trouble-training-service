@@ -7,7 +7,7 @@
 | Phase 1 | 기존 미션 보존 + AI 문제 뼈대 | ✅ 완료 |
 | Phase 2 | ChaosPlan 도입 | ✅ 완료 (inject_plan 미연결, 기존 inject() 재사용 중) |
 | Phase 3 | Prometheus 동적 검증 | ✅ 완료 (k8s 타입 룰 + K8s fallback 방식으로 안정화) |
-| Phase 4 | Runtime Context 기반 튜터 | 🔶 부분 완료 (runtime_context.py 구조 존재, 튜터 미연결) |
+| Phase 4 | Runtime Context 기반 튜터 | ✅ 완료 (K8s state + Prometheus 수집, 튜터 연결, TutorMessage DB 저장) |
 | Phase 5 | RAG 장애 로그 저장소 | ❌ 미구현 |
 | Phase 6 | OpenAI/Gemini 기반 생성 활성화 | ✅ 완료 (Gemini 포함, validation_agent 구현 완료) |
 | Phase 7 | 운영 품질 | ❌ 미구현 |
@@ -38,7 +38,8 @@ k8s 타입:
 
 ### 알려진 한계
 - `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함
-- `TutorMessage` DB 저장 미구현: 현재 인메모리(최근 5개)로만 유지
+- `TutorMessage` 보존 정책 미구현: attempt 완료 후에도 메시지가 영구 보존됨. 추후 Phase 7에서 30일 경과 메시지 자동 삭제 배치 추가 예정 (현재 용도는 attempt 진행 중 이전 질문 컨텍스트 제공에 한정)
+- `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함
 - Gemini가 생성한 검증 조건이 PromQL 타입이면 PromQLGuard에서 거절될 수 있음 → k8s fallback으로 처리
 
 ---

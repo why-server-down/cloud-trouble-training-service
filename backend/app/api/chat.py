@@ -67,6 +67,7 @@ async def chat_with_tutor(
     else:
         mission_name, mission_level, chaos_type = await _get_mission_info(db, attempt)
 
+    scenario_id = attempt.scenario_id if attempt.attempt_type == "ai_scenario" else None
     response_text = await tutor.get_hint(
         user_question=body.message,
         attempt_id=attempt.id,
@@ -75,6 +76,8 @@ async def chat_with_tutor(
         mission_level=mission_level,
         chaos_type=chaos_type,
         namespace=namespace,
+        db=db,
+        scenario_id=scenario_id,
     )
 
     return ChatResponse(
