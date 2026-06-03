@@ -1,7 +1,9 @@
 from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.mission_service import MissionService
+from app.services.scenario_service import ScenarioService
 from app.services.scoring_service import ScoringService
+from app.services.validation_rule_service import ValidationRuleService
 from app.services.validation_service import (
     BaseValidationService,
     K8sValidationService,
@@ -44,3 +46,21 @@ def get_mission_service() -> MissionService:
     if _mission_service is None:
         _mission_service = create_mission_service()
     return _mission_service
+
+
+def create_scenario_service() -> ScenarioService:
+    return ScenarioService(
+        chaos_injector=create_chaos_injector(),
+        scoring_service=ScoringService(),
+        validation_rule_service=ValidationRuleService(settings.PROMETHEUS_URL),
+    )
+
+
+_scenario_service: ScenarioService | None = None
+
+
+def get_scenario_service() -> ScenarioService:
+    global _scenario_service
+    if _scenario_service is None:
+        _scenario_service = create_scenario_service()
+    return _scenario_service

@@ -11,6 +11,7 @@ from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.dashboard import router as dashboard_router
 from app.api.missions import router as missions_router
+from app.api.scenarios import router as scenarios_router
 from app.api.terminal import router as terminal_router
 from app.core.database import Base, async_session, engine
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
@@ -58,6 +59,7 @@ async def record_http_metrics(request, call_next):
 app.include_router(auth_router)
 app.include_router(terminal_router)
 app.include_router(missions_router)
+app.include_router(scenarios_router)
 app.include_router(chat_router)
 app.include_router(dashboard_router)
 app.mount("/metrics", make_asgi_app())

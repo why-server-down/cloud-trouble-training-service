@@ -252,18 +252,14 @@ class K8sValidationService(BaseValidationService):
             return self._retry()
 
     def _check_network_latency(self, namespace: str) -> ValidationResult:
+        # nginx-svc에 ready 엔드포인트가 존재하면 readiness probe가 정상화된 것
         try:
-            dep = self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
-            containers = dep.spec.template.spec.containers
-            nginx_container = next((c for c in containers if c.name == "nginx"), None)
-            if not nginx_container:
-                return self._retry()
-            
-            if not nginx_container.liveness_probe:
-                return self._retry()
-            
-            return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
+            ep = self._core_api.read_namespaced_endpoints(name="nginx-svc", namespace=namespace)
+            for subset in (ep.subsets or []):
+                if subset.addresses:
+                    return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
+            return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
+            print(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
             return self._retry()
 

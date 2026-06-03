@@ -27,11 +27,11 @@ scrape_configs:
       - targets: ["backend:8000"]
 
   - job_name: kubernetes-cadvisor
-    metrics_path: /api/v1/nodes/desktop-control-plane/proxy/metrics/cadvisor
+    metrics_path: /api/v1/nodes/docker-desktop/proxy/metrics/cadvisor
     static_configs:
       - targets: ["kube-api-proxy:8001"]
 
   - job_name: kubernetes-kubelet-probes
-    metrics_path: /api/v1/nodes/desktop-control-plane/proxy/metrics/probes
+    metrics_path: /api/v1/nodes/docker-desktop/proxy/metrics/probes
     static_configs:
       - targets: ["kube-api-proxy:8001"]

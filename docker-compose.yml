@@ -115,6 +115,7 @@ services:
       - --address=0.0.0.0
       - --accept-hosts=.*
       - --kubeconfig=/app/.kube/config
+      - --insecure-skip-tls-verify=true
     volumes:
       - ./.runtime/kubeconfig:/app/.kube/config:ro
     extra_hosts:

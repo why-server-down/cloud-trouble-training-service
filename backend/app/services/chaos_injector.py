@@ -157,29 +157,32 @@ class ChaosMeshInjector(BaseChaosInjector):
             body=body,
         )
 
-    def _apply_network_chaos(self, chaos_id: str, namespace: str):
-        body = {
-            "apiVersion": f"{self.CHAOS_GROUP}/{self.CHAOS_VERSION}",
-            "kind": "NetworkChaos",
-            "metadata": {"name": chaos_id, "namespace": self.CHAOS_NAMESPACE},
-            "spec": {
-                "action": "delay",
-                "mode": "all",
-                "selector": {"namespaces": [namespace]},
-                "delay": {
-                    "latency": "2000ms",
-                    "correlation": "25",
-                    "jitter": "500ms",
-                },
-                "duration": "30m",
+    def _apply_network_chaos(self, _chaos_id: str, namespace: str):
+        # Readiness Probe 실패 주입: 존재하지 않는 경로 체크 → Pod Ready 0/1 → 서비스 엔드포인트 제외
+        # 사용자 Fix: kubectl patch deployment nginx 로 readinessProbe 제거 또는 경로 수정
+        self._apps_api.patch_namespaced_deployment(
+            name="nginx",
+            namespace=namespace,
+            body={
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "containers": [{
+                                "name": "nginx",
+                                "readinessProbe": {
+                                    "httpGet": {
+                                        "path": "/healthz-notexist",
+                                        "port": 80,
+                                    },
+                                    "initialDelaySeconds": 5,
+                                    "periodSeconds": 10,
+                                    "failureThreshold": 3,
+                                },
+                            }]
+                        }
+                    }
+                }
             },
-        }
-        self._custom_api.create_namespaced_custom_object(
-            group=self.CHAOS_GROUP,
-            version=self.CHAOS_VERSION,
-            namespace=self.CHAOS_NAMESPACE,
-            plural="networkchaos",
-            body=body,
         )
 
     def _apply_service_misconfig(self, chaos_id: str, namespace: str):
@@ -253,9 +256,11 @@ class ChaosMeshInjector(BaseChaosInjector):
                     body={"spec": {"template": {"spec": {"containers": [{"name": "nginx", "resources": {"requests": {"memory": "64Mi"}, "limits": {"memory": "128Mi"}}}]}}}},
                 )
             elif chaos_type == "network_latency":
-                self._custom_api.delete_namespaced_custom_object(
-                    group=self.CHAOS_GROUP, version=self.CHAOS_VERSION,
-                    namespace=self.CHAOS_NAMESPACE, plural="networkchaos", name=chaos_id,
+                # readiness probe 제거하여 복구
+                self._apps_api.patch_namespaced_deployment(
+                    name="nginx",
+                    namespace=namespace,
+                    body={"spec": {"template": {"spec": {"containers": [{"name": "nginx", "readinessProbe": None}]}}}},
                 )
             elif chaos_type == "service_misconfig":
                 self._apps_api.delete_namespaced_deployment(name="webapp", namespace=namespace)

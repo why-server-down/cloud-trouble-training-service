@@ -5,26 +5,26 @@
 ## 핵심 메커니즘
 1. Attack - Chaos Mesh가 사용자 Pod 공격 (고정 4개 미션 + AI 동적 생성)
 2. Defend - 사용자가 kubectl로 장애 해결 (AI 튜터가 소크라테스식 힌트 제공)
-3. Score - Prometheus가 정상화 감지 → 점수 부여
+3. Score - K8s API/Prometheus가 정상화 감지 → 점수 부여
 
 ## 캡스톤 로드맵
 
-### 캡스톤 1 - Kubernetes 완성 (현재 진행)
+### 캡스톤 1 - Kubernetes 완성 (진행 중)
 기존 4개 고정 미션을 튜토리얼로 유지하고, AI가 동적으로 장애를 생성하는 "AI 문제 더 풀기" 모드를 추가한다. 자세한 설계는 [agent.md](agent.md) 참고.
 
 - 기존 4개 미션 튜토리얼 유지
-- AI 장애 생성 모드 (난이도 선택 → 랜덤 시나리오 주입)
-- Grafana 패널 실무형 완성 (cAdvisor 추가 필요)
-- 검증 안정화 (VALIDATION_BACKEND=k8s 실 테스트)
+- AI 장애 생성 모드 Phase 1~3 완료 (난이도 선택 → AI 시나리오 생성 → 장애 주입 → K8s 검증)
+- Grafana 패널 cAdvisor 수정 완료 (Docker Desktop container="" 필터)
+- 검증 K8s fallback 추가 완료
 - 미션 4 (network_latency) 재설계 필요
 
 ### 캡스톤 2 - 멀티 환경 고도화 (예정)
 탭 분리: Kubernetes / Docker-only / Linux / Application
 
 ## 기술 스택
-- Frontend: React (xterm.js 터미널, 채팅 UI)
+- Frontend: React (xterm.js 터미널, 채팅 UI, 환경 탭 UI)
 - Backend: FastAPI, SQLAlchemy async, PostgreSQL
-- AI: LangChain + OpenAI gpt-4o-mini (소크라테스식 튜터, 시나리오 생성), Qdrant (RAG)
+- AI: LangChain + OpenAI gpt-4o-mini / Google Gemini (소크라테스식 튜터, 시나리오 생성), Qdrant (RAG)
 - Infra: Kubernetes, Chaos Mesh
 - Monitoring: Prometheus, Grafana, Loki, Promtail, AlertManager
 
@@ -36,24 +36,41 @@
 - [x] 웹 터미널 (xterm.js + WebSocket, kubectl 전용)
 - [x] 미션 시스템 (목록/시작/상태/완료/포기/힌트, 4개 레벨)
 - [x] 점수 계산 (시간 감점 + 힌트 감점)
-- [x] AI 튜터 채팅 API (Mock 패턴, 시나리오별 소크라테스식 힌트)
-- [x] RAG AI 엔진 (ai-data/ - LangChain + Qdrant + GPT)
+- [x] AI 튜터 채팅 API (Mock + OpenAI/Gemini 연동, K8s Pod 상태 실시간 반영)
+- [x] RAG AI 엔진 (ai-data/ - LangChain + Qdrant + GPT/Gemini)
 - [x] Chaos Mesh 연동 (로그인 시 사용자 네임스페이스 + nginx Pod 자동 생성)
 - [x] K8s API 기반 실제 검증 (K8sValidationService)
 - [x] Prometheus 기반 검증 (PrometheusValidationService)
 - [x] 대시보드 / 리더보드 / 업적 시스템
 - [x] 티어 시스템 (Bronze → Silver → Gold → Platinum → DevOps Master)
 - [x] 모니터링 스택 (Prometheus + Grafana + Loki + Promtail + AlertManager)
+- [x] Grafana cAdvisor 패널 수정 (container="" 필터, Docker Desktop 호환)
+- [x] AI 튜터 Pod 상태 조회 datetime 정렬 버그 수정
+- [x] 환경 탭 UI (Kubernetes / Docker / Linux / Application, 미개발 탭 WIP 화면)
+- [x] **AI 장애 생성 모드 Phase 1~3** (agent.md 기준)
+  - GeneratedScenario / ValidationRule 모델 및 DB 마이그레이션
+  - ScenarioAgent: Mock fixture (난이도별 4종) + OpenAI/Gemini 실제 생성
+  - ChaosPlan / ChaosPlanCompiler (allowlist 안전장치)
+  - ScenarioService (생성 → 주입 → 검증 → 포기 → 힌트 전체 오케스트레이션)
+  - ValidationRuleService: PromQLGuard + k8s 타입 룰 + K8s 직접 검증 fallback
+  - /api/scenarios/* 전체 엔드포인트 (start-random, status, current/check, current/abandon, current/hint, unlock-status)
+  - ai-data/prompts/scenario_gen.md 시나리오 생성 시스템 프롬프트
+  - 프론트엔드 AI Challenge Mode UI (잠금 해제 조건, 난이도 선택, 진행 상황 표시)
+- [x] missions.py AI 시나리오 attempt 혼용 크래시 수정 (NoneType 방지)
+- [x] scenario_agent.py mock fixture validation k8s 룰로 통일
 
 ### 진행 중 (캡스톤 1)
-- [ ] AI 장애 생성 모드 (agent.md Phase 1~6)
-- [ ] cAdvisor 추가 (Pod CPU/Memory/Network 실사용 메트릭)
+- [ ] AI 장애 생성 모드 Phase 4~7 (agent.md 기준)
+  - Phase 4: RuntimeContextCollector → 튜터 연결 (runtime_context.py 구조 존재, 미연결)
+  - Phase 5: RAG 장애 로그 지식창고 (incident-logs/ 디렉터리 구조 미구성)
+  - Phase 6: validation_agent.py 미구현
+  - Phase 7: 운영 메트릭, 비용 제한, 시드 저장
 - [ ] 미션 4 (network_latency) 재설계
-- [ ] AI 튜터 OpenAI 실제 연동
+- [ ] TutorMessage DB 영구 저장 (현재 인메모리 최근 5개)
 
 ### 예정 (캡스톤 2)
 - [ ] AWS EKS 배포
-- [ ] 멀티 환경 탭 (Docker-only, Linux, Application)
+- [ ] 멀티 환경 탭 실구현 (Docker-only, Linux, Application)
 
 ## 브랜치 전략
 - `main` - 배포 브랜치
@@ -82,12 +99,23 @@ open http://localhost:8000/docs
 ## 환경변수 (.env)
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
-AI_BACKEND=mock              # mock | openai
-OPENAI_API_KEY=              # openai 모드일 때 필요
+
+# AI 백엔드 선택
+AI_BACKEND=mock              # mock | openai | gemini
+
+# OpenAI 모드
+OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
-SCENARIO_MODEL=gpt-4o-mini   # AI 시나리오 생성 모델
-TUTOR_MODEL=gpt-4o-mini      # AI 튜터 모델
+SCENARIO_MODEL=gpt-4o-mini
+TUTOR_MODEL=gpt-4o-mini
 EMBEDDING_MODEL=text-embedding-3-small
+
+# Gemini 모드 (OpenAI 호환 API 사용)
+GEMINI_API_KEY=
+GEMINI_MODEL=models/gemini-2.0-flash-lite
+GEMINI_EMBEDDING_MODEL=models/text-embedding-004
+
+# 인프라
 CHAOS_BACKEND=mock           # mock | chaos_mesh
 VALIDATION_BACKEND=mock      # mock | k8s | prometheus
 MOCK_VALIDATION_AUTO_PASS=false
@@ -101,7 +129,6 @@ VITE_GRAFANA_BASE_URL=http://localhost:3001
 
 ## 모니터링 스택 실행
 ```bash
-# 모니터링 프로필로 실행 (Prometheus + Grafana + Loki 포함)
 docker compose --profile monitoring up -d
 
 # Grafana: http://localhost:3001 (admin/admin)
@@ -109,7 +136,7 @@ docker compose --profile monitoring up -d
 ```
 
 ## 주요 설계 문서
-- [agent.md](agent.md) - AI 장애 생성 모드 전체 설계 (Phase 1~7, 안전장치, API, 데이터 모델)
+- [agent.md](agent.md) - AI 장애 생성 모드 전체 설계 및 구현 현황 (Phase 1~7)
 - [backend/CLAUDE.md](backend/CLAUDE.md) - 백엔드 API 및 서비스 상세
 - [README.md](README.md) - 프로젝트 공개 소개
 

@@ -300,6 +300,119 @@
   opacity: 0.45;
 }
 
+/* AI 시나리오 섹션 */
+.ai-scenario-section {
+  border-top: 1px solid var(--line-strong);
+  background: #0d1211;
+}
+
+.ai-section-header {
+  padding: 0.9rem 0.9rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.ai-section-header h3 {
+  color: var(--text);
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.ai-lock-notice {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem 0.9rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.ai-lock-icon {
+  font-size: 0.9rem;
+}
+
+.ai-scenario-active {
+  padding: 0.75rem 0.9rem 0;
+}
+
+.ai-scenario-title {
+  margin-bottom: 0.35rem;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.ai-scenario-brief {
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.ai-difficulty-badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+}
+
+.ai-difficulty-selector {
+  padding: 0.75rem 0.9rem 0.9rem;
+}
+
+.ai-selector-label {
+  margin-bottom: 0.5rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.difficulty-btns {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.difficulty-btn {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  transition: 140ms ease;
+}
+
+.difficulty-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.difficulty-btn.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ai-start-btn {
+  width: 100%;
+  padding: 0.6rem;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.ai-start-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 @media (max-width: 768px) {
   .mission-panel {
     border-right: none;

@@ -1,5 +1,49 @@
 # AI Agent Implementation Plan
 
+## 구현 현황 (2026-06-03 기준)
+
+| Phase | 제목 | 상태 |
+|---|---|---|
+| Phase 1 | 기존 미션 보존 + AI 문제 뼈대 | ✅ 완료 |
+| Phase 2 | ChaosPlan 도입 | ✅ 완료 (inject_plan 미연결, 기존 inject() 재사용 중) |
+| Phase 3 | Prometheus 동적 검증 | ✅ 완료 (k8s 타입 룰 + K8s fallback 방식으로 안정화) |
+| Phase 4 | Runtime Context 기반 튜터 | 🔶 부분 완료 (runtime_context.py 구조 존재, 튜터 미연결) |
+| Phase 5 | RAG 장애 로그 저장소 | ❌ 미구현 |
+| Phase 6 | OpenAI/Gemini 기반 생성 활성화 | ✅ 완료 (Gemini 포함, validation_agent는 미구현) |
+| Phase 7 | 운영 품질 | ❌ 미구현 |
+
+### Phase 1~3 구현 요약
+
+**실제 파일:**
+- `backend/app/ai/scenario_agent.py` - Mock fixture + OpenAI/Gemini 시나리오 생성
+- `backend/app/api/scenarios.py` - /api/scenarios/* 전체 엔드포인트
+- `backend/app/services/chaos_plan.py` - ChaosPlan, ChaosPlanCompiler
+- `backend/app/services/scenario_service.py` - 오케스트레이터
+- `backend/app/services/validation_rule_service.py` - PromQLGuard + K8s 검증 fallback
+- `backend/app/services/promql_guard.py` - PromQL 안전성 검사
+- `backend/app/services/runtime_context.py` - 구조만 (미연결)
+- `ai-data/prompts/scenario_gen.md` - Gemini 시나리오 생성 시스템 프롬프트
+
+**검증 방식 변경:**
+- 당초 설계: PromQL 기반 (`validation.rules[].type = "promql"`)
+- 실제 구현: k8s 타입 룰 우선 + `k8s_check_by_fault_type()` fallback
+- 이유: Docker Desktop cAdvisor 메트릭 제한, PromQL 메트릭명 불일치 문제
+
+**AI 검증 룰 타입 (scenario_gen.md 지시사항):**
+```
+k8s 타입:
+  - deployment:nginx:running       → nginx Deployment available_replicas > 0
+  - service:webapp-svc:endpoints   → webapp-svc ready endpoints > 0
+```
+
+### 알려진 한계
+- `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함
+- `TutorMessage` DB 저장 미구현: 현재 인메모리(최근 5개)로만 유지
+- Gemini가 생성한 검증 조건이 PromQL 타입이면 PromQLGuard에서 거절될 수 있음 → k8s fallback으로 처리
+- 미션 4 (network_latency) 검증 로직이 실질적으로 동작하지 않음 (재설계 필요)
+
+---
+
 ## 캡스톤 로드맵
 
 이 구현 계획은 캡스톤 1과 캡스톤 2로 나뉜다.
@@ -1108,7 +1152,7 @@ Mission Page
 
 ## 구현 순서
 
-### Phase 1: 기존 미션 보존 + AI 문제 뼈대
+### Phase 1: 기존 미션 보존 + AI 문제 뼈대 ✅ 완료
 
 1. `GeneratedScenario`, `ValidationRule`, `TutorMessage` 모델 추가
 2. migration 또는 개발용 metadata create 반영
@@ -1124,7 +1168,7 @@ Mission Page
 - 기존 4개 기본 미션은 기존과 동일하게 동작한다.
 - AI 문제는 별도 `/api/scenarios/*` API로 시작된다.
 
-### Phase 2: ChaosPlan 도입
+### Phase 2: ChaosPlan 도입 ✅ 완료 (inject_plan 미연결)
 
 1. `ChaosPlan` dataclass/Pydantic 모델 추가
 2. `ChaosPlanCompiler` 구현
@@ -1136,7 +1180,7 @@ Mission Page
 
 - service selector mismatch, image pull error, memory stress를 `ChaosPlan`으로 실행/rollback한다.
 
-### Phase 3: Prometheus 동적 검증
+### Phase 3: K8s/Prometheus 동적 검증 ✅ 완료 (k8s 타입 룰 방식으로 안정화)
 
 1. `ValidationRuleService` 구현
 2. `PromQLGuard` 구현
@@ -1149,7 +1193,7 @@ Mission Page
 - 시나리오마다 다른 PromQL 성공 조건으로 완료 여부를 판단한다.
 - namespace 없는 PromQL은 저장 단계에서 거절된다.
 
-### Phase 4: Runtime Context 기반 튜터
+### Phase 4: Runtime Context 기반 튜터 🔶 부분 완료
 
 1. `RuntimeContextCollector` 구현
 2. Kubernetes state collector 구현
@@ -1164,7 +1208,7 @@ Mission Page
 - 튜터가 사용자가 방금 실행한 명령과 현재 Kubernetes 상태를 참고해서 질문한다.
 - 같은 힌트를 반복하지 않는다.
 
-### Phase 5: RAG 장애 로그 저장소
+### Phase 5: RAG 장애 로그 저장소 ❌ 미구현
 
 1. `incident-logs/` 디렉터리 구조 추가
 2. markdown frontmatter parser 추가
@@ -1176,7 +1220,7 @@ Mission Page
 
 - OOMKilled, ImagePullBackOff, Service endpoint 없음 같은 실제 로그 문서를 검색해 튜터 응답에 반영한다.
 
-### Phase 6: OpenAI 기반 생성 활성화
+### Phase 6: OpenAI/Gemini 기반 생성 활성화 ✅ 완료 (validation_agent 미구현)
 
 1. `Scenario Generator Agent` OpenAI 구현
 2. JSON Schema structured output 적용
@@ -1189,7 +1233,7 @@ Mission Page
 - 난이도별 랜덤 시나리오가 LLM으로 생성된다.
 - 잘못된 시나리오는 실행 전에 거절된다.
 
-### Phase 7: 운영 품질
+### Phase 7: 운영 품질 ❌ 미구현
 
 1. 생성/실행/검증/튜터 응답 metric 추가
 2. LLM token usage 저장

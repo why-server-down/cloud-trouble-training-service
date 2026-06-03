@@ -34,7 +34,7 @@ MISSIONS = [
     {
         "name": "좀비 서버의 습격",
         "level": 4,
-        "description": "Pod 간 네트워크 지연이 발생하고 있습니다. Liveness Probe를 설정하여 자동 복구되도록 하세요.",
+        "description": "Pod는 Running 상태이지만 트래픽을 전혀 받지 못하고 있습니다. Readiness Probe 설정을 확인하고 서비스가 정상 트래픽을 처리할 수 있도록 복구하세요.",
         "chaos_type": "network_latency",
         "base_score": 100,
         "time_limit": 2100,
