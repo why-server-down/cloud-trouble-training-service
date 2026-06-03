@@ -104,11 +104,15 @@ class AnalyticsService:
         curve = []
         for attempt in completed:
             attempts_by_mission[attempt.mission_id] += 1
+            if attempt.attempt_type == "ai_scenario":
+                name = f"AI 시나리오 ({attempt.scenario_id and str(attempt.scenario_id)[:8]})"
+            else:
+                name = attempt.mission.name if attempt.mission else "알 수 없음"
             curve.append(
                 {
                     "attempt_id": str(attempt.id),
                     "mission_id": str(attempt.mission_id),
-                    "mission_name": attempt.mission.name,
+                    "mission_name": name,
                     "attempt_number": attempts_by_mission[attempt.mission_id],
                     "completion_time": self._completion_seconds(attempt),
                     "score": attempt.final_score or 0,
@@ -186,7 +190,7 @@ class AnalyticsService:
     def _calculate_skill_scores(self, completed: list[MissionAttempt]) -> dict[str, float]:
         scores = {}
         for skill, chaos_types in SKILL_CATEGORIES.items():
-            relevant = [attempt.final_score or 0 for attempt in completed if attempt.mission.chaos_type in chaos_types]
+            relevant = [attempt.final_score or 0 for attempt in completed if attempt.mission and attempt.mission.chaos_type in chaos_types]
             confidence = min(len(relevant) / 3, 1.0)
             scores[skill] = round((sum(relevant) / len(relevant)) * confidence, 1) if relevant else 0.0
         return scores

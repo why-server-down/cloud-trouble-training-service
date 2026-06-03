@@ -15,24 +15,42 @@ ALLOWED_FAULT_TYPES = {
     "network_latency",
     "probe_failure",
     "configmap_misconfig",
+    "liveness_probe_failure",
+    "init_container_failure",
+    "node_selector_mismatch",
+    "compound_probe_cascade",
+    "compound_crash_service",
+    "wrong_image_registry",
+    "secret_ref_missing",
+    "pvc_unbound",
+    "cpu_throttle",
     # 정적 미션 레거시 타입 (alias)
     "pod_failure",
     "memory_stress",
     "service_misconfig",
 }
 
-# AI fault_type → 기존 chaos_injector.inject() chaos_type 매핑
+# AI fault_type → chaos_injector.inject() chaos_type 매핑
 FAULT_TYPE_TO_CHAOS_TYPE: dict[str, str] = {
-    "image_pull_error": "pod_failure",
-    "pod_failure": "pod_failure",
-    "crash_loop": "pod_failure",
-    "probe_failure": "pod_failure",
-    "oom_killed": "memory_stress",
-    "memory_stress": "memory_stress",
+    "image_pull_error":        "pod_failure",           # nginx:wrongtag → ImagePullBackOff
+    "pod_failure":             "pod_failure",
+    "crash_loop":              "crash_loop",             # exit 1 command → CrashLoopBackOff
+    "probe_failure":           "network_latency",        # readinessProbe 실패 → endpoint 제외
+    "network_latency":         "network_latency",
+    "oom_killed":              "memory_stress",          # memory limit 6Mi → OOMKilled
+    "memory_stress":           "memory_stress",
     "service_selector_mismatch": "service_misconfig",
-    "service_misconfig": "service_misconfig",
-    "network_latency": "network_latency",
-    "configmap_misconfig": "pod_failure",
+    "service_misconfig":       "service_misconfig",
+    "configmap_misconfig":     "configmap_misconfig",    # broken nginx.conf → CrashLoop
+    "liveness_probe_failure":  "liveness_probe",         # livenessProbe 실패 → container restart
+    "init_container_failure":  "init_container_failure", # initContainer exit1 → Init:CrashLoop
+    "node_selector_mismatch":  "node_selector_mismatch", # 불가능한 nodeSelector → Pending
+    "compound_probe_cascade":  "compound_probe_cascade", # wrongtag+readiness cascade
+    "compound_crash_service":  "compound_crash_service", # crash_loop+service parallel
+    "wrong_image_registry":    "wrong_image_registry",   # private registry → unauthorized
+    "secret_ref_missing":      "secret_ref_missing",     # envFrom secretRef 없는 Secret
+    "pvc_unbound":             "pvc_unbound",            # nonexistent storageClass PVC → Pending
+    "cpu_throttle":            "cpu_throttle",           # CPU 1m + 빡빡한 readinessProbe
 }
 
 RESOURCE_NAME_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
@@ -112,7 +130,8 @@ class ChaosPlanCompiler:
         if not RESOURCE_NAME_PATTERN.match(target_name):
             raise ChaosPlanCompileError(f"유효하지 않은 리소스 이름: {target_name}")
 
-        if fault_type in ("image_pull_error", "pod_failure", "crash_loop", "probe_failure", "configmap_misconfig"):
+        if fault_type in ("image_pull_error", "pod_failure"):
+            # nginx:wrongtag → ImagePullBackOff
             wrong_image = params.get("wrong_image", "nginx:wrongtag")
             original_image = params.get("original_image", "nginx:latest")
             plan.steps.append(ChaosStep(
@@ -124,7 +143,19 @@ class ChaosPlanCompiler:
                 patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "image": original_image}]}}}},
             ))
 
+        elif fault_type == "crash_loop":
+            # exit 1 command → 즉시 종료 → CrashLoopBackOff
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "command": ["sh", "-c", "exit 1"]}]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "command": None}]}}}},
+            ))
+
         elif fault_type in ("oom_killed", "memory_stress"):
+            # memory limit 6Mi → OOMKilled
             memory_limit = params.get("memory_limit", "6Mi")
             plan.steps.append(ChaosStep(
                 kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
@@ -136,6 +167,7 @@ class ChaosPlanCompiler:
             ))
 
         elif fault_type in ("service_selector_mismatch", "service_misconfig"):
+            # webapp-svc selector 불일치 → endpoints 0
             svc_name = target.get("name", "webapp-svc")
             if not RESOURCE_NAME_PATTERN.match(svc_name):
                 raise ChaosPlanCompileError(f"유효하지 않은 서비스 이름: {svc_name}")
@@ -150,20 +182,174 @@ class ChaosPlanCompiler:
                 patch={"spec": {"selector": original_selector}},
             ))
 
-        elif fault_type == "network_latency":
-            latency_ms = int(params.get("latency_ms", 2000))
-            if latency_ms > MAX_LATENCY_MS:
-                raise ChaosPlanCompileError(f"latency 상한 초과: {latency_ms}ms > {MAX_LATENCY_MS}ms")
-            chaos_name = f"latency-{plan.id[:8]}"
+        elif fault_type in ("network_latency", "probe_failure"):
+            # readinessProbe 경로 오류 → Pod Not Ready → endpoint 제외
             plan.steps.append(ChaosStep(
-                kind="chaos_mesh_create", resource="networkchaos", name=chaos_name, namespace=namespace,
-                spec={
-                    "action": "delay", "mode": "all",
-                    "selector": {"namespaces": [namespace]},
-                    "delay": {"latency": f"{latency_ms}ms", "correlation": "25", "jitter": "500ms"},
-                    "duration": "30m",
-                },
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "readinessProbe": {"httpGet": {"path": "/healthz-notexist", "port": 80}, "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}]}}}},
             ))
             plan.rollback.append(ChaosStep(
-                kind="chaos_mesh_delete", resource="networkchaos", name=chaos_name, namespace=namespace,
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "readinessProbe": None}]}}}},
+            ))
+
+        elif fault_type == "liveness_probe_failure":
+            # livenessProbe 경로 오류 → probe 실패 → container 재시작 반복
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "livenessProbe": {"httpGet": {"path": "/healthz-notexist", "port": 80}, "initialDelaySeconds": 5, "periodSeconds": 5, "failureThreshold": 1}}]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "livenessProbe": None}]}}}},
+            ))
+
+        elif fault_type == "configmap_misconfig":
+            # broken nginx.conf ConfigMap 마운트 → nginx config test 실패 → CrashLoop
+            cm_name = "nginx-broken-config"
+            plan.steps.append(ChaosStep(
+                kind="k8s_create", resource="configmap", name=cm_name, namespace=namespace,
+                spec={"data": {"nginx.conf": "<broken nginx config>"}},
+            ))
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"volumeMounts": [{"name": cm_name, "mountPath": "/etc/nginx/nginx.conf"}]},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"volumeMounts": []},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_delete", resource="configmap", name=cm_name, namespace=namespace,
+            ))
+
+        elif fault_type == "init_container_failure":
+            # initContainer exit1 → Init:CrashLoopBackOff (메인 컨테이너 시작 전에 실패)
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"initContainers": [
+                    {"name": "init-check", "image": "busybox:1.35", "command": ["sh", "-c", "exit 1"]}
+                ]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"initContainers": None}}}},
+            ))
+
+        elif fault_type == "node_selector_mismatch":
+            # 불가능한 nodeSelector → 스케줄링 실패 → Pending (Running/CrashLoop과 전혀 다른 증상)
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"nodeSelector": {"disk": "ssd-nonexistent"}}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"nodeSelector": None}}}},
+            ))
+
+        elif fault_type == "compound_probe_cascade":
+            # [cascade] wrongtag + readinessProbe 동시 주입
+            # 이미지 고치면 pod 뜨지만 readinessProbe가 숨어있다가 드러남 → 두 번 fix 필요
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "image": "nginx:wrongtag",
+                     "readinessProbe": {"httpGet": {"path": "/healthz-notexist", "port": 80},
+                                       "initialDelaySeconds": 5, "periodSeconds": 10, "failureThreshold": 3}}
+                ]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "image": "nginx:latest", "readinessProbe": None}
+                ]}}}},
+            ))
+
+        elif fault_type == "wrong_image_registry":
+            wrong_image = params.get("wrong_image", "private.registry.internal/nginx:latest")
+            original_image = params.get("original_image", "nginx:latest")
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "image": wrong_image}]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{"name": target_name, "image": original_image}]}}}},
+            ))
+
+        elif fault_type == "secret_ref_missing":
+            secret_name = params.get("secret_name", "missing-app-secret")
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "envFrom": [{"secretRef": {"name": secret_name}}]}
+                ]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "envFrom": None}
+                ]}}}},
+            ))
+
+        elif fault_type == "pvc_unbound":
+            pvc_name = "nginx-data"
+            plan.steps.append(ChaosStep(
+                kind="k8s_create", resource="pvc", name=pvc_name, namespace=namespace,
+                spec={"storageClassName": "nonexistent-storage", "accessModes": ["ReadWriteOnce"], "storage": "1Gi"},
+            ))
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {
+                    "volumes": [{"name": pvc_name, "persistentVolumeClaim": {"claimName": pvc_name}}],
+                    "containers": [{"name": target_name, "volumeMounts": [{"name": pvc_name, "mountPath": "/data"}]}],
+                }}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"volumes": None, "containers": [{"name": target_name, "volumeMounts": None}]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_delete", resource="pvc", name=pvc_name, namespace=namespace,
+            ))
+
+        elif fault_type == "cpu_throttle":
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{
+                    "name": target_name,
+                    "resources": {"requests": {"cpu": "1m"}, "limits": {"cpu": "1m"}},
+                    "readinessProbe": {"httpGet": {"path": "/", "port": 80}, "initialDelaySeconds": 2, "periodSeconds": 5, "timeoutSeconds": 1, "failureThreshold": 2},
+                }]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [{
+                    "name": target_name,
+                    "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}, "limits": {"cpu": "500m", "memory": "128Mi"}},
+                    "readinessProbe": None,
+                }]}}}},
+            ))
+
+        elif fault_type == "compound_crash_service":
+            # [parallel] crash_loop + service_misconfig 동시 주입
+            # 두 문제가 완전히 독립적 → 각각 별도 조사 + fix 필요
+            plan.steps.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "command": ["sh", "-c", "exit 1"]}
+                ]}}}},
+            ))
+            plan.steps.append(ChaosStep(
+                kind="k8s_create", resource="service", name="webapp-svc", namespace=namespace,
+                spec={"selector": {"app": "webapp-broken"}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_patch", resource="deployment", name=target_name, namespace=namespace,
+                patch={"spec": {"template": {"spec": {"containers": [
+                    {"name": target_name, "command": None}
+                ]}}}},
+            ))
+            plan.rollback.append(ChaosStep(
+                kind="k8s_delete", resource="service", name="webapp-svc", namespace=namespace,
             ))

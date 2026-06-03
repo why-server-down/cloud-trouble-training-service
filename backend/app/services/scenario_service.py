@@ -27,6 +27,15 @@ ALLOWED_FAULT_TYPES = [
     "network_latency",
     "probe_failure",
     "configmap_misconfig",
+    "liveness_probe_failure",
+    "init_container_failure",
+    "node_selector_mismatch",
+    "compound_probe_cascade",
+    "compound_crash_service",
+    "wrong_image_registry",
+    "secret_ref_missing",
+    "pvc_unbound",
+    "cpu_throttle",
 ]
 
 
@@ -255,9 +264,32 @@ class ScenarioService:
                 namespace=namespace,
             )
 
+        # AI 판정: mechanical check 후에도 미해결 시 LLM이 K8s 상태 전체를 보고 재판정
+        ai_judgment = None
+        if not resolved and settings.VALIDATION_BACKEND != "mock" and settings.AI_BACKEND in ("openai", "gemini"):
+            from app.ai.validation_agent import get_validation_agent
+            agent = get_validation_agent()
+            ai_judgment = await agent.judge(
+                scenario_context={
+                    "title": scenario.title,
+                    "fault_type": scenario.fault_type,
+                    "student_brief": scenario.student_brief,
+                    "internal_summary": scenario.internal_summary,
+                    "namespace": namespace,
+                },
+                namespace=namespace,
+            )
+            if ai_judgment.confidence >= 0.7:
+                resolved = ai_judgment.resolved
+
         attempt.last_validation_result = {
             "resolved": resolved,
             "rules": [{"name": r.name, "passed": r.passed, "error": r.error} for r in rule_results],
+            "ai_judgment": {
+                "resolved": ai_judgment.resolved,
+                "reason": ai_judgment.reason,
+                "confidence": ai_judgment.confidence,
+            } if ai_judgment else None,
         }
 
         if resolved:
