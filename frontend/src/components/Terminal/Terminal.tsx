@@ -132,7 +132,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
         } else if (matches.length > 1) {
           terminal.write(`\r\n  ${matches.join('\r\n  ')}\r\n${getPrompt()}${currentLineRef.current}`)
         }
-      } else if (code >= 32) {
+      } else if (code >= 32 && code !== 127) {
         currentLineRef.current += data
         terminal.write(data)
       }

@@ -22,14 +22,23 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain.schema import Document
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    from langchain.schema import Document
 from dotenv import load_dotenv
 
 from config import config
 
 load_dotenv()
+
+# 임베딩 차원: OpenAI text-embedding-ada-002=1536, Gemini gemini-embedding-001=3072
+_EMBEDDING_DIMENSIONS = {
+    "openai": 1536,
+    "gemini": 3072,
+}
 
 
 @dataclass
@@ -72,9 +81,10 @@ class RAGService:
     - 2.5: Comprehensive error handling
     """
     
-    # OpenAI text-embedding-ada-002 dimension
-    EMBEDDING_DIMENSION = 1536
-    
+    @property
+    def EMBEDDING_DIMENSION(self) -> int:
+        return _EMBEDDING_DIMENSIONS.get(config.AI_BACKEND, 1536)
+
     def __init__(
         self,
         collection_name: str = "k8s_docs",
@@ -114,15 +124,24 @@ class RAGService:
                     port=6333
                 )
             
-            # Task 2.2: Initialize OpenAI embeddings with error handling
-            api_key = config.OPENAI_API_KEY
-            if not api_key or api_key == "your_openai_api_key_here":
-                raise RAGServiceError("OpenAI API key not configured")
-            
-            self.embeddings = OpenAIEmbeddings(
-                openai_api_key=api_key,
-                model="text-embedding-ada-002"
-            )
+            # 임베딩 초기화: gemini 또는 openai 백엔드 선택
+            if config.AI_BACKEND == "gemini":
+                gemini_key = config.GEMINI_API_KEY
+                if not gemini_key:
+                    raise RAGServiceError("Gemini API key not configured")
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                self.embeddings = GoogleGenerativeAIEmbeddings(
+                    model=config.GEMINI_EMBEDDING_MODEL,
+                    google_api_key=gemini_key,
+                )
+            else:
+                api_key = config.OPENAI_API_KEY
+                if not api_key or api_key == "your_openai_api_key_here":
+                    raise RAGServiceError("OpenAI API key not configured")
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=api_key,
+                    model="text-embedding-ada-002",
+                )
             
             # Task 2.3: Create collection if it doesn't exist
             self._ensure_collection_exists()
@@ -132,27 +151,34 @@ class RAGService:
     
     def _ensure_collection_exists(self):
         """
-        Ensure collection exists with proper configuration
-        Creates collection if it doesn't exist
+        Ensure collection exists with proper configuration.
+        차원이 현재 임베딩 모델과 다르면 컬렉션을 삭제하고 재생성한다.
         """
         try:
-            # Check if collection exists
             collections = self.client.get_collections().collections
             collection_names = [col.name for col in collections]
-            
-            if self.collection_name not in collection_names:
-                # Create collection with vector configuration
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(
-                        size=self.EMBEDDING_DIMENSION,
-                        distance=Distance.COSINE  # Cosine similarity
-                    )
-                )
-                print(f"Created collection: {self.collection_name}")
-            else:
-                print(f"Collection already exists: {self.collection_name}")
-                
+            target_dim = self.EMBEDDING_DIMENSION
+
+            if self.collection_name in collection_names:
+                # 기존 컬렉션 차원 확인
+                info = self.client.get_collection(self.collection_name)
+                existing_dim = info.config.params.vectors.size
+                if existing_dim != target_dim:
+                    print(f"Dimension mismatch ({existing_dim} → {target_dim}), recreating collection.")
+                    self.client.delete_collection(self.collection_name)
+                else:
+                    print(f"Collection already exists: {self.collection_name} (dim={existing_dim})")
+                    return
+
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(
+                    size=target_dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+            print(f"Created collection: {self.collection_name} (dim={target_dim})")
+
         except Exception as e:
             raise QdrantConnectionError(f"Failed to ensure collection exists: {str(e)}")
     
@@ -360,21 +386,33 @@ class RAGService:
                     ]
                 )
             
-            # Search similar documents in Qdrant
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                limit=top_k,
-                query_filter=query_filter,
-                score_threshold=min_similarity  # Qdrant's built-in threshold
-            )
-            
+            # Search similar documents in Qdrant (qdrant-client 1.7+ API)
+            try:
+                # 신버전 API
+                from qdrant_client.models import QueryRequest
+                search_results = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    limit=top_k,
+                    query_filter=query_filter,
+                    score_threshold=min_similarity,
+                ).points
+            except AttributeError:
+                # 구버전 fallback
+                search_results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    limit=top_k,
+                    query_filter=query_filter,
+                    score_threshold=min_similarity,
+                )
+
             # Format results
             documents = []
             for result in search_results:
                 documents.append(RetrievedDocument(
                     content=result.payload.get("content", ""),
-                    similarity=result.score,  # Cosine similarity (0-1)
+                    similarity=result.score,
                     source=result.payload.get("source", "unknown"),
                     metadata=result.payload
                 ))

@@ -12,14 +12,22 @@ load_dotenv()
 
 class Config:
     """Configuration class for AI Tutor System"""
-    
+
+    # AI Backend: "mock" | "openai" | "gemini"
+    AI_BACKEND: str = os.getenv("AI_BACKEND", "mock")
+
     # OpenAI Configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4")
     OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
     OPENAI_MAX_TOKENS: int = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
     OPENAI_TIMEOUT: int = int(os.getenv("OPENAI_TIMEOUT", "10"))
-    
+
+    # Gemini Configuration
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    GEMINI_EMBEDDING_MODEL: str = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
+
     # Qdrant Configuration
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
@@ -37,14 +45,17 @@ class Config:
     @classmethod
     def validate(cls) -> bool:
         """Validate configuration"""
+        if cls.AI_BACKEND == "gemini":
+            if not cls.GEMINI_API_KEY:
+                print("⚠️  Warning: GEMINI_API_KEY not set")
+                return False
+            return True
         if not cls.OPENAI_API_KEY:
             print("⚠️  Warning: OPENAI_API_KEY not set")
             return False
-        
         if cls.OPENAI_API_KEY == "your_openai_api_key_here":
             print("⚠️  Warning: OPENAI_API_KEY is still the default value")
             return False
-        
         return True
     
     @classmethod

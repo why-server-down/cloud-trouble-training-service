@@ -23,6 +23,7 @@ class K8sSetupService:
     def _setup_sync(self, namespace: str) -> None:
         self._ensure_namespace(namespace)
         self._ensure_nginx_deployment(namespace)
+        self._ensure_nginx_service(namespace)
 
     def _ensure_namespace(self, namespace: str) -> None:
         try:
@@ -73,6 +74,24 @@ class K8sSetupService:
                     namespace=namespace, body=deployment
                 )
                 print(f"[K8s] nginx 배포 완료: {namespace}")
+            else:
+                raise
+
+    def _ensure_nginx_service(self, namespace: str) -> None:
+        try:
+            self._core_api.read_namespaced_service(name="nginx-svc", namespace=namespace)
+            print(f"[K8s] nginx-svc 이미 존재: {namespace}")
+        except ApiException as e:
+            if e.status == 404:
+                service = client.V1Service(
+                    metadata=client.V1ObjectMeta(name="nginx-svc", namespace=namespace),
+                    spec=client.V1ServiceSpec(
+                        selector={"app": "nginx"},
+                        ports=[client.V1ServicePort(port=80, target_port=80)],
+                    ),
+                )
+                self._core_api.create_namespaced_service(namespace=namespace, body=service)
+                print(f"[K8s] nginx-svc 생성 완료: {namespace}")
             else:
                 raise
 

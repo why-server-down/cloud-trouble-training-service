@@ -115,6 +115,8 @@ class MissionService:
             select(Mission).where(Mission.id == attempt.mission_id)
         )
         mission = mission_result.scalar_one_or_none()
+        if not mission:
+            raise ValueError("미션 정보를 찾을 수 없습니다 (AI 시나리오 attempt는 /api/scenarios/status를 사용하세요)")
 
         now = datetime.now(timezone.utc)
         elapsed = int((now - attempt.start_time).total_seconds())

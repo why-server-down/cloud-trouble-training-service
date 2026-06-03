@@ -10,6 +10,51 @@ from typing import Optional
 
 from app.core.config import settings
 
+
+def _get_real_pod_status(namespace: str) -> tuple[str, str]:
+    """K8s API로 실제 Pod 상태와 이벤트를 조회한다."""
+    try:
+        from kubernetes import client, config
+        try:
+            config.load_incluster_config()
+        except Exception:
+            config.load_kube_config()
+
+        core_api = client.CoreV1Api()
+        pods = core_api.list_namespaced_pod(namespace=namespace)
+
+        if not pods.items:
+            return "Pod 없음", "네임스페이스에 Pod가 존재하지 않습니다"
+
+        status_lines = []
+        for pod in pods.items:
+            phase = pod.status.phase or "Unknown"
+            name = pod.metadata.name
+            container_statuses = pod.status.container_statuses or []
+            for cs in container_statuses:
+                if cs.state.waiting:
+                    phase = f"{cs.state.waiting.reason or 'Waiting'}"
+                elif cs.state.terminated:
+                    phase = f"Terminated ({cs.state.terminated.reason or ''})"
+            status_lines.append(f"{name}: {phase}")
+
+        # 최근 이벤트 조회
+        events = core_api.list_namespaced_event(namespace=namespace)
+        recent_events = []
+        for ev in sorted(
+            events.items,
+            key=lambda e: e.last_timestamp.isoformat() if e.last_timestamp else "",
+            reverse=True,
+        )[:5]:
+            if ev.message:
+                recent_events.append(f"- {ev.reason}: {ev.message[:100]}")
+
+        pod_status = "\n".join(status_lines)
+        event_str = "\n".join(recent_events) if recent_events else "이벤트 없음"
+        return pod_status, event_str
+    except Exception as e:
+        return "조회 실패", f"K8s API 오류: {e}"
+
 # ai-data 경로를 Python path에 추가
 _AI_DATA_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../../ai-data")
@@ -41,15 +86,36 @@ class TutorService:
             return
         self._initialized = True
 
-        if settings.AI_BACKEND != "openai" or not settings.OPENAI_API_KEY:
+        if settings.AI_BACKEND not in ("openai", "gemini"):
             return
+
+        # ai-data/config.py는 os.environ에서 직접 키를 읽으므로 먼저 세팅
+        os.environ["AI_BACKEND"] = settings.AI_BACKEND
+
+        if settings.AI_BACKEND == "gemini":
+            if not settings.GEMINI_API_KEY:
+                return
+            os.environ["GEMINI_API_KEY"] = settings.GEMINI_API_KEY
+            os.environ["GEMINI_MODEL"] = settings.GEMINI_MODEL
+            os.environ["GEMINI_EMBEDDING_MODEL"] = settings.GEMINI_EMBEDDING_MODEL
+            api_key = settings.GEMINI_API_KEY
+            model = settings.GEMINI_MODEL
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        else:
+            if not settings.OPENAI_API_KEY:
+                return
+            os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
+            api_key = settings.OPENAI_API_KEY
+            model = settings.TUTOR_MODEL
+            base_url = None
 
         try:
             from ai_engine import AITutorEngine
             self._engine = AITutorEngine(
-                openai_api_key=settings.OPENAI_API_KEY,
-                model=settings.OPENAI_MODEL,
+                openai_api_key=api_key,
+                model=model,
                 use_rag=True,
+                api_base_url=base_url,
             )
         except Exception as e:
             print(f"[AI Tutor] 엔진 초기화 실패 (Mock 모드로 fallback): {e}")
@@ -112,11 +178,16 @@ class TutorService:
                 chaos_type=chaos_type,
                 expected_solution=chaos_type,
             )
+            if settings.VALIDATION_BACKEND == "k8s" and namespace:
+                pod_status, recent_events = _get_real_pod_status(namespace)
+            else:
+                pod_status = "Unknown (Mock 환경)"
+                recent_events = "(실제 K8s 환경에서는 이벤트가 제공됩니다)"
             system_ctx = SystemContext(
                 namespace=namespace,
-                pod_status="Unknown (Mock 환경)",
-                pod_logs="(실제 K8s 환경에서는 실시간 로그가 제공됩니다)",
-                recent_events="(실제 K8s 환경에서는 이벤트가 제공됩니다)",
+                pod_status=pod_status,
+                pod_logs="(로그는 kubectl logs <pod-name> 으로 직접 확인하세요)",
+                recent_events=recent_events,
             )
             user_ctx = UserContext(
                 user_id=attempt_id,
@@ -163,10 +234,10 @@ class TutorService:
                 3: "1. `kubectl get svc` 로 Service 목록 확인\n2. `kubectl describe svc <이름>` 에서 Endpoints 확인\n3. `kubectl get pods --show-labels` 로 label 비교\n4. Service selector 또는 Pod label 수정",
             },
             "network_latency": {
-                0: "응답이 매우 느린 상황이에요. 네트워크 레벨에서 문제가 생겼을 수 있는데, 어떤 Pod 간 통신이 느린지 확인해볼까요?",
-                1: "특정 Pod나 Node에서 네트워크 지연이 발생하고 있을 수 있어요. Pod의 상태와 이벤트를 확인해보면 단서가 있을까요?",
-                2: "`kubectl get pods -o wide`로 어떤 Node에 있는지 확인하고, `kubectl describe pod <이름>`의 Events에서 네트워크 관련 메시지를 찾아보세요.",
-                3: "1. `kubectl get pods -o wide` 로 Pod 위치 확인\n2. `kubectl describe pod <이름>` 으로 네트워크 이벤트 확인\n3. NetworkChaos 정책 또는 Pod 재배치로 해결",
+                0: "Pod는 Running인데 서비스 트래픽을 못 받는 상황이에요. Pod가 Running이어도 트래픽을 받으려면 또 다른 조건이 필요한데, 뭔지 알고 있나요?",
+                1: "Readiness Probe라는 개념이 있어요. Pod가 실제로 요청을 처리할 준비가 됐는지 확인하는 건강검진이에요. nginx의 Readiness Probe 설정이 어떻게 되어 있는지 확인해볼까요?",
+                2: "`kubectl describe pod <이름>`의 Conditions 섹션에서 Ready 상태와 Readiness probe 실패 메시지를 확인해보세요. probe가 어떤 경로를 체크하고 있나요?",
+                3: "1. `kubectl describe pod <이름>` 으로 Readiness probe 실패 경로 확인\n2. `kubectl patch deployment nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"readinessProbe\":null}]}}}}'` 로 probe 제거\n3. 또는 `kubectl edit deployment nginx` 로 readinessProbe 섹션 삭제",
             },
         }
 
