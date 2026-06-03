@@ -213,3 +213,33 @@
 - [ ] 28.3 Write PBT: RAG similarity >= 0.7
 - [ ] 28.4 Write PBT: Hint penalties are correct
 - [ ] 28.5 Run all property tests
+
+## Phase 10: Prompt Refinement (Socratic Tutor Enhancement)
+
+### Task 29: Hint Level Restructuring
+- [x] 29.1 Remove Level 0 (consolidate 4-level to 3-level system)
+- [x] 29.2 Redefine Level 1: Observation-focused guidance only
+- [x] 29.3 Redefine Level 2: Technical concepts + log line hints (no direct cause)
+- [x] 29.4 Redefine Level 3: Complete solution with YAML/commands
+- [x] 29.5 Update penalty structure to match 3-level system
+
+### Task 30: Prompt Template Enhancement
+- [x] 30.1 Add context placeholder: {context}
+- [x] 30.2 Add user message placeholder: {user_message}
+- [x] 30.3 Add hint level placeholder: [Hint_Level]
+- [x] 30.4 Define precise constraints for each level
+- [x] 30.5 Update socratic_tutor.md with refined prompt
+
+### Task 31: Level-Specific Constraint Definition
+- [x] 31.1 Level 1 constraints: NO answers/causes, observation commands only
+- [x] 31.2 Level 2 constraints: NO direct cause, explain concepts, hint at log lines
+- [x] 31.3 Level 3 constraints: Provide complete YAML settings and exact commands
+- [x] 31.4 Add examples for each level
+- [x] 31.5 Validate constraint enforcement logic
+
+### Task 32: Prompt Testing & Validation
+- [ ] 32.1 Test Level 1: Verify no answers/causes are given
+- [ ] 32.2 Test Level 2: Verify concept explanation without direct cause
+- [ ] 32.3 Test Level 3: Verify complete solution is provided
+- [ ] 32.4 Test context placeholder substitution
+- [ ] 32.5 Validate with real Gemini API calls

@@ -1728,3 +1728,100 @@ Next steps:
 **작업 일시**: 2026-06-04  
 **소요 시간**: 약 2시간  
 **상태**: ✅ **완료** (Qdrant 적재는 사용자가 Docker 설치 후 실행)
+
+
+---
+
+## 2026-06-04: Socratic Tutor Prompt Refinement (Phase 10)
+
+### 작업 개요
+AI Tutor 시스템의 Socratic 프롬프트를 고도화하여 힌트 레벨별 제약 조건을 정밀하게 통제할 수 있도록 개선했습니다.
+
+### 주요 변경사항
+
+#### 1. 힌트 레벨 재구조화 (4단계 → 3단계)
+- **Level 0 제거**: 기존 4단계 시스템을 3단계로 통합
+- **새로운 3단계 체계**:
+  - **Level 1 (관찰 유도)**: 정답/원인 절대 금지, 관측 가능한 상태에 대한 질문만 허용
+  - **Level 2 (개념 설명)**: 기술 개념 설명, 로그 라인 힌트, 원인 직접 제시 금지
+  - **Level 3 (완전한 해결책)**: 근본 원인, 정확한 명령어, YAML 설정 모두 제공
+
+#### 2. 프롬프트 템플릿 강화
+**추가된 Placeholder:**
+- `{context}`: 구조화된 컨텍스트 데이터 (미션, 시스템, 사용자)
+- `{user_message}`: 사용자 질문
+- `[Hint_Level]`: 현재 힌트 레벨
+
+**정밀한 제약 조건 정의:**
+```python
+# Level 1 금지 패턴
+FORBIDDEN = ["the issue is", "run kubectl", "check line", "edit the", "change to"]
+
+# Level 2 금지 패턴
+FORBIDDEN = ["the solution is", "change line X to Y", "edit deployment and set"]
+
+# Level 3 필수 패턴
+REQUIRED = ["root cause", "kubectl", "why this works"]
+```
+
+#### 3. 레벨별 상세 예제 추가
+**CrashLoopBackOff 시나리오 3단계 예제:**
+- Level 1: "What does the Status field show? What messages repeat in Events?"
+- Level 2: "CrashLoopBackOff = immediate exit. Check last 10 log lines for exit code."
+- Level 3: "Root Cause: CMD=/app/start.sh missing. Fix: kubectl edit, change to /usr/local/bin/start.sh"
+
+#### 4. 업데이트된 파일
+
+**Spec 파일:**
+- `.kiro/specs/ai-tutor-system/tasks.md`: Phase 10 추가 (Task 29-32)
+- `.kiro/specs/ai-tutor-system/requirements.md`: 3단계 체계 반영
+- `.kiro/specs/ai-tutor-system/design.md`: SocraticPromptEngine 및 HintManager 업데이트
+
+**프롬프트 파일:**
+- `ai-data/prompts/socratic_tutor.md`: 완전히 재작성 (~200 lines)
+  - 3단계 힌트 시스템 상세 문서화
+  - Enforcement Rules (금지/필수 패턴 검증)
+  - 실전 예제 3개 추가
+  - Context placeholder 통합
+
+#### 5. Task 완료 상태
+
+**Phase 10: Prompt Refinement**
+- ✅ Task 29: Hint Level Restructuring (5/5 완료)
+- ✅ Task 30: Prompt Template Enhancement (5/5 완료)
+- ✅ Task 31: Level-Specific Constraint Definition (5/5 완료)
+- ⏳ Task 32: Prompt Testing & Validation (0/5 대기 중)
+
+### 기술적 개선사항
+
+#### 점수 패널티 구조 (변경 없음)
+```python
+HINT_PENALTIES = {
+    1: 5,   # 관찰 유도
+    2: 10,  # 개념 설명
+    3: 50   # 완전한 해결책
+}
+```
+
+#### 프롬프트 생성 로직 개선
+```python
+def _format_hint_level_instruction(self, level: int) -> str:
+    instructions = {
+        1: "OBSERVATIONAL: Questions only, NO answers/commands",
+        2: "CONCEPTUAL: Explain concepts, point to logs, NO solutions",
+        3: "COMPLETE: Root cause + exact commands + YAML"
+    }
+    return f"[Hint_Level: {level}]\n{instructions[level]}"
+```
+
+### 다음 단계 (Task 32)
+1. Level 1 프롬프트 테스트: 정답/원인 누출 검증
+2. Level 2 프롬프트 테스트: 개념 설명 vs 직접 해결책 검증
+3. Level 3 프롬프트 테스트: 완전성 검증 (root cause, commands, YAML)
+4. Context placeholder 치환 검증
+5. Gemini API 실전 호출 테스트
+
+### 참고 링크
+- Spec: `.kiro/specs/ai-tutor-system/`
+- Prompt: `ai-data/prompts/socratic_tutor.md`
+- Related Tasks: Phase 3 (Prompt Engineering), Phase 8 (Frontend Integration)
