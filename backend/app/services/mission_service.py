@@ -83,6 +83,7 @@ class MissionService:
                         Mission.level == mission.level - 1,
                     )
                 )
+                .limit(1)
             )
             if not prev_completed.scalar_one_or_none():
                 raise ValueError("이전 레벨을 먼저 완료해야 합니다")
