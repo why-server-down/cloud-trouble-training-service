@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import Toast, { ToastMessage } from '../Feedback/Toast'
 import {
@@ -75,7 +75,6 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
   const [activeScenario, setActiveScenario] = useState<ScenarioStatusResponse | null>(null)
   const [scenarioHintsUsed, setScenarioHintsUsed] = useState(0)
   const [isTutorFloatingOpen, setIsTutorFloatingOpen] = useState(false)
-  const hadTutorRef = useRef(false)
   const hasTutor = Boolean(activeMissionId || activeScenario?.status === 'in_progress')
 
   const showToast = useCallback((kind: ToastMessage['kind'], text: string) => setToast({ kind, text }), [])
@@ -149,13 +148,9 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
   }, [fetchMissions])
 
   useEffect(() => {
-    if (hasTutor && !hadTutorRef.current) {
-      setIsTutorFloatingOpen(true)
-    }
     if (!hasTutor) {
       setIsTutorFloatingOpen(false)
     }
-    hadTutorRef.current = hasTutor
   }, [hasTutor])
 
   // AI 시나리오 진행 중일 때 1초마다 상태 갱신

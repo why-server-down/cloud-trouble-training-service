@@ -26,6 +26,9 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
         if (data.attempt.status !== 'in_progress') onMissionEnd()
       } catch (error) {
         console.error('미션 상태 조회 실패:', error)
+        if (error instanceof Error && error.message === '진행 중인 미션이 없습니다') {
+          onMissionEnd()
+        }
       }
     }
 

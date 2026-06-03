@@ -30,7 +30,7 @@ const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
 const GRAFANA_DATA_FALLBACK_FAILURES = 3
 
 const getGrafanaUrl = (namespace: string | null) =>
-  `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/${DASHBOARD_UID}?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
+  `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/afterfail-incident-triage?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
 
 type PrometheusQueryResponse = {
   status: string

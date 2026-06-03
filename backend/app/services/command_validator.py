@@ -11,10 +11,9 @@ class ValidationResult:
 
 
 class CommandValidator:
-    ALLOWED_COMMANDS = [
-        "get", "describe", "logs", "edit", "apply", "delete", "set", "patch",
-        "exec", "port-forward", "top", "explain",
-        "help", "version", "api-resources", "api-versions",
+    FORBIDDEN_COMMANDS = [
+        "cluster-info", "cordon", "uncordon", "drain", "proxy",
+        "auth", "certificate", "alpha", "cp", "plugin", "attach"
     ]
 
     BLACKLIST_PATTERNS = [
@@ -40,14 +39,14 @@ class CommandValidator:
         if len(parts) < 2:
             return ValidationResult(
                 is_valid=False,
-                error="Invalid kubectl command",
+                error="명령어 목록을 보려면 'kubectl help'를 입력하세요.",
             )
 
         subcommand = parts[1]
-        if subcommand not in self.ALLOWED_COMMANDS:
+        if subcommand in self.FORBIDDEN_COMMANDS:
             return ValidationResult(
                 is_valid=False,
-                error=f"Command '{subcommand}' is not allowed",
+                error=f"Command '{subcommand}' is restricted for safety reasons",
             )
 
         for pattern in self.BLACKLIST_PATTERNS:

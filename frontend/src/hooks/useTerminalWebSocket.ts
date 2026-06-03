@@ -16,6 +16,7 @@ interface UseTerminalWebSocketProps {
   terminal: Terminal | null
   namespace?: string
   onConfirmRequired?: (command: string) => void
+  onCommandComplete?: () => void
 }
 
 export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnected'
@@ -43,12 +44,13 @@ const normalizeWsBaseUrl = (configuredUrl?: string) => {
   return configuredUrl.replace(/\/$/, '')
 }
 
-export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired }: UseTerminalWebSocketProps) => {
+export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired, onCommandComplete }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const initialMessageReceivedRef = useRef(false)
   const confirmHandlerRef = useRef(onConfirmRequired)
+  const completeHandlerRef = useRef(onCommandComplete)
   const [connectionStatus, setConnectionStatus] = useState<TerminalConnectionStatus>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [reconnectKey, setReconnectKey] = useState(0)
@@ -56,7 +58,8 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
 
   useEffect(() => {
     confirmHandlerRef.current = onConfirmRequired
-  }, [onConfirmRequired])
+    completeHandlerRef.current = onCommandComplete
+  }, [onConfirmRequired, onCommandComplete])
 
   const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
 
@@ -86,8 +89,12 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
           } else {
             terminal.write(`\r\n${getPrompt()}`)
           }
+          completeHandlerRef.current?.()
         }
-        if (message.type === 'error' && message.message) terminal.write(`\r\n\x1b[31mError: ${message.message}\x1b[0m\r\n${getPrompt()}`)
+        if (message.type === 'error' && message.message) {
+          terminal.write(`\r\n\x1b[31mError: ${message.message}\x1b[0m\r\n${getPrompt()}`)
+          completeHandlerRef.current?.()
+        }
         if (message.type === 'confirm' && message.command) confirmHandlerRef.current?.(message.command)
       } catch (parseError) {
         console.error('WebSocket 메시지 파싱 실패:', parseError)
