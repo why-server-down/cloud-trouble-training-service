@@ -25,6 +25,7 @@ const ENV_TABS: { id: EnvTab; label: string; subtitle: string; wip: boolean }[] 
 
 const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
 const DASHBOARD_UID = 'k8s-survival-overview'
+const GRAFANA_DATA_WARMUP_MS = 5500
 
 const getGrafanaUrl = (namespace: string | null) =>
   `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/${DASHBOARD_UID}?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
@@ -40,8 +41,10 @@ function App() {
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [hasActiveMission, setHasActiveMission] = useState(false)
-  const [isGrafanaLoading, setIsGrafanaLoading] = useState(false)
+  const [isGrafanaFrameReady, setIsGrafanaFrameReady] = useState(false)
+  const [isGrafanaDataReady, setIsGrafanaDataReady] = useState(false)
   const grafanaUrl = getGrafanaUrl(namespace)
+  const isGrafanaLoading = hasActiveMission && (!isGrafanaFrameReady || !isGrafanaDataReady)
 
   const clearAuthState = useCallback(() => {
     setToken(null)
@@ -115,8 +118,16 @@ function App() {
   }, [activeTab])
 
   useEffect(() => {
-    setIsGrafanaLoading(hasActiveMission)
+    setIsGrafanaFrameReady(false)
+    setIsGrafanaDataReady(false)
   }, [grafanaUrl, hasActiveMission])
+
+  useEffect(() => {
+    if (!hasActiveMission || !isGrafanaFrameReady) return
+
+    const timeout = window.setTimeout(() => setIsGrafanaDataReady(true), GRAFANA_DATA_WARMUP_MS)
+    return () => window.clearTimeout(timeout)
+  }, [grafanaUrl, hasActiveMission, isGrafanaFrameReady])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
@@ -272,12 +283,11 @@ function App() {
                               className="grafana-frame"
                               src={grafanaUrl}
                               title="Grafana dashboard"
-                              onLoad={() => setIsGrafanaLoading(false)}
+                              onLoad={() => setIsGrafanaFrameReady(true)}
                             />
                             {isGrafanaLoading && (
                               <div className="grafana-loading-overlay" role="status" aria-live="polite">
-                                <strong>대시보드를 불러오고 있습니다.</strong>
-                                <span>잠시만 기다려주세요..</span>
+                                <strong>데이터 로딩중입니다..</strong>
                               </div>
                             )}
                           </div>
