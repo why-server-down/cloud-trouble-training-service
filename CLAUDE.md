@@ -16,7 +16,7 @@
 - AI 장애 생성 모드 Phase 1~3 완료 (난이도 선택 → AI 시나리오 생성 → 장애 주입 → K8s 검증)
 - Grafana 패널 cAdvisor 수정 완료 (Docker Desktop container="" 필터)
 - 검증 K8s fallback 추가 완료
-- 미션 4 (network_latency) 재설계 필요
+- 미션 4 재설계 완료 (network_latency → Readiness Probe 실패로 구현)
 
 ### 캡스톤 2 - 멀티 환경 고도화 (예정)
 탭 분리: Kubernetes / Docker-only / Linux / Application
@@ -58,6 +58,7 @@
   - 프론트엔드 AI Challenge Mode UI (잠금 해제 조건, 난이도 선택, 진행 상황 표시)
 - [x] missions.py AI 시나리오 attempt 혼용 크래시 수정 (NoneType 방지)
 - [x] scenario_agent.py mock fixture validation k8s 룰로 통일
+- [x] 미션 4 재설계 (chaos_type=network_latency → Readiness Probe 실패 주입으로 구현)
 
 ### 진행 중 (캡스톤 1)
 - [ ] AI 장애 생성 모드 Phase 4~7 (agent.md 기준)
@@ -65,7 +66,6 @@
   - Phase 5: RAG 장애 로그 지식창고 (incident-logs/ 디렉터리 구조 미구성)
   - Phase 6: validation_agent.py 미구현
   - Phase 7: 운영 메트릭, 비용 제한, 시드 저장
-- [ ] 미션 4 (network_latency) 재설계
 - [ ] TutorMessage DB 영구 저장 (현재 인메모리 최근 5개)
 
 ### 예정 (캡스톤 2)
