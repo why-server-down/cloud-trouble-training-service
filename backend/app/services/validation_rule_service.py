@@ -146,8 +146,12 @@ class ValidationRuleService:
                     name, check_type = parts[1], parts[2]
                     dep = apps_api.read_namespaced_deployment(name=name, namespace=namespace)
                     if check_type == "running":
+                        desired = dep.spec.replicas or 1
+                        updated = dep.status.updated_replicas or 0
                         available = dep.status.available_replicas or 0
-                        return available > 0, float(available)
+                        unavailable = dep.status.unavailable_replicas or 0
+                        passed = updated >= desired and available >= desired and unavailable == 0
+                        return passed, float(available)
                     elif check_type == "memory_limit" and len(parts) >= 4:
                         threshold = parts[3]  # e.g. "20Mi"
                         containers = dep.spec.template.spec.containers

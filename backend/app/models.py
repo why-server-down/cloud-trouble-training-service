@@ -132,6 +132,7 @@ class ValidationRule(Base):
 
 class TutorMessage(Base):
     __tablename__ = "tutor_messages"
+    # TODO(phase7): created_at 기준 30일 경과 레코드 자동 삭제 배치 추가 예정
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mission_attempts.id"), nullable=False)
