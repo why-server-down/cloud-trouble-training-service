@@ -1,10 +1,11 @@
 """
 AI 시나리오 생성 에이전트.
 - mock 모드: 난이도별 fixture JSON 반환 (OpenAI 없이 동작)
-- openai 모드: Phase 6에서 구현 예정, 현재는 mock fallback
+- openai/gemini 모드: scenario_gen.md 시스템 프롬프트 기반 실제 생성
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -847,8 +848,6 @@ class OpenAIScenarioAgent:
     def _parse_response(
         self, raw: str, gen_input: ScenarioGenerationInput
     ) -> list[ScenarioCandidate]:
-        import json
-
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:

@@ -7,7 +7,7 @@ import time
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 import openai
-from openai import OpenAI, OpenAIError, APIError, RateLimitError, APIConnectionError
+from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 
 from config import config
 

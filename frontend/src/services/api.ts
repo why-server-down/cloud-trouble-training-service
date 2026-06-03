@@ -209,11 +209,6 @@ export const createTerminalSession = async (token: string): Promise<SessionRespo
   return response.json()
 }
 
-export const healthCheck = async (): Promise<{ status: string }> => {
-  const response = await fetch(`${API_BASE_URL}/health`)
-  return response.json()
-}
-
 export const getProfile = async (token: string): Promise<UserProfileResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
     headers: {
@@ -454,11 +449,3 @@ export const useScenarioHint = async (token: string): Promise<MissionAttemptResp
   return response.json()
 }
 
-export const debugResolveScenario = async (token: string): Promise<{ message: string }> => {
-  const response = await fetch(`${API_BASE_URL}/api/scenarios/debug/resolve`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!response.ok) throw new Error(await getErrorDetail(response, '디버그 해결에 실패했습니다'))
-  return response.json()
-}

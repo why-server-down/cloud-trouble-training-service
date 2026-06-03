@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from 'xterm'
 import { AUTH_EXPIRED_EVENT } from '../services/api'
+import { getTerminalPrompt } from '../utils/terminal'
 
 interface WebSocketMessage {
   type: 'output' | 'error' | 'confirm'
@@ -57,10 +58,7 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
     confirmHandlerRef.current = onConfirmRequired
   }, [onConfirmRequired])
 
-  const getPrompt = useCallback(() => {
-    if (!namespace) return '$ '
-    return `[${namespace.startsWith('user-') ? namespace.slice(0, 15) + '...' : namespace}]$ `
-  }, [namespace])
+  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
 
   useEffect(() => {
     if (!sessionId || !token || !terminal) return
