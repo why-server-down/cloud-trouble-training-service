@@ -25,6 +25,7 @@ const kubectlCommands = [
   'kubectl version',
   'kubectl help',
   'kubectl get all',
+  'clear',
 ]
 
 const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
@@ -35,6 +36,9 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   const commandHistoryRef = useRef<string[]>([])
   const historyIndexRef = useRef(-1)
   const isConnectedRef = useRef(false)
+  const commandQueueRef = useRef<{ cmd: string; wasEchoed: boolean }[]>([])
+  const isExecutingRef = useRef(false)
+  const onCommandCompleteRef = useRef<(() => void) | null>(null)
   const [confirmCommand, setConfirmCommand] = useState<string | null>(null)
   const [terminalReady, setTerminalReady] = useState(false)
 
@@ -46,6 +50,9 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
     terminal: terminalReady ? xtermRef.current : null,
     namespace,
     onConfirmRequired: setConfirmCommand,
+    onCommandComplete: useCallback(() => {
+      onCommandCompleteRef.current?.()
+    }, []),
   })
 
   useEffect(() => {
@@ -83,19 +90,74 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
       for (let index = 0; index < currentLineRef.current.length; index += 1) terminal.write('\b \b')
     }
 
+    const processNextCommand = () => {
+      if (isExecutingRef.current) return
+      if (commandQueueRef.current.length === 0) return
+
+      const { cmd, wasEchoed } = commandQueueRef.current.shift()!
+      isExecutingRef.current = true
+
+      const command = cmd.trim()
+
+      if (!wasEchoed) terminal.write(cmd + '\r\n')
+      else terminal.write('\r\n')
+
+      if (command === 'clear') {
+        terminal.clear()
+        terminal.write(getPrompt())
+        isExecutingRef.current = false
+        setTimeout(processNextCommand, 0)
+        return
+      }
+
+      if (command) {
+        commandHistoryRef.current.push(command)
+        historyIndexRef.current = commandHistoryRef.current.length
+        if (isConnectedRef.current && sessionId && token) {
+          sendCommand(command)
+        } else {
+          terminal.writeln(command.startsWith('kubectl') ? '터미널 연결을 기다리는 중입니다.' : 'Error: Only kubectl commands are allowed')
+          terminal.write(getPrompt())
+          isExecutingRef.current = false
+          setTimeout(processNextCommand, 0)
+        }
+      } else {
+        terminal.write(getPrompt())
+        isExecutingRef.current = false
+        setTimeout(processNextCommand, 0)
+      }
+    }
+
+    onCommandCompleteRef.current = () => {
+      isExecutingRef.current = false
+      processNextCommand()
+    }
+
+    const queueCommand = (cmd: string, wasEchoed: boolean) => {
+      commandQueueRef.current.push({ cmd, wasEchoed })
+      processNextCommand()
+    }
+
     terminal.onData((data) => {
+      if (data.length > 1 && (data.includes('\r') || data.includes('\n'))) {
+        let normalizedData = data.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+        if (!normalizedData.endsWith('\r')) {
+          normalizedData += '\r'
+        }
+        const lines = normalizedData.split('\r')
+        lines.forEach((line, index) => {
+          if (index < lines.length - 1) {
+            queueCommand(currentLineRef.current + line, false)
+            currentLineRef.current = ''
+          }
+        })
+        return
+      }
+
       const code = data.charCodeAt(0)
 
       if (code === 13) {
-        terminal.write('\r\n')
-        const command = currentLineRef.current.trim()
-        if (command) {
-          commandHistoryRef.current.push(command)
-          historyIndexRef.current = commandHistoryRef.current.length
-          if (isConnectedRef.current && sessionId && token) sendCommand(command)
-          else terminal.writeln(command.startsWith('kubectl') ? '터미널 연결을 기다리는 중입니다.' : 'Error: Only kubectl commands are allowed')
-        }
-        if (!command || !isConnectedRef.current) terminal.write(getPrompt())
+        queueCommand(currentLineRef.current, true)
         currentLineRef.current = ''
       } else if (code === 127 && currentLineRef.current.length > 0) {
         currentLineRef.current = currentLineRef.current.slice(0, -1)
