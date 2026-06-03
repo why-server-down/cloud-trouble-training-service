@@ -1,4 +1,4 @@
-# Survival Camp - Mission Playbook
+# AfterFail - Mission Playbook
 
 ## Level 1: Basic Pod Issues
 

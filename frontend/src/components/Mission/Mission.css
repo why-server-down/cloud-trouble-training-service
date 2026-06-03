@@ -30,6 +30,26 @@
   overflow-y: auto;
 }
 
+.mission-panel.mission-active {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mission-panel.mission-active .mission-list {
+  flex: 0 0 auto;
+  padding-bottom: 0.65rem;
+  overflow: visible;
+}
+
+.mission-panel.mission-active .mission-card {
+  margin-bottom: 0;
+}
+
+.mission-panel.mission-active .mission-header,
+.mission-panel.mission-active .mission-status-panel {
+  flex-shrink: 0;
+}
+
 .mission-card {
   display: block;
   width: 100%;
@@ -221,6 +241,12 @@
   flex-direction: column;
   padding: 0.9rem;
   background: #121817;
+}
+
+.mission-panel.mission-active .tutor-panel {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
 }
 
 .tutor-header {

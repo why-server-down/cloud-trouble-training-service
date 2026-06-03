@@ -306,7 +306,7 @@ curl -X POST http://localhost:8000/api/missions/start \
 
 ## 📝 라이선스
 
-이 프로젝트는 K8s Survival Camp의 일부입니다.
+이 프로젝트는 AfterFail의 일부입니다.
 
 ---
 

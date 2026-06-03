@@ -1,4 +1,4 @@
-# K8s Survival Camp
+# AfterFail
 
 카오스 엔지니어링 + AI 튜터 + 게이미피케이션 기반 DevOps 장애 대응 훈련 플랫폼 (캡스톤 디자인)
 

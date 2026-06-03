@@ -1,6 +1,6 @@
 # ai-data - RAG 지식창고
 
-K8s Survival Camp AI 튜터 및 시나리오 생성에 사용되는 RAG 엔진.
+AfterFail AI 튜터 및 시나리오 생성에 사용되는 RAG 엔진.
 
 ## 구조
 

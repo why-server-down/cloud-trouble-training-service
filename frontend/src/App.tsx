@@ -146,7 +146,7 @@ function App() {
       <header className="app-header">
         <div className="brand-lockup">
           <span className="brand-index">OPS / 01</span>
-          <h1>K8s Survival Camp</h1>
+          <h1>AfterFail</h1>
           <span className="brand-subtitle">Incident drill console</span>
         </div>
         <div className="header-info">
@@ -234,7 +234,7 @@ function App() {
                             <span className="terminal-label">GETTING STARTED / FIELD GUIDE</span>
                           </div>
                           <div className="tutorial-content">
-                            <span className="tutorial-kicker">K8s SURVIVAL CAMP</span>
+                            <span className="tutorial-kicker">AfterFail</span>
                             <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
                             <p>왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다. 오른쪽 대시보드와 Kubernetes 명령을 함께 사용해 원인을 찾아보세요.</p>
                             <div className="tutorial-steps">

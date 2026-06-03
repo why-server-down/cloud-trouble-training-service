@@ -1,4 +1,4 @@
-# Frontend - K8s Survival Camp
+# Frontend - AfterFail
 
 React + TypeScript + Vite 기반 프론트엔드
 
@@ -45,7 +45,7 @@ frontend/src/
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  K8s Survival Camp          [프로필]  [Namespace]  [로그아웃] │
+│  AfterFail                  [프로필]  [Namespace]  [로그아웃] │
 ├──────────────────┬──────────────────────────────────────┤
 │  [미션] [터미널]  │                                        │
 ├──────────────────┤                                        │
