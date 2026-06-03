@@ -31,7 +31,7 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
   const [connectionStatus, setConnectionStatus] = useState<TerminalConnectionStatus>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [reconnectKey, setReconnectKey] = useState(0)
-  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
   useEffect(() => {
     confirmHandlerRef.current = onConfirmRequired

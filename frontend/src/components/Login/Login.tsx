@@ -63,16 +63,16 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         <form onSubmit={handleSubmit}>
           <div className="form-group">
             <label htmlFor="username">사용자명</label>
-            <input id="username" type="text" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="student1" required disabled={loading} />
+            <input id="username" type="text" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="student1" required disabled={loading} autoComplete="username" />
           </div>
           <div className="form-group">
             <label htmlFor="password">비밀번호</label>
-            <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="비밀번호 입력" required disabled={loading} />
+            <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="비밀번호 입력" required disabled={loading} autoComplete={isRegisterMode ? 'new-password' : 'current-password'} />
           </div>
           {isRegisterMode && (
             <div className="form-group">
               <label htmlFor="confirmPassword">비밀번호 확인</label>
-              <input id="confirmPassword" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="비밀번호 다시 입력" required disabled={loading} />
+              <input id="confirmPassword" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="비밀번호 다시 입력" required disabled={loading} autoComplete="new-password" />
             </div>
           )}
           {error && <div className="error-message">{error}</div>}
