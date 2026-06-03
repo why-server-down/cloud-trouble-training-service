@@ -49,38 +49,32 @@ class SocraticPromptEngine:
         self.system_prompt = self._load_system_prompt(system_prompt_path)
         
         self.hint_level_instructions = {
-            0: """
-HINT LEVEL 0 - Directional Guidance:
-- Provide ONLY general direction
-- Ask questions about what they can observe
-- DO NOT mention specific commands, resource names, or solutions
-- Guide them to think about WHERE to look, not WHAT to do
-- Example: "What does the pod's status tell you? What might cause that?"
-""",
             1: """
-HINT LEVEL 1 - Specific Investigation:
-- Point to specific resources or log sections to check
-- Suggest the TYPE of kubectl command (describe, logs, get)
-- DO NOT provide exact command syntax yet
-- Example: "Check the pod's detailed information and events. What error appears in the events?"
+CURRENT HINT LEVEL: 1 (Observational Guidance)
+STRICT CONSTRAINTS:
+- ❌ FORBIDDEN: Direct answers, root causes, solution steps
+- ❌ FORBIDDEN: Exact kubectl syntax or specific commands
+- ✅ ONLY: Questions about observable system state, general directions
+Guide the student to observe what is happening. Ask what they see in pod status, events, logs.
+Do NOT name the problem or point to the cause.
 """,
             2: """
-HINT LEVEL 2 - Exact Commands:
-- Provide specific kubectl commands with exact syntax
-- Tell them what to look for in the output
-- Explain what the command does
-- Example: "Run `kubectl describe pod <pod-name>` and look at the Events section at the bottom. What error message do you see there?"
+CURRENT HINT LEVEL: 2 (Conceptual + Diagnostic Hints)
+STRICT CONSTRAINTS:
+- ❌ FORBIDDEN: Directly stating the root cause or solution
+- ✅ ALLOWED: Explain technical concepts, reference specific log lines or event messages
+- ✅ ALLOWED: Introduce relevant K8s concepts (probes, image pull policy, etc.)
+Explain what the observed symptoms mean conceptually. Narrow down the area of investigation.
+Do NOT provide the fix or exact kubectl commands.
 """,
             3: """
-HINT LEVEL 3 - Complete Solution:
-- Provide the full solution with step-by-step instructions
-- Include exact commands and any YAML edits needed
-- Explain WHY each step is necessary
-- Example: "The issue is a typo in the image name. Here's how to fix it:
-  1. Edit the deployment: `kubectl edit deployment <name>`
-  2. Find the image line (around line 24)
-  3. Change 'ngnix' to 'nginx'
-  4. Save and exit. The pod will automatically restart with the correct image."
+CURRENT HINT LEVEL: 3 (Complete Solution)
+PROVIDE EVERYTHING:
+- ✅ State the root cause explicitly
+- ✅ Provide exact kubectl commands with placeholders (e.g., <pod-name>)
+- ✅ Include YAML configuration fixes if needed
+- ✅ Explain WHY this solution works
+Structure your response as: Root Cause → Solution steps → Why this works.
 """
         }
     
@@ -105,7 +99,7 @@ HINT LEVEL 3 - Complete Solution:
         
         Args:
             user_question: User's question
-            hint_level: Current hint level (0-3)
+            hint_level: Current hint level (1-3). 0은 1로 처리.
             mission_ctx: Mission information
             system_ctx: K8s system state
             user_ctx: User history
@@ -117,7 +111,9 @@ HINT LEVEL 3 - Complete Solution:
         prompt_parts = [self.system_prompt]
         
         # Add hint level instruction
-        prompt_parts.append(self.hint_level_instructions.get(hint_level, ""))
+        # hint_level 0은 level 1(관찰 유도)으로 처리
+        effective_level = max(1, min(hint_level, 3))
+        prompt_parts.append(self.hint_level_instructions.get(effective_level, ""))
         
         # Add mission context
         if mission_ctx:
@@ -221,7 +217,7 @@ def main():
     )
     
     # Generate prompts at different hint levels
-    for level in range(4):
+    for level in range(1, 4):
         print(f"\n{'='*80}")
         print(f"HINT LEVEL {level}")
         print('='*80)
