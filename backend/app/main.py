@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="K8s Survival Camp API",
+    title="AfterFail API",
     description="AI 기반 클라우드 장애 대응 훈련 플랫폼",
     version="0.1.0",
     lifespan=lifespan,

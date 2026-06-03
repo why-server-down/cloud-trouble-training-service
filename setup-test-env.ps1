@@ -4,11 +4,30 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "Starting K8s Survival Camp with Docker Compose..."
+Write-Host "Starting AfterFail with Docker Compose..."
 
 docker info *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Docker is not running. Start Docker Desktop and retry."
+}
+
+try {
+    Resolve-DnsName registry-1.docker.io -ErrorAction Stop *> $null
+} catch {
+    Write-Error @"
+Docker Hub DNS lookup failed for registry-1.docker.io.
+
+Docker Compose needs Docker Hub to pull base images such as:
+- python:3.11-slim
+- node:20-alpine
+- nginx:1.27-alpine
+
+Fix the local Docker Desktop network/DNS/proxy setup, then retry:
+1. Check that the host can resolve it: nslookup registry-1.docker.io
+2. If you are behind a proxy, set it in Docker Desktop Settings > Resources > Proxies.
+3. Try flushing/restarting networking: ipconfig /flushdns, wsl --shutdown, then restart Docker Desktop.
+4. Verify image pulls directly: docker pull nginx:1.27-alpine
+"@
 }
 
 $hostKubeconfig = Join-Path $HOME ".kube\config"

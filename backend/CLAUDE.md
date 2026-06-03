@@ -1,4 +1,4 @@
-# Backend - K8s Survival Camp
+# Backend - AfterFail
 
 ## 개요
 FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스템, AI 시나리오 생성 담당.
@@ -20,7 +20,7 @@ app/
 │                        #   User, TerminalSession, CommandLog
 │                        #   Mission, MissionAttempt (attempt_type, scenario_id 포함)
 │                        #   GeneratedScenario, ValidationRule
-│                        #   TutorMessage (DB 저장 예정, 현재 인메모리)
+│                        #   TutorMessage (DB 모델 정의 완료, 인메모리 히스토리 병행)
 ├── schemas.py           # Pydantic 스키마 (요청/응답)
 ├── api/
 │   ├── deps.py          # 의존성 (get_db, get_current_user)
@@ -56,7 +56,7 @@ app/
     ├── __init__.py
     ├── tutor_service.py      # AI 튜터 어댑터 (Mock/OpenAI/Gemini, K8s Pod 상태 실시간 조회)
     ├── scenario_agent.py     # 시나리오 생성 AI (Mock fixture + OpenAI/Gemini)
-    └── validation_agent.py   # 검증 조건 생성 AI (미구현 예정)
+    └── validation_agent.py   # LLM 기반 AI 시나리오 완료 판정 (Mock + OpenAI/Gemini 구현 완료)
 ```
 
 ## API 엔드포인트
@@ -118,6 +118,10 @@ app/
 | `memory_stress` | nginx 메모리 limit을 6Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
 | `service_misconfig` | webapp Deployment + 잘못된 selector의 Service 생성 | `kubectl patch svc webapp-svc -p '{"spec":{"selector":{"app":"webapp"}}}'` |
 | `network_latency` | nginx readinessProbe에 존재하지 않는 경로 주입 | `kubectl patch deployment nginx -p '...'`으로 readinessProbe 제거 |
+| `wrong_image_registry` | private registry 이미지로 패치 → unauthorized ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
+| `secret_ref_missing` | 존재하지 않는 Secret envFrom 참조 → CreateContainerConfigError | Secret 생성 또는 envFrom 제거 |
+| `pvc_unbound` | 존재하지 않는 storageClass PVC 생성 + 마운트 → Pod Pending | PVC 삭제 및 deployment에서 volume/volumeMount 제거 |
+| `cpu_throttle` | CPU limit 1m + 빡빡한 readinessProbe → Running이지만 0/1 Not Ready | `kubectl patch deployment nginx`로 CPU limit 상향 + readinessProbe 제거 |
 
 ### AI 시나리오 시스템 (scenario_service.py)
 

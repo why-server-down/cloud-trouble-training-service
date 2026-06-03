@@ -1,4 +1,4 @@
-# K8s Survival Camp
+# AfterFail
 
 카오스 엔지니어링 + AI 튜터 + 게이미피케이션 기반 DevOps 장애 대응 훈련 플랫폼 (캡스톤 디자인)
 
@@ -64,7 +64,7 @@
 - [ ] AI 장애 생성 모드 Phase 4~7 (agent.md 기준)
   - Phase 4: RuntimeContextCollector → 튜터 연결 (runtime_context.py 구조 존재, 미연결)
   - Phase 5: RAG 장애 로그 지식창고 (incident-logs/ 디렉터리 구조 미구성)
-  - Phase 6: validation_agent.py 미구현
+  - Phase 6: validation_agent.py 구현 완료 (Mock + OpenAI/Gemini LLM 판정)
   - Phase 7: 운영 메트릭, 비용 제한, 시드 저장
 - [ ] TutorMessage DB 영구 저장 (현재 인메모리 최근 5개)
 

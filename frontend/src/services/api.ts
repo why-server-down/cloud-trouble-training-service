@@ -1,4 +1,22 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const normalizeApiBaseUrl = (configuredUrl?: string) => {
+  if (!configuredUrl) return ''
+
+  try {
+    const url = new URL(configuredUrl)
+    const isSameBrowserHost = url.hostname === window.location.hostname
+    const isDockerServiceName = url.hostname === 'backend'
+
+    if (isDockerServiceName || (isSameBrowserHost && url.port === '8000')) {
+      return ''
+    }
+  } catch {
+    return configuredUrl
+  }
+
+  return configuredUrl.replace(/\/$/, '')
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
 interface LoginResponse {
@@ -188,11 +206,6 @@ export const createTerminalSession = async (token: string): Promise<SessionRespo
     throw new Error(await getErrorDetail(response, '터미널 세션 생성에 실패했습니다'))
   }
 
-  return response.json()
-}
-
-export const healthCheck = async (): Promise<{ status: string }> => {
-  const response = await fetch(`${API_BASE_URL}/health`)
   return response.json()
 }
 
@@ -436,11 +449,3 @@ export const useScenarioHint = async (token: string): Promise<MissionAttemptResp
   return response.json()
 }
 
-export const debugResolveScenario = async (token: string): Promise<{ message: string }> => {
-  const response = await fetch(`${API_BASE_URL}/api/scenarios/debug/resolve`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!response.ok) throw new Error(await getErrorDetail(response, '디버그 해결에 실패했습니다'))
-  return response.json()
-}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from 'xterm'
 import { AUTH_EXPIRED_EVENT } from '../services/api'
+import { getTerminalPrompt } from '../utils/terminal'
 
 interface WebSocketMessage {
   type: 'output' | 'error' | 'confirm'
@@ -22,6 +23,26 @@ export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnecte
 const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 2000
 
+const getDefaultWsBaseUrl = () => `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+
+const normalizeWsBaseUrl = (configuredUrl?: string) => {
+  if (!configuredUrl) return getDefaultWsBaseUrl()
+
+  try {
+    const url = new URL(configuredUrl)
+    const isSameBrowserHost = url.hostname === window.location.hostname
+    const isDockerServiceName = url.hostname === 'backend'
+
+    if (isDockerServiceName || (isSameBrowserHost && url.port === '8000')) {
+      return getDefaultWsBaseUrl()
+    }
+  } catch {
+    return configuredUrl
+  }
+
+  return configuredUrl.replace(/\/$/, '')
+}
+
 export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -31,16 +52,13 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
   const [connectionStatus, setConnectionStatus] = useState<TerminalConnectionStatus>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [reconnectKey, setReconnectKey] = useState(0)
-  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+  const wsBaseUrl = normalizeWsBaseUrl(import.meta.env.VITE_WS_BASE_URL)
 
   useEffect(() => {
     confirmHandlerRef.current = onConfirmRequired
   }, [onConfirmRequired])
 
-  const getPrompt = useCallback(() => {
-    if (!namespace) return '$ '
-    return `[${namespace.startsWith('user-') ? namespace.slice(0, 15) + '...' : namespace}]$ `
-  }, [namespace])
+  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
 
   useEffect(() => {
     if (!sessionId || !token || !terminal) return

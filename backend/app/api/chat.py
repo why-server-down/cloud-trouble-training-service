@@ -13,16 +13,25 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 # AI fault_type → 튜터 mock 응답에 사용할 chaos_type 매핑
 _FAULT_TO_CHAOS: dict[str, str] = {
-    "image_pull_error": "pod_failure",
-    "pod_failure": "pod_failure",
-    "crash_loop": "pod_failure",
-    "probe_failure": "pod_failure",
-    "configmap_misconfig": "pod_failure",
-    "oom_killed": "memory_stress",
-    "memory_stress": "memory_stress",
+    "image_pull_error":          "pod_failure",
+    "pod_failure":               "pod_failure",
+    "crash_loop":                "pod_failure",
+    "probe_failure":             "pod_failure",
+    "configmap_misconfig":       "pod_failure",
+    "liveness_probe_failure":    "pod_failure",
+    "init_container_failure":    "pod_failure",
+    "node_selector_mismatch":    "pod_failure",
+    "wrong_image_registry":      "pod_failure",
+    "secret_ref_missing":        "pod_failure",
+    "pvc_unbound":               "pod_failure",
+    "oom_killed":                "memory_stress",
+    "memory_stress":             "memory_stress",
     "service_selector_mismatch": "service_misconfig",
-    "service_misconfig": "service_misconfig",
-    "network_latency": "network_latency",
+    "service_misconfig":         "service_misconfig",
+    "compound_crash_service":    "service_misconfig",
+    "network_latency":           "network_latency",
+    "compound_probe_cascade":    "network_latency",
+    "cpu_throttle":              "network_latency",
 }
 
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import Toast, { ToastMessage } from '../Feedback/Toast'
 import {
@@ -57,6 +57,8 @@ const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   expert: 'Expert',
 }
 
+const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
+
 const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange }) => {
   const [missions, setMissions] = useState<Mission[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
@@ -72,8 +74,19 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('beginner')
   const [activeScenario, setActiveScenario] = useState<ScenarioStatusResponse | null>(null)
   const [scenarioHintsUsed, setScenarioHintsUsed] = useState(0)
+  const [isTutorFloatingOpen, setIsTutorFloatingOpen] = useState(false)
+  const hadTutorRef = useRef(false)
+  const hasTutor = Boolean(activeMissionId || activeScenario?.status === 'in_progress')
 
   const showToast = useCallback((kind: ToastMessage['kind'], text: string) => setToast({ kind, text }), [])
+
+  const rememberActiveAttempt = useCallback((type: 'static_mission' | 'ai_scenario') => {
+    localStorage.setItem(ACTIVE_ATTEMPT_TYPE_KEY, type)
+  }, [])
+
+  const forgetActiveAttempt = useCallback(() => {
+    localStorage.removeItem(ACTIVE_ATTEMPT_TYPE_KEY)
+  }, [])
 
   const fetchMissions = useCallback(async () => {
     try {
@@ -81,25 +94,37 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       const missionList = await listMissions(token)
       setMissions(missionList)
 
-      // 정적 미션 진행 상태 확인
+      const activeAttemptType = localStorage.getItem(ACTIVE_ATTEMPT_TYPE_KEY)
       let hasActive = false
-      try {
-        const missionStatus = await getMissionStatus(token)
-        setActiveMissionId(missionStatus.attempt.mission_id ?? null)
-        setHintsUsed(missionStatus.attempt.hints_used)
-        hasActive = true
-      } catch {
+
+      if (activeAttemptType === 'static_mission') {
+        try {
+          const missionStatus = await getMissionStatus(token)
+          setActiveMissionId(missionStatus.attempt.mission_id ?? null)
+          setHintsUsed(missionStatus.attempt.hints_used)
+          hasActive = true
+        } catch {
+          forgetActiveAttempt()
+          setActiveMissionId(null)
+          setHintsUsed(0)
+        }
+      } else {
         setActiveMissionId(null)
         setHintsUsed(0)
       }
 
-      // AI 시나리오 진행 상태 확인
-      try {
-        const scenarioStatus = await getScenarioStatus(token)
-        setActiveScenario(scenarioStatus)
-        setScenarioHintsUsed(scenarioStatus.hints_used)
-        hasActive = true
-      } catch {
+      if (activeAttemptType === 'ai_scenario') {
+        try {
+          const scenarioStatus = await getScenarioStatus(token)
+          setActiveScenario(scenarioStatus)
+          setScenarioHintsUsed(scenarioStatus.hints_used)
+          hasActive = true
+        } catch {
+          forgetActiveAttempt()
+          setActiveScenario(null)
+          setScenarioHintsUsed(0)
+        }
+      } else {
         setActiveScenario(null)
         setScenarioHintsUsed(0)
       }
@@ -117,11 +142,21 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       console.error('미션 목록 조회 실패:', err)
       setError('미션 목록을 불러오지 못했습니다.')
     }
-  }, [onActiveMissionChange, token])
+  }, [forgetActiveAttempt, onActiveMissionChange, token])
 
   useEffect(() => {
     void fetchMissions()
   }, [fetchMissions])
+
+  useEffect(() => {
+    if (hasTutor && !hadTutorRef.current) {
+      setIsTutorFloatingOpen(true)
+    }
+    if (!hasTutor) {
+      setIsTutorFloatingOpen(false)
+    }
+    hadTutorRef.current = hasTutor
+  }, [hasTutor])
 
   // AI 시나리오 진행 중일 때 1초마다 상태 갱신
   useEffect(() => {
@@ -132,17 +167,19 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
         setActiveScenario(status)
         setScenarioHintsUsed(status.hints_used)
         if (status.status !== 'in_progress') {
+          forgetActiveAttempt()
           onActiveMissionChange(false)
           await fetchMissions()
         }
       } catch {
         // 시나리오 종료 시 404 발생 → 정리
+        forgetActiveAttempt()
         setActiveScenario(null)
         onActiveMissionChange(false)
       }
     }, 1000)
     return () => window.clearInterval(interval)
-  }, [activeScenario, token, onActiveMissionChange, fetchMissions])
+  }, [activeScenario, token, onActiveMissionChange, fetchMissions, forgetActiveAttempt])
 
   const runConfirmedAction = async () => {
     const action = confirmation?.action
@@ -167,6 +204,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       action: async () => {
         try {
           await startMission(token, missionId)
+          rememberActiveAttempt('static_mission')
           setActiveMissionId(missionId)
           setHintsUsed(0)
           onActiveMissionChange(true)
@@ -195,6 +233,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
           : '아직 해결되지 않았습니다. 리소스 상태를 다시 확인해 주세요.',
       )
       if (result.attempt.status === 'completed') {
+        forgetActiveAttempt()
         setActiveMissionId(null)
         setHintsUsed(0)
         onActiveMissionChange(false)
@@ -218,6 +257,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       action: async () => {
         try {
           await abandonMission(token)
+          forgetActiveAttempt()
           setActiveMissionId(null)
           setHintsUsed(0)
           onActiveMissionChange(false)
@@ -257,11 +297,12 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
     [],
   )
   const handleMissionEnd = useCallback(() => {
+    forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
     onActiveMissionChange(false)
     void fetchMissions()
-  }, [fetchMissions, onActiveMissionChange])
+  }, [fetchMissions, forgetActiveAttempt, onActiveMissionChange])
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
@@ -273,6 +314,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       action: async () => {
         try {
           const scenario = await startRandomScenario(token, selectedDifficulty)
+          rememberActiveAttempt('ai_scenario')
           onActiveMissionChange(true)
           await fetchMissions()
           showToast('success', `"${scenario.title}" 시나리오가 시작됐습니다. 터미널에서 문제를 해결해 보세요.`)
@@ -298,6 +340,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
           : '아직 정상화 조건을 만족하지 못했습니다. 상태를 다시 확인해 주세요.',
       )
       if (result.resolved) {
+        forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
         onActiveMissionChange(false)
@@ -321,6 +364,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       action: async () => {
         try {
           await abandonScenario(token)
+          forgetActiveAttempt()
           setActiveScenario(null)
           setScenarioHintsUsed(0)
           onActiveMissionChange(false)
@@ -363,21 +407,24 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
         : ''
   const scenarioMinutes = activeScenario ? Math.floor(activeScenario.remaining_seconds / 60) : 0
   const scenarioSeconds = activeScenario ? activeScenario.remaining_seconds % 60 : 0
+  const displayedMissions = activeMissionId
+    ? missions.filter((mission) => mission.id === activeMissionId)
+    : missions
 
   return (
-    <div className="mission-panel">
+    <div className={`mission-panel${activeMissionId ? ' mission-active' : ''}`}>
       <div className="mission-header">
         <span className="panel-index">RUNBOOK / INCIDENT QUEUE</span>
         <h2>미션 목록</h2>
       </div>
 
       {/* 정적 미션 목록 */}
-      <div className="mission-list">
+      <div className={`mission-list${activeMissionId ? ' active-only' : ''}`}>
         {error && <div className="mission-error">{error}</div>}
-        {missions.length === 0 ? (
+        {displayedMissions.length === 0 ? (
           <div className="empty-state">미션을 불러오는 중...</div>
         ) : (
-          missions.map((mission) => (
+          displayedMissions.map((mission) => (
             <MissionCard
               key={mission.id}
               mission={mission}
@@ -406,6 +453,9 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
             missionId={activeMissionId}
             hintsUsed={hintsUsed}
             disabled={loading}
+            floating
+            floatingOpen={isTutorFloatingOpen}
+            onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
           />
         </>
       )}
@@ -469,6 +519,9 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
                 missionId={activeScenario.scenario_id}
                 hintsUsed={scenarioHintsUsed}
                 disabled={loading}
+                floating
+                floatingOpen={isTutorFloatingOpen}
+                onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
               />
             </>
           )}

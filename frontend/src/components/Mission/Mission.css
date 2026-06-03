@@ -21,13 +21,33 @@
 .mission-header h2 {
   color: var(--text);
   font-size: 1.2rem;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .mission-list {
   flex: 1;
   padding: 0.85rem;
   overflow-y: auto;
+}
+
+.mission-panel.mission-active {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mission-panel.mission-active .mission-list {
+  flex: 0 0 auto;
+  padding-bottom: 0.65rem;
+  overflow: visible;
+}
+
+.mission-panel.mission-active .mission-card {
+  margin-bottom: 0;
+}
+
+.mission-panel.mission-active .mission-header,
+.mission-panel.mission-active .mission-status-panel {
+  flex-shrink: 0;
 }
 
 .mission-card {
@@ -223,10 +243,31 @@
   background: #121817;
 }
 
+.tutor-floating-launcher,
+.tutor-floating-close {
+  display: none;
+}
+
+.mission-panel.mission-active .tutor-panel {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+}
+
 .tutor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.tutor-title-group {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
 }
 
 .tutor-hint-level {
@@ -314,7 +355,7 @@
 .ai-section-header h3 {
   color: var(--text);
   font-size: 1rem;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .ai-lock-notice {
@@ -411,6 +452,97 @@
 .ai-start-btn:hover:not(:disabled) {
   background: var(--accent-soft);
   color: var(--text);
+}
+
+@media (max-width: 980px), (max-height: 760px) {
+  .tutor-floating-launcher {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 80;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 6rem;
+    min-height: 2.65rem;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--accent);
+    background: #17211e;
+    color: var(--accent);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+  }
+
+  .tutor-panel.tutor-floating {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 90;
+    width: min(26rem, calc(100vw - 2rem));
+    height: min(34rem, calc(100dvh - 6rem));
+    min-height: min(22rem, calc(100dvh - 6rem));
+    max-height: none;
+    flex: none;
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+
+  .mission-panel.mission-active .tutor-panel.tutor-floating {
+    min-height: min(22rem, calc(100dvh - 6rem));
+    flex: none;
+  }
+
+  .tutor-panel.tutor-floating.tutor-collapsed {
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+
+  .tutor-panel.tutor-floating .tutor-floating-close {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.9rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 0.64rem;
+  }
+
+  .tutor-panel.tutor-floating .tutor-floating-close:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+}
+
+@media (max-width: 480px) {
+  .tutor-floating-launcher {
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  .tutor-panel.tutor-floating {
+    right: 0.75rem;
+    bottom: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    height: min(72dvh, calc(100dvh - 5rem));
+    min-height: min(19rem, calc(100dvh - 5rem));
+    padding: 0.75rem;
+  }
+
+  .mission-panel.mission-active .tutor-panel.tutor-floating {
+    min-height: min(19rem, calc(100dvh - 5rem));
+  }
 }
 
 @media (max-width: 768px) {

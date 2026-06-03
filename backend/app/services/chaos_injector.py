@@ -207,7 +207,7 @@ class ChaosMeshInjector(BaseChaosInjector):
             },
         )
 
-    def _apply_service_misconfig(self, chaos_id: str, namespace: str):
+    def _apply_service_misconfig(self, _chaos_id: str, namespace: str):
         from kubernetes import client
         from kubernetes.client.rest import ApiException  # type: ignore[attr-defined]
 
@@ -506,12 +506,12 @@ class ChaosMeshInjector(BaseChaosInjector):
             }]}}}},
         )
 
-    def _apply_compound_crash_service(self, chaos_id: str, namespace: str):
+    def _apply_compound_crash_service(self, _chaos_id: str, namespace: str):
         # [parallel 복합 장애] crash_loop + service_misconfig 동시 주입
         # 두 문제가 완전히 독립적: nginx 고쳐도 webapp-svc는 별도 조사 필요
         # 조사 경로가 갈림: 하나는 Deployment, 다른 하나는 Service/Endpoints
-        self._apply_crash_loop(chaos_id, namespace)
-        self._apply_service_misconfig(chaos_id, namespace)
+        self._apply_crash_loop(_chaos_id, namespace)
+        self._apply_service_misconfig(_chaos_id, namespace)
 
     async def revert(self, chaos_id: str) -> bool:
         loop = asyncio.get_event_loop()

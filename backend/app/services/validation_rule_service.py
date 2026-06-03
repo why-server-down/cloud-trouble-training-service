@@ -4,6 +4,7 @@ ValidationRuleService - AI 생성 검증 조건의 저장, 가드, 실행.
 Mock 모드: in-memory 해결 상태 추적.
 """
 import asyncio
+import re
 import uuid
 from dataclasses import dataclass
 
@@ -148,7 +149,6 @@ class ValidationRuleService:
                         available = dep.status.available_replicas or 0
                         return available > 0, float(available)
                     elif check_type == "memory_limit" and len(parts) >= 4:
-                        import re
                         threshold = parts[3]  # e.g. "20Mi"
                         containers = dep.spec.template.spec.containers
                         for c in containers:

@@ -63,12 +63,6 @@ if _AI_DATA_PATH not in sys.path:
     sys.path.insert(0, _AI_DATA_PATH)
 
 
-class ChatMessage:
-    def __init__(self, role: str, content: str):
-        self.role = role
-        self.content = content
-
-
 class TutorService:
     """
     AI 튜터 서비스

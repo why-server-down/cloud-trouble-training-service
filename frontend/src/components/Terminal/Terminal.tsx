@@ -3,6 +3,7 @@ import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
+import { getTerminalPrompt } from '../../utils/terminal'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
@@ -37,10 +38,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   const [confirmCommand, setConfirmCommand] = useState<string | null>(null)
   const [terminalReady, setTerminalReady] = useState(false)
 
-  const getPrompt = useCallback(() => {
-    if (!namespace) return '$ '
-    return `[${namespace.startsWith('user-') ? namespace.slice(0, 15) + '...' : namespace}]$ `
-  }, [namespace])
+  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
 
   const { isConnected, connectionStatus, error, sendCommand } = useTerminalWebSocket({
     sessionId: sessionId || '',
