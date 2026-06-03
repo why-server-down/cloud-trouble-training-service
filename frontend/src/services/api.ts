@@ -1,4 +1,22 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+const normalizeApiBaseUrl = (configuredUrl?: string) => {
+  if (!configuredUrl) return ''
+
+  try {
+    const url = new URL(configuredUrl)
+    const isSameBrowserHost = url.hostname === window.location.hostname
+    const isDockerServiceName = url.hostname === 'backend'
+
+    if (isDockerServiceName || (isSameBrowserHost && url.port === '8000')) {
+      return ''
+    }
+  } catch {
+    return configuredUrl
+  }
+
+  return configuredUrl.replace(/\/$/, '')
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
 interface LoginResponse {
