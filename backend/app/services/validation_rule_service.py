@@ -188,27 +188,53 @@ class ValidationRuleService:
         "crash_loop":                "deployment:nginx:running",
         "probe_failure":             "deployment:nginx:running",
         "configmap_misconfig":       "deployment:nginx:running",
+        "liveness_probe_failure":    "deployment:nginx:running",
+        "init_container_failure":    "deployment:nginx:running",
+        "node_selector_mismatch":    "deployment:nginx:running",
+        "compound_probe_cascade":    "deployment:nginx:running",  # available_replicas가 두 문제 모두 감지
         "oom_killed":                "deployment:nginx:running",
         "memory_stress":             "deployment:nginx:running",
         "network_latency":           "deployment:nginx:running",
+        "wrong_image_registry":      "deployment:nginx:running",
+        "secret_ref_missing":        "deployment:nginx:running",
+        "pvc_unbound":               "deployment:nginx:running",
+        "cpu_throttle":              "deployment:nginx:running",
         "service_selector_mismatch": "service:webapp-svc:endpoints",
         "service_misconfig":         "service:webapp-svc:endpoints",
     }
 
+    # compound 장애는 복수 쿼리 동시 검증
+    _COMPOUND_K8S_QUERIES: dict[str, list[str]] = {
+        "compound_crash_service": [
+            "deployment:nginx:running",
+            "service:webapp-svc:endpoints",
+        ],
+    }
+
     async def k8s_check_by_fault_type(self, fault_type: str, namespace: str) -> bool:
         """accepted 검증 룰이 없을 때 fault_type 기반 K8s 직접 검증 fallback."""
+        # compound 장애: 복수 쿼리 모두 통과해야 resolved
+        compound = self._COMPOUND_K8S_QUERIES.get(fault_type)
+        if compound:
+            results = await asyncio.gather(*[
+                self._run_k8s(self._make_fallback_rule(q, fault_type), namespace)
+                for q in compound
+            ])
+            return all(r.passed for r in results)
+
         query = self._FAULT_TYPE_K8S_QUERY.get(fault_type)
         if not query:
             return False
+        result = await self._run_k8s(self._make_fallback_rule(query, fault_type), namespace)
+        return result.passed
 
+    def _make_fallback_rule(self, query: str, fault_type: str):
         class _Rule:
             id = uuid.uuid4()
             name = f"fallback_{fault_type}"
-
         rule = _Rule()
         rule.query = query
-        result = await self._run_k8s(rule, namespace)
-        return result.passed
+        return rule
 
     def _is_mock_resolved(self, scenario_id: uuid.UUID, namespace: str) -> bool:
         return f"{scenario_id}:{namespace}" in self._mock_resolved
