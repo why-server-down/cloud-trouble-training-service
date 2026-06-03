@@ -65,7 +65,7 @@
   right: 1rem;
   bottom: 1rem;
   display: flex;
-  max-width: min(430px, calc(100vw - 2rem));
+  max-width: min(430px, calc(100% - 2rem));
   align-items: center;
   gap: 1rem;
   padding: 0.8rem 0.9rem;

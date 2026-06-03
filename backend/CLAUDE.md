@@ -1,4 +1,4 @@
-# Backend - K8s Survival Camp
+# Backend - AfterFail
 
 ## 개요
 FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스템, AI 시나리오 생성 담당.

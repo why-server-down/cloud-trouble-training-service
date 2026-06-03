@@ -1,7 +1,7 @@
 # 프로젝트 제안서
 
 ## 프로젝트명
-Cloud Trouble Training Service
+AfterFail
 
 ## 개요
 클라우드 장애 대응 훈련을 위한 AI 기반 자동화 플랫폼

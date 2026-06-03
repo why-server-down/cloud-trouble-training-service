@@ -1,17 +1,20 @@
 .app {
   display: flex;
+  min-width: 0;
   width: 100%;
   height: 100%;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-header {
   display: flex;
-  min-height: 70px;
+  min-height: 64px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.8rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--line-strong);
   background: rgba(15, 20, 19, 0.96);
 }
@@ -50,13 +53,17 @@
 
 .header-info {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.55rem;
 }
 
 .app-loading {
   display: grid;
   height: 100vh;
+  height: 100dvh;
   place-items: center;
   color: var(--accent);
   background: var(--bg);
@@ -105,26 +112,36 @@
 .workspace,
 .app-layout {
   display: flex;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .workspace {
-  width: 100%;
   flex-direction: column;
+}
+
+.app-layout {
+  gap: var(--layout-gap);
+  padding: var(--layout-pad);
 }
 
 /* ── Environment Tabs ───────────────────────────────────── */
 .env-tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   flex-shrink: 0;
   gap: 0;
+  overflow: hidden;
   border-bottom: 1px solid var(--line-strong);
   background: var(--surface);
 }
 
 .env-tab {
   display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 0.18rem;
   padding: 0.65rem 1.1rem;
@@ -153,19 +170,25 @@
 }
 
 .env-tab-label {
+  overflow: hidden;
   font-family: var(--mono);
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .env-tab-sub {
+  overflow: hidden;
   color: inherit;
   font-family: var(--mono);
   font-size: 0.6rem;
   letter-spacing: 0.1em;
   opacity: 0.6;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .env-tab.active .env-tab-label {
@@ -262,7 +285,9 @@
 
 .mission-section {
   display: flex;
-  width: 390px;
+  width: clamp(20rem, 28vw, 24.5rem);
+  min-width: 20rem;
+  max-width: 24.5rem;
   flex-shrink: 0;
   flex-direction: column;
   overflow: hidden;
@@ -274,7 +299,6 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  padding: 0.85rem;
   overflow: hidden;
 }
 
@@ -284,7 +308,8 @@
   min-height: 0;
   flex: 1;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.85rem;
+  gap: var(--layout-gap);
+  overflow: hidden;
 }
 
 .grafana-panel {
@@ -295,7 +320,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: #090d0c;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: var(--panel-shadow);
 }
 
 .tutorial-panel {
@@ -306,7 +331,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: #090d0c;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: var(--panel-shadow);
 }
 
 .tutorial-panel-header {
@@ -453,7 +478,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: 1rem;
 }
 
 .workspace-dashboard .dashboard-grid {
@@ -462,17 +487,17 @@
 
 @media (max-width: 768px) {
   .app-header {
-    min-height: 58px;
-    padding: 0.55rem 0.75rem;
+    min-height: 64px;
+    padding: 0.65rem 0.75rem;
   }
 
-  .brand-index,
-  .brand-subtitle {
+  .brand-index {
     display: none;
   }
 
   .brand-lockup {
-    display: block;
+    grid-template-columns: auto;
+    row-gap: 0.12rem;
   }
 
   .brand-lockup h1 {
@@ -480,8 +505,12 @@
     white-space: nowrap;
   }
 
+  .brand-subtitle {
+    display: block;
+    grid-column: auto;
+  }
+
   .header-info {
-    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.3rem;
   }
@@ -494,33 +523,28 @@
   }
 
   .namespace-badge {
-    display: none;
-  }
-
-  .env-tabs {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .env-tabs::-webkit-scrollbar {
-    display: none;
+    display: inline-block;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .env-tab {
-    flex-shrink: 0;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0.35rem;
   }
 
   .env-tab-label {
-    font-size: 0.72rem;
+    font-size: 0.68rem;
   }
 
   .env-tab-sub {
-    display: none;
+    font-size: 0.54rem;
   }
 
   .workspace-tabs {
     display: grid;
+    flex-shrink: 0;
     grid-template-columns: repeat(2, 1fr);
     border-bottom: 1px solid var(--line);
     background: var(--surface);
@@ -546,23 +570,45 @@
   .mission-section,
   .terminal-section {
     width: 100%;
+    min-width: 0;
+    max-width: none;
   }
 
   .mobile-hidden {
     display: none;
   }
 
-  .terminal-section {
-    padding: 0.45rem;
+  .terminal-workspace {
+    grid-auto-rows: minmax(18rem, 1fr);
+    grid-template-columns: 1fr;
+    overflow-y: auto;
   }
 
+  .terminal-container,
+  .tutorial-panel,
   .grafana-panel {
-    display: none;
+    min-height: 18rem;
   }
 }
 
 @media (max-width: 480px) {
+  .app-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .header-info {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .profile-summary {
-    display: none;
+    display: inline-block;
+    max-width: calc(100% - 6rem);
+  }
+
+  .logout-button {
+    margin-left: auto;
   }
 }

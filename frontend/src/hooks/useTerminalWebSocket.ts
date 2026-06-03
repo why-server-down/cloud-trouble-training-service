@@ -22,6 +22,26 @@ export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnecte
 const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 2000
 
+const getDefaultWsBaseUrl = () => `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+
+const normalizeWsBaseUrl = (configuredUrl?: string) => {
+  if (!configuredUrl) return getDefaultWsBaseUrl()
+
+  try {
+    const url = new URL(configuredUrl)
+    const isSameBrowserHost = url.hostname === window.location.hostname
+    const isDockerServiceName = url.hostname === 'backend'
+
+    if (isDockerServiceName || (isSameBrowserHost && url.port === '8000')) {
+      return getDefaultWsBaseUrl()
+    }
+  } catch {
+    return configuredUrl
+  }
+
+  return configuredUrl.replace(/\/$/, '')
+}
+
 export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
@@ -31,7 +51,7 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
   const [connectionStatus, setConnectionStatus] = useState<TerminalConnectionStatus>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [reconnectKey, setReconnectKey] = useState(0)
-  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+  const wsBaseUrl = normalizeWsBaseUrl(import.meta.env.VITE_WS_BASE_URL)
 
   useEffect(() => {
     confirmHandlerRef.current = onConfirmRequired

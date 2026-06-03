@@ -24,10 +24,35 @@ const ENV_TABS: { id: EnvTab; label: string; subtitle: string; wip: boolean }[] 
 ]
 
 const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
+const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
 const DASHBOARD_UID = 'k8s-survival-overview'
+const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
+const GRAFANA_DATA_FALLBACK_FAILURES = 3
 
 const getGrafanaUrl = (namespace: string | null) =>
   `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/${DASHBOARD_UID}?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
+
+type PrometheusQueryResponse = {
+  status: string
+  data?: {
+    result?: Array<{
+      value?: [number, string]
+    }>
+  }
+}
+
+const escapePrometheusLabelValue = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+const hasPrometheusData = (payload: PrometheusQueryResponse) =>
+  payload.status === 'success'
+  && Boolean(payload.data?.result?.some((series) => Number(series.value?.[1] ?? 0) > 0))
+
+const getGrafanaDataProbeUrl = (namespace: string | null) => {
+  const namespaceMatcher = escapePrometheusLabelValue(namespace || '.*')
+  const query = `sum(kube_pod_status_phase{namespace=~"${namespaceMatcher}"})`
+  return `${PROMETHEUS_BASE_URL}/api/v1/query?query=${encodeURIComponent(query)}`
+}
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
@@ -40,8 +65,10 @@ function App() {
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [hasActiveMission, setHasActiveMission] = useState(false)
-  const [isGrafanaLoading, setIsGrafanaLoading] = useState(false)
+  const [isGrafanaFrameReady, setIsGrafanaFrameReady] = useState(false)
+  const [isGrafanaDataReady, setIsGrafanaDataReady] = useState(false)
   const grafanaUrl = getGrafanaUrl(namespace)
+  const isGrafanaLoading = hasActiveMission && (!isGrafanaFrameReady || !isGrafanaDataReady)
 
   const clearAuthState = useCallback(() => {
     setToken(null)
@@ -115,8 +142,45 @@ function App() {
   }, [activeTab])
 
   useEffect(() => {
-    setIsGrafanaLoading(hasActiveMission)
+    setIsGrafanaFrameReady(false)
+    setIsGrafanaDataReady(false)
   }, [grafanaUrl, hasActiveMission])
+
+  useEffect(() => {
+    if (!hasActiveMission) return
+
+    let cancelled = false
+    let failures = 0
+    let intervalId: number | undefined
+
+    const markDataReady = () => {
+      if (cancelled) return
+      setIsGrafanaDataReady(true)
+      if (intervalId) window.clearInterval(intervalId)
+    }
+
+    const probeGrafanaData = async () => {
+      try {
+        const response = await fetch(getGrafanaDataProbeUrl(namespace), { cache: 'no-store' })
+        if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
+
+        const payload = await response.json() as PrometheusQueryResponse
+        if (hasPrometheusData(payload)) markDataReady()
+      } catch (error) {
+        failures += 1
+        console.warn('Grafana data readiness probe failed:', error)
+        if (isGrafanaFrameReady && failures >= GRAFANA_DATA_FALLBACK_FAILURES) markDataReady()
+      }
+    }
+
+    void probeGrafanaData()
+    intervalId = window.setInterval(probeGrafanaData, GRAFANA_DATA_POLL_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      if (intervalId) window.clearInterval(intervalId)
+    }
+  }, [grafanaUrl, hasActiveMission, isGrafanaFrameReady, namespace])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
@@ -146,7 +210,7 @@ function App() {
       <header className="app-header">
         <div className="brand-lockup">
           <span className="brand-index">OPS / 01</span>
-          <h1>K8s Survival Camp</h1>
+          <h1>AfterFail</h1>
           <span className="brand-subtitle">Incident drill console</span>
         </div>
         <div className="header-info">
@@ -234,7 +298,7 @@ function App() {
                             <span className="terminal-label">GETTING STARTED / FIELD GUIDE</span>
                           </div>
                           <div className="tutorial-content">
-                            <span className="tutorial-kicker">K8s SURVIVAL CAMP</span>
+                            <span className="tutorial-kicker">AfterFail</span>
                             <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
                             <p>왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다. 오른쪽 대시보드와 Kubernetes 명령을 함께 사용해 원인을 찾아보세요.</p>
                             <div className="tutorial-steps">
@@ -272,12 +336,11 @@ function App() {
                               className="grafana-frame"
                               src={grafanaUrl}
                               title="Grafana dashboard"
-                              onLoad={() => setIsGrafanaLoading(false)}
+                              onLoad={() => setIsGrafanaFrameReady(true)}
                             />
                             {isGrafanaLoading && (
                               <div className="grafana-loading-overlay" role="status" aria-live="polite">
-                                <strong>대시보드를 불러오고 있습니다.</strong>
-                                <span>잠시만 기다려주세요..</span>
+                                <strong>데이터 로딩중입니다..</strong>
                               </div>
                             )}
                           </div>
