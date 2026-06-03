@@ -36,11 +36,11 @@
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "green",
                 "value": 1
               },
               {
-                "color": "red",
+                "color": "green",
                 "value": 5
               }
             ]
@@ -80,13 +80,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kube_pod_status_phase{namespace=~\"$namespace\",phase!~\"Running|Succeeded\"} == 1)",
-          "legendFormat": "not running",
+          "expr": "sum(kube_pod_status_phase{namespace=~\"$namespace\",phase=\"Running\"})",
+          "legendFormat": "running",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Problem Pods",
+      "title": "Running Pods",
       "type": "stat"
     },
     {
@@ -128,6 +128,78 @@
         "h": 4
       },
       "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "noValue": "0",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(kube_pod_status_phase{namespace=~\"$namespace\",phase!~\"Running|Succeeded\"})",
+          "legendFormat": "not running",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Problem Pods",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 8,
+        "h": 4
+      },
+      "id": 4,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
@@ -194,78 +266,6 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 16,
-        "y": 1,
-        "w": 8,
-        "h": 4
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "noValue": "0",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name",
-        "wideLayout": true
-      },
-      "pluginVersion": "11.4.0",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(kube_pod_container_status_waiting{namespace=~\"$namespace\"} == 1)",
-          "legendFormat": "waiting",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Waiting Containers",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
         "x": 0,
         "y": 5,
         "w": 8,
@@ -296,13 +296,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kube_endpoint_address{namespace=~\"$namespace\",ready=\"false\"})",
-          "legendFormat": "not ready",
+          "expr": "sum(kube_pod_container_status_waiting{namespace=~\"$namespace\"})",
+          "legendFormat": "waiting",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Not Ready Endpoints",
+      "title": "Waiting Containers",
       "type": "stat"
     },
     {
@@ -324,11 +324,11 @@
                 "value": null
               },
               {
-                "color": "orange",
+                "color": "green",
                 "value": 1
               },
               {
-                "color": "red",
+                "color": "green",
                 "value": 5
               }
             ]
@@ -368,13 +368,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(kube_deployment_status_replicas_unavailable{namespace=~\"$namespace\"})",
-          "legendFormat": "unavailable",
+          "expr": "sum(kube_endpoint_address{namespace=~\"$namespace\",ready=\"true\"}) or vector(0)",
+          "legendFormat": "ready",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Unavailable Replicas",
+      "title": "Ready Endpoints",
       "type": "stat"
     },
     {
@@ -440,13 +440,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(prober_probe_total{namespace=~\"$namespace\",result!=\"successful\"}[5m]))",
-          "legendFormat": "5m",
+          "expr": "sum(kube_deployment_status_replicas_unavailable{namespace=~\"$namespace\"}) or vector(0)",
+          "legendFormat": "unavailable",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Probe Failures",
+      "title": "Unavailable Replicas",
       "type": "stat"
     },
     {
@@ -461,6 +461,100 @@
       "panels": [],
       "title": "Workload Health",
       "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 10,
+        "w": 24,
+        "h": 8
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (phase) (kube_pod_status_phase{namespace=~\"$namespace\"})",
+          "legendFormat": "{{phase}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pod Phases",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -494,11 +588,11 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 10,
+        "y": 18,
         "w": 24,
         "h": 8
       },
-      "id": 11,
+      "id": 12,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -519,8 +613,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, phase) (kube_pod_status_phase{namespace=~\"$namespace\",phase!~\"Succeeded\"} == 1)",
-          "legendFormat": "phase",
+          "expr": "sum by (pod, container) (kube_pod_container_status_ready{namespace=~\"$namespace\"})",
+          "legendFormat": "ready",
           "range": false,
           "refId": "A",
           "instant": true,
@@ -532,8 +626,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, container) (kube_pod_container_status_waiting{namespace=~\"$namespace\"} == 1)",
-          "legendFormat": "waiting",
+          "expr": "sum by (pod, container) (kube_pod_container_status_running{namespace=~\"$namespace\"})",
+          "legendFormat": "running",
           "range": false,
           "refId": "B",
           "instant": true,
@@ -545,8 +639,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, container, reason) (kube_pod_container_status_waiting_reason{namespace=~\"$namespace\"} == 1)",
-          "legendFormat": "waiting reason",
+          "expr": "sum by (pod, container) (kube_pod_container_status_waiting{namespace=~\"$namespace\"})",
+          "legendFormat": "waiting",
           "range": false,
           "refId": "C",
           "instant": true,
@@ -558,8 +652,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, container, reason) (kube_pod_container_status_last_terminated_reason{namespace=~\"$namespace\"} == 1)",
-          "legendFormat": "last termination",
+          "expr": "sum by (pod, container) (kube_pod_container_status_terminated{namespace=~\"$namespace\"})",
+          "legendFormat": "terminated",
           "range": false,
           "refId": "D",
           "instant": true,
@@ -571,15 +665,15 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[15m]))",
-          "legendFormat": "restart 15m",
+          "expr": "sum by (pod, container) (kube_pod_container_status_restarts_total{namespace=~\"$namespace\"})",
+          "legendFormat": "restarts",
           "range": false,
           "refId": "E",
           "instant": true,
           "format": "table"
         }
       ],
-      "title": "Pod Triage",
+      "title": "Container State Table",
       "type": "table"
     },
     {
@@ -640,11 +734,11 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 18,
+        "y": 26,
         "w": 24,
         "h": 8
       },
-      "id": 12,
+      "id": 13,
       "options": {
         "legend": {
           "calcs": [
@@ -667,7 +761,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (deployment) (kube_deployment_spec_replicas{namespace=~\"$namespace\"})",
+          "expr": "sum by (deployment) (kube_deployment_spec_replicas{namespace=~\"$namespace\"}) or vector(0)",
           "legendFormat": "{{deployment}} desired",
           "range": true,
           "refId": "A"
@@ -678,7 +772,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (deployment) (kube_deployment_status_replicas_available{namespace=~\"$namespace\"})",
+          "expr": "sum by (deployment) (kube_deployment_status_replicas_available{namespace=~\"$namespace\"}) or vector(0)",
           "legendFormat": "{{deployment}} available",
           "range": true,
           "refId": "B"
@@ -689,7 +783,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (deployment) (kube_deployment_status_replicas_unavailable{namespace=~\"$namespace\"})",
+          "expr": "sum by (deployment) (kube_deployment_status_replicas_unavailable{namespace=~\"$namespace\"}) or vector(0)",
           "legendFormat": "{{deployment}} unavailable",
           "range": true,
           "refId": "C"
@@ -702,13 +796,13 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 26,
+        "y": 34,
         "w": 24,
         "h": 1
       },
       "id": 20,
       "panels": [],
-      "title": "Failure Clues",
+      "title": "Service Routing",
       "type": "row"
     },
     {
@@ -719,39 +813,14 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
             },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
@@ -762,31 +831,28 @@
                 "value": null
               }
             ]
-          },
-          "unit": "short"
+          }
         },
         "overrides": []
       },
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 35,
         "w": 24,
         "h": 8
       },
       "id": 21,
       "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
           ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
+          "show": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "showHeader": true
       },
       "pluginVersion": "11.4.0",
       "targets": [
@@ -796,14 +862,42 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, container, reason) (kube_pod_container_status_waiting_reason{namespace=~\"$namespace\"} == 1)",
-          "legendFormat": "{{pod}}/{{container}} {{reason}}",
-          "range": true,
-          "refId": "A"
+          "expr": "kube_service_info{namespace=~\"$namespace\"} or vector(0)",
+          "legendFormat": "service",
+          "range": false,
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "kube_service_spec_type{namespace=~\"$namespace\"} or vector(0)",
+          "legendFormat": "type",
+          "range": false,
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "kube_endpoint_info{namespace=~\"$namespace\"} or vector(0)",
+          "legendFormat": "endpoint object",
+          "range": false,
+          "refId": "C",
+          "instant": true,
+          "format": "table"
         }
       ],
-      "title": "Container Waiting Reasons",
-      "type": "timeseries"
+      "title": "Services And Endpoint Objects",
+      "type": "table"
     },
     {
       "datasource": {
@@ -863,7 +957,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 35,
+        "y": 43,
         "w": 24,
         "h": 8
       },
@@ -890,8 +984,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (endpoint) (kube_endpoint_address{namespace=~\"$namespace\",ready=\"true\"})",
-          "legendFormat": "{{endpoint}} ready",
+          "expr": "sum by (endpoint, ready) (kube_endpoint_address{namespace=~\"$namespace\"}) or vector(0)",
+          "legendFormat": "{{endpoint}} ready={{ready}}",
           "range": true,
           "refId": "A"
         },
@@ -901,20 +995,20 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (endpoint) (kube_endpoint_address{namespace=~\"$namespace\",ready=\"false\"})",
-          "legendFormat": "{{endpoint}} not ready",
+          "expr": "count by (endpoint) (kube_endpoint_info{namespace=~\"$namespace\"}) or vector(0)",
+          "legendFormat": "{{endpoint}} object",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Service Endpoint Health",
+      "title": "Endpoint Address Count",
       "type": "timeseries"
     },
     {
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 51,
         "w": 24,
         "h": 1
       },
@@ -981,7 +1075,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 44,
+        "y": 52,
         "w": 24,
         "h": 8
       },
@@ -1075,7 +1169,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 52,
+        "y": 60,
         "w": 24,
         "h": 8
       },
@@ -1112,16 +1206,121 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 8
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (kube_pod_container_resource_requests{namespace=~\"$namespace\",resource=\"memory\"}) or vector(0)",
+          "legendFormat": "{{pod}} request",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod) (kube_pod_container_resource_limits{namespace=~\"$namespace\",resource=\"memory\"}) or vector(0)",
+          "legendFormat": "{{pod}} limit",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Configured Memory Requests And Limits",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 60,
+        "y": 76,
         "w": 24,
         "h": 1
       },
       "id": 40,
       "panels": [],
-      "title": "Traffic And Probe Signals",
+      "title": "Failure Signals",
       "type": "row"
     },
     {
@@ -1182,7 +1381,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 61,
+        "y": 77,
         "w": 24,
         "h": 8
       },
@@ -1209,13 +1408,46 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod, probe_type, result) (rate(prober_probe_total{namespace=~\"$namespace\"}[5m]))",
-          "legendFormat": "{{pod}} {{probe_type}} {{result}}",
+          "expr": "sum by (pod, container) (kube_pod_container_status_ready{namespace=~\"$namespace\"})",
+          "legendFormat": "{{pod}}/{{container}} ready",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod, container) (kube_pod_container_status_running{namespace=~\"$namespace\"})",
+          "legendFormat": "{{pod}}/{{container}} running",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod, container) (kube_pod_container_status_waiting{namespace=~\"$namespace\"})",
+          "legendFormat": "{{pod}}/{{container}} waiting",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod, container) (kube_pod_container_status_terminated{namespace=~\"$namespace\"})",
+          "legendFormat": "{{pod}}/{{container}} terminated",
+          "range": true,
+          "refId": "D"
         }
       ],
-      "title": "Probe Results",
+      "title": "Container State Signals",
       "type": "timeseries"
     },
     {
@@ -1270,13 +1502,13 @@
               }
             ]
           },
-          "unit": "Bps"
+          "unit": "short"
         },
         "overrides": []
       },
       "gridPos": {
         "x": 0,
-        "y": 69,
+        "y": 85,
         "w": 24,
         "h": 8
       },
@@ -1303,8 +1535,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod) (rate(container_network_receive_bytes_total{namespace=~\"$namespace\",pod!=\"\"}[2m]))",
-          "legendFormat": "{{pod}} rx",
+          "expr": "sum by (pod, container) (kube_pod_container_status_restarts_total{namespace=~\"$namespace\"})",
+          "legendFormat": "{{pod}}/{{container}} total",
           "range": true,
           "refId": "A"
         },
@@ -1314,13 +1546,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (pod) (rate(container_network_transmit_bytes_total{namespace=~\"$namespace\",pod!=\"\"}[2m]))",
-          "legendFormat": "{{pod}} tx",
+          "expr": "sum by (pod, container) (increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[15m]))",
+          "legendFormat": "{{pod}}/{{container}} 15m",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Pod Network Traffic",
+      "title": "Restart Timeline",
       "type": "timeseries"
     }
   ],
@@ -1367,5 +1599,5 @@
   "timezone": "browser",
   "title": "AfterFail Incident Triage",
   "uid": "k8s-survival-overview",
-  "version": 9
+  "version": 11
 }

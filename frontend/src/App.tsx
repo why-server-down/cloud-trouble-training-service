@@ -24,11 +24,35 @@ const ENV_TABS: { id: EnvTab; label: string; subtitle: string; wip: boolean }[] 
 ]
 
 const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
+const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
 const DASHBOARD_UID = 'k8s-survival-overview'
-const GRAFANA_DATA_WARMUP_MS = 5500
+const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
+const GRAFANA_DATA_FALLBACK_FAILURES = 3
 
 const getGrafanaUrl = (namespace: string | null) =>
   `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/${DASHBOARD_UID}?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
+
+type PrometheusQueryResponse = {
+  status: string
+  data?: {
+    result?: Array<{
+      value?: [number, string]
+    }>
+  }
+}
+
+const escapePrometheusLabelValue = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+const hasPrometheusData = (payload: PrometheusQueryResponse) =>
+  payload.status === 'success'
+  && Boolean(payload.data?.result?.some((series) => Number(series.value?.[1] ?? 0) > 0))
+
+const getGrafanaDataProbeUrl = (namespace: string | null) => {
+  const namespaceMatcher = escapePrometheusLabelValue(namespace || '.*')
+  const query = `sum(kube_pod_status_phase{namespace=~"${namespaceMatcher}"})`
+  return `${PROMETHEUS_BASE_URL}/api/v1/query?query=${encodeURIComponent(query)}`
+}
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
@@ -123,11 +147,40 @@ function App() {
   }, [grafanaUrl, hasActiveMission])
 
   useEffect(() => {
-    if (!hasActiveMission || !isGrafanaFrameReady) return
+    if (!hasActiveMission) return
 
-    const timeout = window.setTimeout(() => setIsGrafanaDataReady(true), GRAFANA_DATA_WARMUP_MS)
-    return () => window.clearTimeout(timeout)
-  }, [grafanaUrl, hasActiveMission, isGrafanaFrameReady])
+    let cancelled = false
+    let failures = 0
+    let intervalId: number | undefined
+
+    const markDataReady = () => {
+      if (cancelled) return
+      setIsGrafanaDataReady(true)
+      if (intervalId) window.clearInterval(intervalId)
+    }
+
+    const probeGrafanaData = async () => {
+      try {
+        const response = await fetch(getGrafanaDataProbeUrl(namespace), { cache: 'no-store' })
+        if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
+
+        const payload = await response.json() as PrometheusQueryResponse
+        if (hasPrometheusData(payload)) markDataReady()
+      } catch (error) {
+        failures += 1
+        console.warn('Grafana data readiness probe failed:', error)
+        if (isGrafanaFrameReady && failures >= GRAFANA_DATA_FALLBACK_FAILURES) markDataReady()
+      }
+    }
+
+    void probeGrafanaData()
+    intervalId = window.setInterval(probeGrafanaData, GRAFANA_DATA_POLL_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      if (intervalId) window.clearInterval(intervalId)
+    }
+  }, [grafanaUrl, hasActiveMission, isGrafanaFrameReady, namespace])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
