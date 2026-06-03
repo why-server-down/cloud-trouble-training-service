@@ -1,16 +1,19 @@
-# Frontend Dockerfile
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
+
+ARG VITE_API_BASE_URL=http://localhost:8000
+ARG VITE_WS_BASE_URL=ws://localhost:8000
+ARG VITE_GRAFANA_BASE_URL=http://localhost:3001
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+ENV VITE_WS_BASE_URL=$VITE_WS_BASE_URL
+ENV VITE_GRAFANA_BASE_URL=$VITE_GRAFANA_BASE_URL
+
 COPY package*.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:18-alpine
-WORKDIR /app
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package*.json ./
-RUN npm ci --production
-EXPOSE 3000
-CMD ["npm", "start"]
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
+EXPOSE 80
