@@ -29,6 +29,7 @@ class TutorRequest:
     mission_ctx: Optional[MissionContext] = None
     system_ctx: Optional[SystemContext] = None
     user_ctx: Optional[UserContext] = None
+    chaos_type: Optional[str] = None
 
 
 @dataclass
@@ -110,7 +111,7 @@ class AITutorEngine:
         if self.use_rag and request.hint_level >= 1:
             retrieved_docs = self.rag_service.search_knowledge(
                 request.user_question,
-                top_k=3
+                fault_type=request.chaos_type,
             )
             
             if retrieved_docs:

@@ -20,7 +20,8 @@ from qdrant_client.models import (
     PointStruct,
     Filter,
     FieldCondition,
-    MatchValue
+    MatchValue,
+    MatchAny,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -291,26 +292,34 @@ class RAGService:
         try:
             texts = [doc.page_content for doc in documents]
             metadatas = [doc.metadata for doc in documents]
-            
-            # Generate embeddings with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    embeddings_list = self.embeddings.embed_documents(texts)
-                    break
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        print(f"Embedding attempt {attempt + 1} failed, retrying...")
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                    else:
-                        raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
-            
+
+            # Gemini free tier: 분당 100건 제한 → 배치 단위로 임베딩
+            BATCH_SIZE = 80
+            all_embeddings: list = []
+            for batch_start in range(0, len(texts), BATCH_SIZE):
+                batch_texts = texts[batch_start:batch_start + BATCH_SIZE]
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        batch_embeddings = self.embeddings.embed_documents(batch_texts)
+                        all_embeddings.extend(batch_embeddings)
+                        print(f"  Embedded {min(batch_start + BATCH_SIZE, len(texts))}/{len(texts)} chunks")
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            wait = 35 * (attempt + 1)
+                            print(f"  Rate limit hit, {wait}s 대기 후 재시도...")
+                            time.sleep(wait)
+                        else:
+                            raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
+                if batch_start + BATCH_SIZE < len(texts):
+                    time.sleep(35)  # 다음 배치 전 rate limit 회복 대기
+
             # Prepare points for Qdrant
             points = []
-            for i, (text, embedding, metadata) in enumerate(zip(texts, embeddings_list, metadatas)):
+            for i, (text, embedding, metadata) in enumerate(zip(texts, all_embeddings, metadatas)):
                 point_id = str(uuid.uuid4())
-                
-                # Prepare payload (metadata + content)
+
                 payload = {
                     "content": text,
                     "source": metadata.get("source", "unknown"),
@@ -318,12 +327,11 @@ class RAGService:
                     "filepath": metadata.get("filepath", ""),
                     "ingested_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
-                # Add any additional metadata fields
+
                 for key, value in metadata.items():
                     if key not in payload:
                         payload[key] = value
-                
+
                 points.append(
                     PointStruct(
                         id=point_id,
@@ -331,13 +339,13 @@ class RAGService:
                         payload=payload
                     )
                 )
-            
+
             # Upsert points to Qdrant
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points
             )
-            
+
             return len(documents)
             
         except DocumentIngestionError:
@@ -350,33 +358,45 @@ class RAGService:
         query: str,
         top_k: Optional[int] = None,
         min_similarity: Optional[float] = None,
-        filter_source: Optional[str] = None
+        filter_source: Optional[str] = None,
+        fault_type: Optional[str] = None,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
-        
+
         Args:
             query: User query
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
             filter_source: Optional filter by source metadata
-        
+            fault_type: Optional chaos/fault type — filters to matching + general docs
+
         Returns:
             List of retrieved documents with similarity scores
-        
+
         Raises:
             SearchError: If search fails
         """
         try:
             top_k = top_k or config.RAG_TOP_K
             min_similarity = min_similarity or config.RAG_MIN_SIMILARITY
-            
+
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)
-            
-            # Prepare filter if source is specified
+
+            # Prepare filter
             query_filter = None
-            if filter_source:
+            if fault_type:
+                # fault_type에 해당하는 문서 + general 문서 포함
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="fault_types",
+                            match=MatchAny(any=[fault_type, "general"])
+                        )
+                    ]
+                )
+            elif filter_source:
                 query_filter = Filter(
                     must=[
                         FieldCondition(
