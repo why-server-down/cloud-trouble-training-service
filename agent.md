@@ -8,7 +8,7 @@
 | Phase 2 | ChaosPlan 도입 | ✅ 완료 (inject_plan 미연결, 기존 inject() 재사용 중) |
 | Phase 3 | Prometheus 동적 검증 | ✅ 완료 (k8s 타입 룰 + K8s fallback 방식으로 안정화) |
 | Phase 4 | Runtime Context 기반 튜터 | ✅ 완료 (K8s state + Prometheus 수집, 튜터 연결, TutorMessage DB 저장) |
-| Phase 5 | RAG 장애 로그 저장소 | ❌ 미구현 |
+| Phase 5 | RAG 장애 로그 저장소 | 🔶 부분 완료 (fault_type 필터링 + knowledge-base 구축 완료, incident-logs 미구성) |
 | Phase 6 | OpenAI/Gemini 기반 생성 활성화 | ✅ 완료 (Gemini 포함, validation_agent 구현 완료) |
 | Phase 7 | 운영 품질 | ❌ 미구현 |
 
@@ -21,7 +21,7 @@
 - `backend/app/services/scenario_service.py` - 오케스트레이터
 - `backend/app/services/validation_rule_service.py` - PromQLGuard + K8s 검증 fallback
 - `backend/app/services/promql_guard.py` - PromQL 안전성 검사
-- `backend/app/services/runtime_context.py` - 구조만 (미연결)
+- `backend/app/services/runtime_context.py` - K8s/Prometheus/CommandLog 수집 완전 구현 및 튜터 연결됨
 - `ai-data/prompts/scenario_gen.md` - Gemini 시나리오 생성 시스템 프롬프트
 
 **검증 방식 변경:**
@@ -37,9 +37,8 @@ k8s 타입:
 ```
 
 ### 알려진 한계
-- `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함
-- `TutorMessage` 보존 정책 미구현: attempt 완료 후에도 메시지가 영구 보존됨. 추후 Phase 7에서 30일 경과 메시지 자동 삭제 배치 추가 예정 (현재 용도는 attempt 진행 중 이전 질문 컨텍스트 제공에 한정)
-- `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함
+- `inject_plan()` 미연결: AI 시나리오도 기존 `inject(chaos_type)` 경로를 사용함 (`FAULT_TYPE_TO_CHAOS_TYPE` 매핑으로 기존 `inject()` 재사용)
+- `TutorMessage` 보존 정책 미구현: attempt 완료 후에도 메시지가 영구 보존됨. 추후 Phase 7에서 30일 경과 메시지 자동 삭제 배치 추가 예정
 - Gemini가 생성한 검증 조건이 PromQL 타입이면 PromQLGuard에서 거절될 수 있음 → k8s fallback으로 처리
 
 ---
@@ -1193,7 +1192,7 @@ Mission Page
 - 시나리오마다 다른 PromQL 성공 조건으로 완료 여부를 판단한다.
 - namespace 없는 PromQL은 저장 단계에서 거절된다.
 
-### Phase 4: Runtime Context 기반 튜터 🔶 부분 완료
+### Phase 4: Runtime Context 기반 튜터 ✅ 완료
 
 1. `RuntimeContextCollector` 구현
 2. Kubernetes state collector 구현
@@ -1208,19 +1207,23 @@ Mission Page
 - 튜터가 사용자가 방금 실행한 명령과 현재 Kubernetes 상태를 참고해서 질문한다.
 - 같은 힌트를 반복하지 않는다.
 
-### Phase 5: RAG 장애 로그 저장소 ❌ 미구현
+### Phase 5: RAG 장애 로그 저장소 🔶 부분 완료
 
-1. `incident-logs/` 디렉터리 구조 추가
-2. markdown frontmatter parser 추가
-3. `RAGService` metadata filter 확장
-4. ingestion script가 fault_type/difficulty/platform metadata 저장
-5. 튜터가 runtime signals 기반으로 검색
+**완료된 항목:**
+1. `knowledge-base/troubleshooting/` 전용 문서 구축 (crashloopbackoff, imagepullbackoff, oomkilled, pending-pods, service-misconfig)
+2. `RAGService.search_knowledge()` `fault_type` 필터 파라미터 추가 (Qdrant `MatchAny` 필터)
+3. ingestion script fault_type/platform metadata 저장 (`_FAULT_TYPE_TAGS` 매핑)
+4. 튜터가 chaos_type 기반으로 관련 문서만 검색 (ai_engine.py → tutor_service.py 연결)
+5. Qdrant k8s_docs 컬렉션 217개 청크 ingestion 완료
 
-완료 기준:
+**미완료:**
+- `incident-logs/` 실제 운영 장애 로그 (EKS/GKE/AKS 사후 분석 문서) 미구성
+
+완료 기준 (원래):
 
 - OOMKilled, ImagePullBackOff, Service endpoint 없음 같은 실제 로그 문서를 검색해 튜터 응답에 반영한다.
 
-### Phase 6: OpenAI/Gemini 기반 생성 활성화 ✅ 완료 (validation_agent 미구현)
+### Phase 6: OpenAI/Gemini 기반 생성 활성화 ✅ 완료
 
 1. `Scenario Generator Agent` OpenAI 구현
 2. JSON Schema structured output 적용

@@ -13,7 +13,7 @@
 기존 4개 고정 미션을 튜토리얼로 유지하고, AI가 동적으로 장애를 생성하는 "AI 문제 더 풀기" 모드를 추가한다. 자세한 설계는 [agent.md](agent.md) 참고.
 
 - 기존 4개 미션 튜토리얼 유지
-- AI 장애 생성 모드 Phase 1~3 완료 (난이도 선택 → AI 시나리오 생성 → 장애 주입 → K8s 검증)
+- AI 장애 생성 모드 Phase 1~6 완료 (Phase 5는 부분 완료 - incident-logs 미구성)
 - Grafana 패널 cAdvisor 수정 완료 (Docker Desktop container="" 필터)
 - 검증 K8s fallback 추가 완료
 - 미션 4 재설계 완료 (network_latency → Readiness Probe 실패로 구현)
@@ -28,7 +28,7 @@
 - Infra: Kubernetes, Chaos Mesh
 - Monitoring: Prometheus, Grafana, Loki, Promtail, AlertManager
 
-## 구현 현황 (2026-06-03 기준)
+## 구현 현황 (2026-06-04 기준)
 
 ### 완료
 - [x] 회원가입 / 로그인 (JWT)
@@ -59,14 +59,19 @@
 - [x] missions.py AI 시나리오 attempt 혼용 크래시 수정 (NoneType 방지)
 - [x] scenario_agent.py mock fixture validation k8s 룰로 통일
 - [x] 미션 4 재설계 (chaos_type=network_latency → Readiness Probe 실패 주입으로 구현)
+- [x] **AI 장애 생성 모드 Phase 4** (agent.md 기준)
+  - RuntimeContextCollector 구현 및 튜터 연결 완료 (K8s state + 이벤트 + Prometheus + 명령 이력)
+  - TutorMessage DB 모델 및 저장 로직 구현 완료
+- [x] **AI 장애 생성 모드 Phase 5 (부분 완료)**
+  - RAG knowledge-base 구축 (troubleshooting/ 전용 문서 + 6개 권위 출처 문서)
+  - fault_type 기반 RAG 필터링 구현 (ingest_knowledge.py + rag_service.py + ai_engine.py)
+  - Qdrant 217개 청크 ingestion 완료, 채팅 API 연동 검증 완료
+  - 미완료: incident-logs/ 실제 운영 장애 로그 문서 미구성
+- [x] **AI 장애 생성 모드 Phase 6** — validation_agent.py 구현 완료 (Mock + OpenAI/Gemini LLM 판정)
 
 ### 진행 중 (캡스톤 1)
-- [ ] AI 장애 생성 모드 Phase 4~7 (agent.md 기준)
-  - Phase 4: RuntimeContextCollector → 튜터 연결 (runtime_context.py 구조 존재, 미연결)
-  - Phase 5: RAG 장애 로그 지식창고 (incident-logs/ 디렉터리 구조 미구성)
-  - Phase 6: validation_agent.py 구현 완료 (Mock + OpenAI/Gemini LLM 판정)
-  - Phase 7: 운영 메트릭, 비용 제한, 시드 저장
-- [ ] TutorMessage DB 영구 저장 (현재 인메모리 최근 5개)
+- [ ] AI 장애 생성 모드 Phase 7 (운영 메트릭, 비용 제한, 시드 저장)
+- [ ] Phase 5 미완료: incident-logs/ 실제 클라우드 장애 로그 문서 추가
 
 ### 예정 (캡스톤 2)
 - [ ] AWS EKS 배포
@@ -120,6 +125,10 @@ CHAOS_BACKEND=mock           # mock | chaos_mesh
 VALIDATION_BACKEND=mock      # mock | k8s | prometheus
 MOCK_VALIDATION_AUTO_PASS=false
 PROMETHEUS_URL=http://localhost:9090
+
+# RAG (Qdrant 벡터 DB)
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=              # Qdrant Cloud 사용 시
 
 # 프론트엔드 (Vite 빌드 시)
 VITE_API_BASE_URL=http://localhost:8000

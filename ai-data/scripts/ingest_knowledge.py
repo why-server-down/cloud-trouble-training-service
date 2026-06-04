@@ -46,13 +46,18 @@ def print_warning(text):
 # 파일 경로(부분 매칭) → fault_types 매핑
 # "general" 태그: 장애 유형과 무관하게 항상 검색에 포함
 _FAULT_TYPE_TAGS: dict[str, list[str]] = {
-    "troubleshooting/oomkilled":          ["oom_killed", "memory_stress"],
+    "troubleshooting/oomkilled":          ["oom_killed", "memory_stress", "cpu_throttle"],
     "troubleshooting/crashloopbackoff":   ["crash_loop", "pod_failure", "init_container_failure",
-                                           "probe_failure", "liveness_probe_failure", "compound_probe_cascade"],
+                                           "probe_failure", "liveness_probe_failure", "liveness_probe",
+                                           "compound_probe_cascade", "configmap_misconfig",
+                                           "secret_ref_missing", "network_latency"],
     "troubleshooting/imagepullbackoff":   ["image_pull_error", "wrong_image_registry", "pod_failure"],
     "troubleshooting/pending-pods":       ["node_selector_mismatch", "pvc_unbound"],
+    "troubleshooting/service-misconfig":  ["service_misconfig", "service_selector_mismatch",
+                                           "compound_crash_service"],
     "05-chaos-mesh/pod-chaos":            ["pod_failure", "crash_loop", "oom_killed",
-                                           "liveness_probe_failure", "init_container_failure"],
+                                           "liveness_probe_failure", "liveness_probe",
+                                           "init_container_failure", "configmap_misconfig"],
     "02-komodor/incident-playbooks":      ["general"],
     "02-komodor/log-patterns":            ["general"],
     "06-prometheus/promql-queries":       ["general"],
