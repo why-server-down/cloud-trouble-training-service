@@ -280,19 +280,21 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.6rem;
+  padding-right: 0.25rem;
   overflow-y: auto;
 }
 
 .chat-message {
-  max-width: 92%;
-  padding: 0.55rem 0.65rem;
+  width: fit-content;
+  max-width: min(92%, 42rem);
+  padding: 0.62rem 0.72rem;
   border-left: 2px solid var(--line-strong);
   background: var(--surface-raised);
   color: var(--muted);
   font-size: 0.76rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
+  line-height: 1.58;
+  overflow-wrap: anywhere;
 }
 
 .chat-message.user {
@@ -300,6 +302,102 @@
   border-left-color: var(--accent);
   background: var(--accent-soft);
   color: var(--text);
+}
+
+.chat-message-role {
+  display: block;
+  margin-bottom: 0.28rem;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.chat-message.user .chat-message-role {
+  color: var(--accent);
+}
+
+.chat-message-content {
+  display: grid;
+  gap: 0.48rem;
+}
+
+.chat-message-content p {
+  margin: 0;
+}
+
+.chat-message-content code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.06rem 0.28rem;
+  border: 1px solid var(--line);
+  background: #0a0f0e;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  vertical-align: baseline;
+}
+
+.chat-list {
+  display: grid;
+  gap: 0.34rem;
+  margin: 0;
+  padding-left: 1.05rem;
+}
+
+.chat-list li {
+  padding-left: 0.15rem;
+}
+
+.chat-message-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.chat-message-loading .chat-message-role {
+  margin-bottom: 0;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.18rem;
+  align-items: center;
+}
+
+.typing-indicator span {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.35;
+  animation: tutorTypingPulse 1.05s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.typing-indicator span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes tutorTypingPulse {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+
+  40% {
+    transform: translateY(-0.12rem);
+    opacity: 1;
+  }
 }
 
 .chat-error {

@@ -78,8 +78,8 @@ def main():
     if settings.AI_BACKEND == "openai" and not settings.OPENAI_API_KEY:
         issues.append("⚠️  OPENAI_API_KEY is not set but AI_BACKEND=openai")
     
-    if settings.GEMINI_MODEL != "models/gemini-3.1-flash-lite":
-        issues.append(f"⚠️  GEMINI_MODEL should be 'models/gemini-3.1-flash-lite', got '{settings.GEMINI_MODEL}'")
+    if settings.GEMINI_MODEL != "gemini-2.5-flash-lite":
+        issues.append(f"⚠️  GEMINI_MODEL should be 'gemini-2.5-flash-lite', got '{settings.GEMINI_MODEL}'")
     
     if settings.GEMINI_EMBEDDING_MODEL != "models/gemini-embedding-001":
         issues.append(f"⚠️  GEMINI_EMBEDDING_MODEL should be 'models/gemini-embedding-001', got '{settings.GEMINI_EMBEDDING_MODEL}'")

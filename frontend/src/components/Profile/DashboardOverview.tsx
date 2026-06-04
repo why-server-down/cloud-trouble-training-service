@@ -6,6 +6,7 @@ import {
   getDashboardStats,
   getLeaderboard,
   getLearningCurve,
+  getProfile,
   LeaderboardEntry,
   LearningCurveEntry,
 } from '../../services/api'
@@ -20,6 +21,49 @@ const skillLabels = [
   ['Network', 'network'],
   ['Operations', 'ops'],
 ] as const
+
+const emptyStats: DashboardStatsResponse = {
+  username: '',
+  total_score: 0,
+  missions_completed: 0,
+  total_time_spent: 0,
+  hints_used: 0,
+  current_tier: {
+    name: 'Bronze',
+    min_score: 0,
+    max_score: 200,
+    color: '#cd7f32',
+    progress: 0,
+    next_tier: 'Silver',
+  },
+  skill_scores: {
+    troubleshooting: 0,
+    resource: 0,
+    network: 0,
+    ops: 0,
+  },
+}
+
+const emptyAchievements: AchievementsResponse = {
+  unlocked: 0,
+  total: 0,
+  progress: 0,
+  items: [],
+}
+
+const getFallbackStats = async (token: string): Promise<DashboardStatsResponse> => {
+  try {
+    const profile = await getProfile(token)
+    return {
+      ...emptyStats,
+      username: profile.username,
+      total_score: profile.total_score,
+      missions_completed: profile.missions_completed,
+    }
+  } catch {
+    return emptyStats
+  }
+}
 
 const formatDuration = (seconds: number) => {
   const minutes = Math.floor(seconds / 60)
@@ -42,21 +86,31 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ token }) => {
   useEffect(() => {
     let active = true
     const load = async () => {
-      try {
-        const [nextStats, nextCurve, nextLeaderboard, nextAchievements] = await Promise.all([
-          getDashboardStats(token),
-          getLearningCurve(token),
-          getLeaderboard(token),
-          getAchievements(token),
-        ])
-        if (!active) return
-        setStats(nextStats)
-        setCurve(nextCurve)
-        setLeaderboard(nextLeaderboard)
-        setAchievements(nextAchievements)
+      const [statsResult, curveResult, leaderboardResult, achievementsResult] = await Promise.allSettled([
+        getDashboardStats(token),
+        getLearningCurve(token),
+        getLeaderboard(token),
+        getAchievements(token),
+      ])
+
+      if (!active) return
+
+      setStats(statsResult.status === 'fulfilled' ? statsResult.value : await getFallbackStats(token))
+      setCurve(curveResult.status === 'fulfilled' ? curveResult.value : [])
+      setLeaderboard(leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : [])
+      setAchievements(achievementsResult.status === 'fulfilled' ? achievementsResult.value : emptyAchievements)
+
+      const failedLabels = [
+        statsResult.status === 'rejected' ? 'stats' : null,
+        curveResult.status === 'rejected' ? 'learning curve' : null,
+        leaderboardResult.status === 'rejected' ? 'leaderboard' : null,
+        achievementsResult.status === 'rejected' ? 'achievements' : null,
+      ].filter(Boolean)
+
+      if (failedLabels.length) {
+        setError(`Some dashboard data is temporarily unavailable: ${failedLabels.join(', ')}.`)
+      } else {
         setError(null)
-      } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : 'Failed to load dashboard.')
       }
     }
     void load()
@@ -78,11 +132,11 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ token }) => {
     return `${x},${y}`
   }).join(' ')
 
-  if (error) return <div className="dashboard-error">{error}</div>
   if (!stats || !achievements) return <div className="dashboard-empty">Loading learning dashboard...</div>
 
   return (
     <div className="learning-dashboard">
+      {error && <div className="dashboard-warning">{error}</div>}
       <section className="dashboard-tier-card">
         <div>
           <span className="dashboard-label">CURRENT TIER</span>
@@ -123,25 +177,29 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({ token }) => {
 
         <section className="dashboard-card">
           <span className="dashboard-label">LEADERBOARD / TOP 10</span>
-          <ol className="leaderboard-list">
-            {leaderboard.map((entry) => (
-              <li className={entry.is_current_user ? 'current-user' : ''} key={entry.user_id}>
-                <b>#{entry.rank}</b><span>{entry.username}</span><strong>{entry.total_score}</strong>
-              </li>
-            ))}
-          </ol>
+          {leaderboard.length ? (
+            <ol className="leaderboard-list">
+              {leaderboard.map((entry) => (
+                <li className={entry.is_current_user ? 'current-user' : ''} key={entry.user_id}>
+                  <b>#{entry.rank}</b><span>{entry.username}</span><strong>{entry.total_score}</strong>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="dashboard-empty">Leaderboard data is not available yet.</p>}
         </section>
 
         <section className="dashboard-card">
           <span className="dashboard-label">ACHIEVEMENTS / {achievements.unlocked} OF {achievements.total}</span>
-          <div className="achievement-list">
-            {achievements.items.map((achievement) => (
-              <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
-                <strong>{achievement.name}</strong>
-                <span>{achievement.description}</span>
-              </article>
-            ))}
-          </div>
+          {achievements.items.length ? (
+            <div className="achievement-list">
+              {achievements.items.map((achievement) => (
+                <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
+                  <strong>{achievement.name}</strong>
+                  <span>{achievement.description}</span>
+                </article>
+              ))}
+            </div>
+          ) : <p className="dashboard-empty">Achievement data is not available yet.</p>}
         </section>
       </div>
     </div>

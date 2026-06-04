@@ -481,7 +481,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
                 <div className="ai-scenario-brief">{activeScenario.student_brief}</div>
                 <div className="ai-difficulty-badge">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</div>
               </div>
-              <div className="mission-status-panel">
+              <div className="mission-status-panel" data-tour="mission-progress">
                 <div className="status-header">AI 시나리오 진행 상황</div>
                 <div className="status-item">
                   <span>남은 시간</span>
