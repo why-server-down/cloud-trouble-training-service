@@ -37,6 +37,7 @@ interface Mission {
 
 interface MissionListProps {
   token: string
+  storageScope: string | null
   onActiveMissionChange: (hasActiveMission: boolean) => void
 }
 
@@ -58,8 +59,10 @@ const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 }
 
 const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
+const DEMO_AI_UNLOCK_STORAGE_KEY = 'demoAiScenarioUnlocked'
+const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
-const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange }) => {
+const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActiveMissionChange }) => {
   const [missions, setMissions] = useState<Mission[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
   const [hintsUsed, setHintsUsed] = useState(0)
@@ -75,17 +78,30 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
   const [activeScenario, setActiveScenario] = useState<ScenarioStatusResponse | null>(null)
   const [scenarioHintsUsed, setScenarioHintsUsed] = useState(0)
   const [isTutorFloatingOpen, setIsTutorFloatingOpen] = useState(false)
+  const [demoAiUnlocked, setDemoAiUnlocked] = useState(() => localStorage.getItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope)) === 'true')
   const hasTutor = Boolean(activeMissionId || activeScenario?.status === 'in_progress')
+  const isAiUnlocked = Boolean(unlockStatus?.unlocked || demoAiUnlocked)
 
   const showToast = useCallback((kind: ToastMessage['kind'], text: string) => setToast({ kind, text }), [])
 
   const rememberActiveAttempt = useCallback((type: 'static_mission' | 'ai_scenario') => {
-    localStorage.setItem(ACTIVE_ATTEMPT_TYPE_KEY, type)
-  }, [])
+    localStorage.setItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope), type)
+  }, [storageScope])
 
   const forgetActiveAttempt = useCallback(() => {
-    localStorage.removeItem(ACTIVE_ATTEMPT_TYPE_KEY)
-  }, [])
+    localStorage.removeItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope))
+  }, [storageScope])
+
+  const unlockAiScenariosForDemo = useCallback(() => {
+    localStorage.setItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope), 'true')
+    setDemoAiUnlocked(true)
+    setUnlockStatus((current) => ({
+      unlocked: true,
+      completed_static: current?.completed_static ?? current?.total_static ?? 4,
+      total_static: current?.total_static ?? 4,
+    }))
+    showToast('info', '시연용으로 AI 문제 모드를 열었습니다.')
+  }, [showToast, storageScope])
 
   const fetchMissions = useCallback(async () => {
     try {
@@ -93,15 +109,21 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       const missionList = await listMissions(token)
       setMissions(missionList)
 
-      const activeAttemptType = localStorage.getItem(ACTIVE_ATTEMPT_TYPE_KEY)
+      const activeAttemptType = localStorage.getItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope))
       let hasActive = false
 
       if (activeAttemptType === 'static_mission') {
         try {
           const missionStatus = await getMissionStatus(token)
-          setActiveMissionId(missionStatus.attempt.mission_id ?? null)
-          setHintsUsed(missionStatus.attempt.hints_used)
-          hasActive = true
+          if (missionStatus.attempt.status === 'in_progress') {
+            setActiveMissionId(missionStatus.attempt.mission_id ?? null)
+            setHintsUsed(missionStatus.attempt.hints_used)
+            hasActive = true
+          } else {
+            forgetActiveAttempt()
+            setActiveMissionId(null)
+            setHintsUsed(0)
+          }
         } catch {
           forgetActiveAttempt()
           setActiveMissionId(null)
@@ -115,9 +137,15 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       if (activeAttemptType === 'ai_scenario') {
         try {
           const scenarioStatus = await getScenarioStatus(token)
-          setActiveScenario(scenarioStatus)
-          setScenarioHintsUsed(scenarioStatus.hints_used)
-          hasActive = true
+          if (scenarioStatus.status === 'in_progress') {
+            setActiveScenario(scenarioStatus)
+            setScenarioHintsUsed(scenarioStatus.hints_used)
+            hasActive = true
+          } else {
+            forgetActiveAttempt()
+            setActiveScenario(null)
+            setScenarioHintsUsed(0)
+          }
         } catch {
           forgetActiveAttempt()
           setActiveScenario(null)
@@ -141,7 +169,16 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       console.error('미션 목록 조회 실패:', err)
       setError('미션 목록을 불러오지 못했습니다.')
     }
-  }, [forgetActiveAttempt, onActiveMissionChange, token])
+  }, [forgetActiveAttempt, onActiveMissionChange, storageScope, token])
+
+  useEffect(() => {
+    setDemoAiUnlocked(localStorage.getItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope)) === 'true')
+    setActiveMissionId(null)
+    setActiveScenario(null)
+    setHintsUsed(0)
+    setScenarioHintsUsed(0)
+    onActiveMissionChange(false)
+  }, [onActiveMissionChange, storageScope])
 
   useEffect(() => {
     void fetchMissions()
@@ -163,6 +200,8 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
         setScenarioHintsUsed(status.hints_used)
         if (status.status !== 'in_progress') {
           forgetActiveAttempt()
+          setActiveScenario(null)
+          setScenarioHintsUsed(0)
           onActiveMissionChange(false)
           await fetchMissions()
         }
@@ -308,7 +347,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       confirmLabel: '시작',
       action: async () => {
         try {
-          const scenario = await startRandomScenario(token, selectedDifficulty)
+          const scenario = await startRandomScenario(token, selectedDifficulty, demoAiUnlocked)
           rememberActiveAttempt('ai_scenario')
           onActiveMissionChange(true)
           await fetchMissions()
@@ -400,23 +439,41 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
       : activeScenario && activeScenario.remaining_seconds < 300
         ? 'warning'
         : ''
+  const isActiveScenario = activeScenario?.status === 'in_progress'
   const scenarioMinutes = activeScenario ? Math.floor(activeScenario.remaining_seconds / 60) : 0
   const scenarioSeconds = activeScenario ? activeScenario.remaining_seconds % 60 : 0
   const displayedMissions = activeMissionId
     ? missions.filter((mission) => mission.id === activeMissionId)
+    : isActiveScenario
+      ? []
     : missions
 
   return (
-    <div className={`mission-panel${activeMissionId ? ' mission-active' : ''}`}>
+    <div className={`mission-panel${activeMissionId || isActiveScenario ? ' mission-active' : ''}`}>
       <div className="mission-header">
         <span className="panel-index">RUNBOOK / INCIDENT QUEUE</span>
         <h2>미션 목록</h2>
       </div>
 
       {/* 정적 미션 목록 */}
-      <div className={`mission-list${activeMissionId ? ' active-only' : ''}`}>
+      <div className={`mission-list${activeMissionId || isActiveScenario ? ' active-only' : ''}`}>
         {error && <div className="mission-error">{error}</div>}
-        {displayedMissions.length === 0 ? (
+        {isActiveScenario && activeScenario && (
+          <div className="mission-card active ai-mission-card">
+            <span className="mission-card-header">
+              <span className="mission-title">{activeScenario.title}</span>
+              <span className="mission-level">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</span>
+            </span>
+            <span className="mission-description">{activeScenario.student_brief}</span>
+            <span className="mission-info">
+              <span>남은 시간 {scenarioMinutes}:{scenarioSeconds.toString().padStart(2, '0')}</span>
+              <span>현재 {activeScenario.current_score}점</span>
+              <span>힌트 {activeScenario.hints_used}개</span>
+            </span>
+            <span className="mission-active-label">LIVE AI INCIDENT</span>
+          </div>
+        )}
+        {displayedMissions.length === 0 && !isActiveScenario ? (
           <div className="empty-state">미션을 불러오는 중...</div>
         ) : (
           displayedMissions.map((mission) => (
@@ -455,16 +512,67 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
         </>
       )}
 
+      {isActiveScenario && activeScenario && (
+        <>
+          <div className="mission-status-panel" data-tour="mission-progress">
+            <div className="status-header">AI 시나리오 진행 상황</div>
+            <div className="status-item">
+              <span>남은 시간</span>
+              <span className={`status-value ${scenarioTimeClass}`}>
+                {scenarioMinutes}:{scenarioSeconds.toString().padStart(2, '0')}
+              </span>
+            </div>
+            <div className="status-item">
+              <span>현재 점수</span>
+              <span className="status-value">{activeScenario.current_score}점</span>
+            </div>
+            <div className="status-item">
+              <span>사용한 힌트</span>
+              <span className="status-value">{activeScenario.hints_used}개</span>
+            </div>
+            <div className="status-actions">
+              <button className="btn btn-success" type="button" onClick={handleCheckScenario} disabled={loading}>
+                완료 확인
+              </button>
+              <button className="btn btn-warning" type="button" onClick={handleUseScenarioHint} disabled={loading}>
+                힌트 사용
+              </button>
+              <button className="btn btn-danger" type="button" onClick={handleAbandonScenario} disabled={loading}>
+                포기
+              </button>
+            </div>
+          </div>
+          <TutorChat
+            token={token}
+            missionId={activeScenario.scenario_id}
+            hintsUsed={scenarioHintsUsed}
+            disabled={loading}
+            floating
+            floatingOpen={isTutorFloatingOpen}
+            onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
+          />
+        </>
+      )}
+
       {/* AI 문제 더 풀기 섹션 */}
-      {!activeMissionId && (
+      {!activeMissionId && !isActiveScenario && (
         <div className="ai-scenario-section">
           <div className="ai-section-header">
             <span className="panel-index">AI CHALLENGE MODE</span>
+            {!isAiUnlocked && (
+              <button
+                type="button"
+                className="demo-unlock-btn"
+                onClick={unlockAiScenariosForDemo}
+              >
+                시연용 잠금 해제
+              </button>
+            )}
             <h3>AI 문제 더 풀기</h3>
           </div>
 
           {/* 잠금 상태 표시 */}
-          {unlockStatus && !unlockStatus.unlocked && (
+          {unlockStatus && !isAiUnlocked && (
             <div className="ai-lock-notice">
               <span className="ai-lock-icon">🔒</span>
               <span>
@@ -522,7 +630,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, onActiveMissionChange 
           )}
 
           {/* 잠금 해제 + AI 시나리오 없을 때: 난이도 선택 */}
-          {unlockStatus?.unlocked && !activeScenario && (
+          {isAiUnlocked && !activeScenario && (
             <div className="ai-difficulty-selector">
               <div className="ai-selector-label">난이도 선택</div>
               <div className="difficulty-btns">

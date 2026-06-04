@@ -464,6 +464,16 @@
   background: rgba(5, 8, 7, 0.82);
 }
 
+.grafana-loading-overlay strong {
+  font-size: 0;
+}
+
+.grafana-loading-overlay strong::after {
+  content: "Grafana 대시보드 로딩중입니다";
+  color: #e9f4ec;
+  font-size: 0.82rem;
+}
+
 .grafana-loading-overlay span {
   color: #9eafa4;
   font-size: 0.86rem;

@@ -32,7 +32,12 @@ async def start_random_scenario(
 
     service = get_scenario_service()
     try:
-        result = await service.start_random(db, current_user, body.difficulty)
+        result = await service.start_random(
+            db,
+            current_user,
+            body.difficulty,
+            allow_demo_unlock=body.demo_unlock,
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except RuntimeError as e:

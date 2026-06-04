@@ -60,7 +60,7 @@ class ScenarioService:
         total = len(missions)
 
         if total == 0:
-            return {"unlocked": False, "completed_static": 0, "total_static": 0}
+            return {"unlocked": settings.DEMO_UNLOCK_AI_SCENARIOS, "completed_static": 0, "total_static": 0}
 
         completed_result = await db.execute(
             select(Mission.id)
@@ -75,13 +75,13 @@ class ScenarioService:
         )
         completed_ids = set(completed_result.scalars().all())
         completed_count = sum(1 for m in missions if m.id in completed_ids)
-        unlocked = completed_count >= total
+        unlocked = settings.DEMO_UNLOCK_AI_SCENARIOS or completed_count >= total
 
         return {"unlocked": unlocked, "completed_static": completed_count, "total_static": total}
 
-    async def _assert_unlocked(self, db: AsyncSession, user_id: uuid.UUID):
+    async def _assert_unlocked(self, db: AsyncSession, user_id: uuid.UUID, allow_demo_unlock: bool = False):
         status = await self.check_unlock_status(db, user_id)
-        if not status["unlocked"]:
+        if not status["unlocked"] and not allow_demo_unlock:
             raise ValueError(
                 f"기본 미션을 모두 완료해야 AI 문제 더 풀기를 이용할 수 있습니다 "
                 f"({status['completed_static']}/{status['total_static']} 완료)"
@@ -93,7 +93,59 @@ class ScenarioService:
                 and_(MissionAttempt.user_id == user_id, MissionAttempt.status == "in_progress")
             )
         )
-        return result.scalar_one_or_none()
+        attempt = result.scalar_one_or_none()
+        if not attempt:
+            return None
+
+        if await self._expire_attempt_if_timed_out(db, attempt):
+            return None
+
+        return attempt
+
+    async def _expire_attempt_if_timed_out(
+        self, db: AsyncSession, attempt: MissionAttempt
+    ) -> bool:
+        if attempt.status != "in_progress":
+            return False
+
+        now = datetime.now(timezone.utc)
+        time_limit: int | None = None
+        scenario: GeneratedScenario | None = None
+
+        if attempt.attempt_type == "ai_scenario":
+            if not attempt.scenario_id:
+                return False
+            result = await db.execute(
+                select(GeneratedScenario).where(GeneratedScenario.id == attempt.scenario_id)
+            )
+            scenario = result.scalar_one_or_none()
+            time_limit = scenario.time_limit if scenario else None
+        else:
+            if not attempt.mission_id:
+                return False
+            result = await db.execute(select(Mission).where(Mission.id == attempt.mission_id))
+            mission = result.scalar_one_or_none()
+            time_limit = mission.time_limit if mission else None
+
+        if time_limit is None:
+            return False
+
+        elapsed = int((now - attempt.start_time).total_seconds())
+        if elapsed < time_limit:
+            return False
+
+        attempt.status = "failed"
+        attempt.end_time = now
+        attempt.final_score = self._scoring.MIN_SCORE
+        if scenario:
+            scenario.status = "failed"
+            if scenario.chaos_id:
+                await self._chaos.revert(scenario.chaos_id)
+                scenario.chaos_id = None
+
+        await db.commit()
+        await db.refresh(attempt)
+        return True
 
     async def _get_recent_fault_types(self, db: AsyncSession, user_id: uuid.UUID, limit: int = 5) -> list[str]:
         result = await db.execute(
@@ -111,9 +163,15 @@ class ScenarioService:
         )
         return list(result.scalars().all())
 
-    async def start_random(self, db: AsyncSession, user: User, difficulty: str) -> dict:
+    async def start_random(
+        self,
+        db: AsyncSession,
+        user: User,
+        difficulty: str,
+        allow_demo_unlock: bool = False,
+    ) -> dict:
         """난이도 선택 → AI 시나리오 생성 + 장애 주입 + attempt 생성 원스텝."""
-        await self._assert_unlocked(db, user.id)
+        await self._assert_unlocked(db, user.id, allow_demo_unlock=allow_demo_unlock)
 
         active = await self._get_active_attempt(db, user.id)
         if active:

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
     PROMETHEUS_URL: str = "http://localhost:9090"
     MOCK_VALIDATION_AUTO_PASS: bool = False
+    DEMO_UNLOCK_AI_SCENARIOS: bool = False
 
     # AI Tutor & Scenario
     AI_BACKEND: str = "mock"  # "mock" | "openai" | "gemini"

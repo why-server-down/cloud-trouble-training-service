@@ -31,6 +31,7 @@ const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
 const GRAFANA_DATA_FALLBACK_FAILURES = 3
 const INTRO_TOUR_STORAGE_KEY = 'afterfail:introTour:v1'
 const MISSION_TOUR_STORAGE_KEY = 'afterfail:missionTour:v1'
+const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
 const INTRO_TOUR_STEPS: TourStep[] = [
   {
@@ -135,6 +136,7 @@ function App() {
   const [activeTour, setActiveTour] = useState<'intro' | 'mission' | null>(null)
   const [hasSeenIntroTour, setHasSeenIntroTour] = useState(() => localStorage.getItem(INTRO_TOUR_STORAGE_KEY) === 'done')
   const [hasSeenMissionTour, setHasSeenMissionTour] = useState(() => localStorage.getItem(MISSION_TOUR_STORAGE_KEY) === 'done')
+  const accountStorageScope = profile?.id || namespace
   const grafanaUrl = getGrafanaUrl(namespace)
   const isGrafanaLoading = hasActiveMission && (!isGrafanaFrameReady || !isGrafanaDataReady)
 
@@ -203,6 +205,12 @@ function App() {
     const interval = window.setInterval(loadProfile, 15000)
     return () => window.clearInterval(interval)
   }, [loadProfile, token])
+
+  useEffect(() => {
+    if (!accountStorageScope) return
+    setHasSeenIntroTour(localStorage.getItem(scopedStorageKey(INTRO_TOUR_STORAGE_KEY, accountStorageScope)) === 'done')
+    setHasSeenMissionTour(localStorage.getItem(scopedStorageKey(MISSION_TOUR_STORAGE_KEY, accountStorageScope)) === 'done')
+  }, [accountStorageScope])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => window.dispatchEvent(new Event('resize')), 0)
@@ -288,11 +296,11 @@ function App() {
 
   const finishActiveTour = () => {
     if (activeTour === 'intro') {
-      localStorage.setItem(INTRO_TOUR_STORAGE_KEY, 'done')
+      localStorage.setItem(scopedStorageKey(INTRO_TOUR_STORAGE_KEY, accountStorageScope), 'done')
       setHasSeenIntroTour(true)
     }
     if (activeTour === 'mission') {
-      localStorage.setItem(MISSION_TOUR_STORAGE_KEY, 'done')
+      localStorage.setItem(scopedStorageKey(MISSION_TOUR_STORAGE_KEY, accountStorageScope), 'done')
       setHasSeenMissionTour(true)
     }
     setActiveTour(null)
@@ -310,6 +318,14 @@ function App() {
     if (step.target === '[data-tour="mission-progress"]') setActiveTab('missions')
     if (step.target === '[data-tour="terminal"]' || step.target === '[data-tour="grafana"]') setActiveTab('terminal')
   }
+
+  const handleActiveMissionChange = useCallback((active: boolean) => {
+    setHasActiveMission(active)
+    if (active) {
+      setIsGrafanaFrameReady(false)
+      setIsGrafanaDataReady(false)
+    }
+  }, [])
 
   if (isLoading) return <div className="app-loading">불러오는 중...</div>
   if (!token || !sessionId) return <Login onLoginSuccess={handleLoginSuccess} />
@@ -397,7 +413,7 @@ function App() {
                   <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
                 </nav>
                 <div className="app-layout">
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} onActiveMissionChange={setHasActiveMission} /></div>
+                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} onActiveMissionChange={handleActiveMissionChange} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
                       {hasActiveMission ? (

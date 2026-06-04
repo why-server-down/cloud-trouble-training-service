@@ -19,6 +19,16 @@ const normalizeApiBaseUrl = (configuredUrl?: string) => {
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL)
 export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 interface LoginResponse {
   access_token: string
   token_type: string
@@ -275,7 +285,7 @@ export const getMissionStatus = async (token: string): Promise<MissionStatusResp
   })
 
   if (!response.ok) {
-    throw new Error(await getErrorDetail(response, '미션 상태 조회에 실패했습니다'))
+    throw new ApiError(await getErrorDetail(response, '미션 상태 조회에 실패했습니다'), response.status)
   }
 
   return response.json()
@@ -351,7 +361,7 @@ const getAuthorizedJson = async <T>(token: string, path: string, fallback: strin
   })
 
   if (!response.ok) {
-    throw new Error(await getErrorDetail(response, fallback))
+    throw new ApiError(await getErrorDetail(response, fallback), response.status)
   }
 
   return response.json()
@@ -413,11 +423,15 @@ export const getUnlockStatus = (token: string) =>
 export const getScenarioStatus = (token: string) =>
   getAuthorizedJson<ScenarioStatusResponse>(token, '/api/scenarios/status', 'AI 시나리오 상태를 불러오지 못했습니다')
 
-export const startRandomScenario = async (token: string, difficulty: string): Promise<ScenarioResponse> => {
+export const startRandomScenario = async (
+  token: string,
+  difficulty: string,
+  demoUnlock: boolean = false,
+): Promise<ScenarioResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/scenarios/start-random`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ difficulty, randomize: true }),
+    body: JSON.stringify({ difficulty, randomize: true, demo_unlock: demoUnlock }),
   })
   if (!response.ok) throw new Error(await getErrorDetail(response, 'AI 시나리오 시작에 실패했습니다'))
   return response.json()

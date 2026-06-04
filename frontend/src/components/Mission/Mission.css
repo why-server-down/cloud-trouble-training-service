@@ -83,6 +83,14 @@
   background: #282318;
 }
 
+.ai-mission-card {
+  cursor: default;
+}
+
+.ai-mission-card:hover {
+  transform: none;
+}
+
 .mission-card-header,
 .mission-info {
   display: flex;
@@ -446,14 +454,54 @@
 }
 
 .ai-section-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.75rem;
   padding: 0.9rem 0.9rem 0.5rem;
   border-bottom: 1px solid var(--line);
 }
 
+.ai-section-header .panel-index {
+  grid-column: 1;
+}
+
 .ai-section-header h3 {
+  grid-column: 1;
   color: var(--text);
   font-size: 1rem;
   letter-spacing: 0;
+}
+
+.demo-unlock-btn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  flex: 0 0 auto;
+  padding: 0.4rem 0.55rem;
+  border: 1px dashed var(--accent);
+  border-radius: 0;
+  background: rgba(56, 189, 248, 0.08);
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.demo-unlock-btn:hover {
+  background: rgba(56, 189, 248, 0.14);
+}
+
+@media (max-width: 560px) {
+  .ai-section-header {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-unlock-btn {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    margin-top: 0.35rem;
+  }
 }
 
 .ai-lock-notice {
