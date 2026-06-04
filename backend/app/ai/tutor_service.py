@@ -130,6 +130,7 @@ class TutorService:
                 previous_questions=previous_questions,
                 attempt_id=str(attempt_id),
                 runtime_ctx=runtime_ctx,
+                fault_type=chaos_type,
             )
 
         # TutorMessage DB 저장
@@ -196,6 +197,7 @@ class TutorService:
         previous_questions: list[str],
         attempt_id: str,
         runtime_ctx: dict | None,
+        fault_type: str | None = None,
     ) -> str:
         try:
             from ai_engine import TutorRequest
@@ -242,6 +244,7 @@ class TutorService:
                 mission_ctx=mission_ctx,
                 system_ctx=system_ctx,
                 user_ctx=user_ctx,
+                chaos_type=fault_type,
             )
 
             loop = asyncio.get_event_loop()

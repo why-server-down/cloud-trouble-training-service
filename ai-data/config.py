@@ -28,12 +28,18 @@ class Config:
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     GEMINI_EMBEDDING_MODEL: str = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
+    # Knowledge Base
+    KNOWLEDGE_BASE_DIR: str = os.getenv(
+        "KNOWLEDGE_BASE_DIR",
+        str(os.path.join(os.path.dirname(__file__), "knowledge-base"))
+    )
+
     # Qdrant Configuration
     QDRANT_URL: str = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
     
     # RAG Configuration
-    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
+    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
     RAG_MIN_SIMILARITY: float = float(os.getenv("RAG_MIN_SIMILARITY", "0.7"))
     RAG_CHUNK_SIZE: int = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
     RAG_CHUNK_OVERLAP: int = int(os.getenv("RAG_CHUNK_OVERLAP", "200"))

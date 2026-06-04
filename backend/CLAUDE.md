@@ -230,6 +230,11 @@ CHAOS_BACKEND=mock           # mock | chaos_mesh
 VALIDATION_BACKEND=mock      # mock | k8s | prometheus
 MOCK_VALIDATION_AUTO_PASS=false
 PROMETHEUS_URL=http://localhost:9090
+
+# RAG (Qdrant 벡터 DB)
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=              # Qdrant Cloud 사용 시 (로컬은 불필요)
+KNOWLEDGE_BASE_DIR=          # knowledge-base 절대 경로 (기본값: ai-data/knowledge-base)
 ```
 
 ## 컨벤션
