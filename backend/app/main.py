@@ -13,7 +13,7 @@ from app.api.dashboard import router as dashboard_router
 from app.api.missions import router as missions_router
 from app.api.scenarios import router as scenarios_router
 from app.api.terminal import router as terminal_router
-from app.core.database import Base, async_session, engine
+from app.core.database import Base, async_session, engine, ensure_schema_compatibility
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
 from app.services.seed_data import seed_missions
 
@@ -26,6 +26,7 @@ if sys.platform == 'win32':
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_schema_compatibility(conn)
     async with async_session() as db:
         await seed_missions(db)
     yield

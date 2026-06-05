@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { askTutor } from '../../services/api'
 
@@ -22,6 +22,58 @@ const initialMessages: ChatMessage[] = [
 ]
 const FLOATING_TUTOR_QUERY = '(max-width: 980px), (max-height: 760px)'
 
+const renderInlineText = (text: string) => {
+  const parts = text.split(/(`[^`]+`)/g)
+
+  return parts.map((part, index) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={`${part}-${index}`}>{part.slice(1, -1)}</code>
+    }
+
+    return <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+  })
+}
+
+const ChatMessageContent: React.FC<{ text: string }> = ({ text }) => {
+  const blocks = text
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+
+  return (
+    <div className="chat-message-content">
+      {blocks.map((block, blockIndex) => {
+        const lines = block.split('\n').map((line) => line.trim()).filter(Boolean)
+        const isList = lines.length > 1 && lines.every((line) => /^(\d+\.|[-*])\s+/.test(line))
+
+        if (isList) {
+          return (
+            <ul key={`${block}-${blockIndex}`} className="chat-list">
+              {lines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>
+                  {renderInlineText(line.replace(/^(\d+\.|[-*])\s+/, ''))}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        return (
+          <p key={`${block}-${blockIndex}`}>
+            {lines.map((line, lineIndex) => (
+              <React.Fragment key={`${line}-${lineIndex}`}>
+                {lineIndex > 0 && <br />}
+                {renderInlineText(line)}
+              </React.Fragment>
+            ))}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
 const TutorChat: React.FC<TutorChatProps> = ({
   token,
   missionId,
@@ -35,6 +87,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const [isFloatingViewport, setIsFloatingViewport] = useState(() =>
     typeof window === 'undefined' || !window.matchMedia ? false : window.matchMedia(FLOATING_TUTOR_QUERY).matches,
   )
@@ -51,6 +104,10 @@ const TutorChat: React.FC<TutorChatProps> = ({
     setInput('')
     setError(null)
   }, [missionId])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages, loading])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined
@@ -104,15 +161,27 @@ const TutorChat: React.FC<TutorChatProps> = ({
           )}
         </div>
         <div className="chat-messages" aria-live="polite">
-          {messages.map((message, index) => <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>{message.text}</div>)}
-          {loading && <div className="chat-message assistant">답변을 준비하고 있습니다...</div>}
+          {messages.map((message, index) => (
+            <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
+              <span className="chat-message-role">{message.role === 'user' ? '나' : '튜터'}</span>
+              <ChatMessageContent text={message.text} />
+            </div>
+          ))}
+          {loading && (
+            <div className="chat-message assistant chat-message-loading">
+              <span className="chat-message-role">튜터</span>
+              <span className="typing-indicator" aria-hidden="true"><span /><span /><span /></span>
+              <span>답변을 준비하고 있습니다...</span>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
         {error && <div className="chat-error">{error}</div>}
         <form className="chat-form" onSubmit={submitQuestion}>
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={isChatDisabled ? '질문할 수 없는 상태입니다.' : '어떤 명령으로 원인을 찾아야 하나요?'}
+            placeholder={isChatDisabled ? '질문할 수 없는 상태입니다' : '어떤 명령으로 원인을 찾아야 하나요?'}
             disabled={isChatDisabled}
           />
           <button type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>

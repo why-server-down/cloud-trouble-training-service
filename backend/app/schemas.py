@@ -136,6 +136,7 @@ class ChatResponse(BaseModel):
 class ScenarioGenerateRequest(BaseModel):
     difficulty: str  # beginner | intermediate | advanced | expert
     randomize: bool = True
+    demo_unlock: bool = False
 
 
 class ScenarioResponse(BaseModel):

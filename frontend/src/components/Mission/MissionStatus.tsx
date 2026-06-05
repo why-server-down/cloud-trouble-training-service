@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { getMissionStatus, MissionStatusResponse } from '../../services/api'
+import { ApiError, getMissionStatus, MissionStatusResponse } from '../../services/api'
 
 interface MissionStatusProps {
   token: string
@@ -26,7 +26,7 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
         if (data.attempt.status !== 'in_progress') onMissionEnd()
       } catch (error) {
         console.error('미션 상태 조회 실패:', error)
-        if (error instanceof Error && error.message === '진행 중인 미션이 없습니다') {
+        if (error instanceof ApiError && error.status === 404) {
           onMissionEnd()
         }
       }
@@ -37,14 +37,14 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
     return () => window.clearInterval(interval)
   }, [token, refreshKey, onStatusChange, onMissionEnd])
 
-  if (!status) return <div className="mission-status-panel"><div className="empty-state">미션 상태를 불러오는 중...</div></div>
+  if (!status) return <div className="mission-status-panel" data-tour="mission-progress"><div className="empty-state">미션 상태를 불러오는 중...</div></div>
 
   const minutes = Math.floor(status.remaining_seconds / 60)
   const seconds = status.remaining_seconds % 60
   const timeClass = status.remaining_seconds < 60 ? 'danger' : status.remaining_seconds < 300 ? 'warning' : ''
 
   return (
-    <div className="mission-status-panel">
+    <div className="mission-status-panel" data-tour="mission-progress">
       <div className="status-header">미션 진행 상황</div>
       <div className="status-item"><span>남은 시간</span><span className={`status-value ${timeClass}`}>{minutes}:{seconds.toString().padStart(2, '0')}</span></div>
       <div className="status-item"><span>현재 점수</span><span className="status-value">{status.current_score}점</span></div>

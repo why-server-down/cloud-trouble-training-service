@@ -25,9 +25,14 @@ services:
       VALIDATION_BACKEND: ${VALIDATION_BACKEND:-prometheus}
       PROMETHEUS_URL: http://prometheus:9090
       MOCK_VALIDATION_AUTO_PASS: ${MOCK_VALIDATION_AUTO_PASS:-false}
+      DEMO_UNLOCK_AI_SCENARIOS: ${DEMO_UNLOCK_AI_SCENARIOS:-false}
       AI_BACKEND: ${AI_BACKEND:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash-lite}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-models/gemini-embedding-001}
+      AI_DATA_DIR: /app/ai-data
       QDRANT_URL: http://qdrant:6333
       KNOWLEDGE_BASE_DIR: /app/ai-data/knowledge-base
       KUBECONFIG: /app/.kube/config

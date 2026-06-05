@@ -14,8 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 
 # ai-data 경로를 Python path에 추가
-_AI_DATA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../ai-data")
+_AI_DATA_PATH_CANDIDATES = (
+    os.getenv("AI_DATA_DIR"),
+    os.path.abspath("/app/ai-data"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ai-data")),
+)
+_AI_DATA_PATH = next(
+    (path for path in _AI_DATA_PATH_CANDIDATES if path and os.path.exists(path)),
+    _AI_DATA_PATH_CANDIDATES[-1],
 )
 if _AI_DATA_PATH not in sys.path:
     sys.path.insert(0, _AI_DATA_PATH)
