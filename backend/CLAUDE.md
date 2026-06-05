@@ -15,7 +15,7 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 ## 프로젝트 구조
 ```
 app/
-├── main.py              # FastAPI 앱, 라우터 등록
+├── main.py              # FastAPI 앱, 라우터 등록, lifespan (DB init → seed → Qdrant auto-ingest)
 ├── models.py            # SQLAlchemy 모델
 │                        #   User, TerminalSession, CommandLog
 │                        #   Mission, MissionAttempt (attempt_type, scenario_id 포함)
@@ -46,12 +46,13 @@ app/
 │   ├── validation_service.py     # 해결 검증 (Mock | K8s API | Prometheus)
 │   ├── validation_rule_service.py # AI 생성 검증 조건 저장/실행 + K8s fallback
 │   ├── promql_guard.py           # PromQL 안전성 검사 (namespace 격리, allowlist)
-│   ├── runtime_context.py        # K8s/Prometheus/Loki/명령 이력 수집 (구조 존재, 미연결)
+│   ├── runtime_context.py        # K8s/Prometheus/CommandLog 수집 (구현 완료, 튜터 연결됨)
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
 │   ├── service_factory.py        # 환경변수 기반 서비스 팩토리
-│   └── seed_data.py              # 미션 초기 데이터 (4개 레벨)
+│   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
+│   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
     ├── __init__.py
     ├── tutor_service.py      # AI 튜터 어댑터 (Mock/OpenAI/Gemini, K8s Pod 상태 실시간 조회)
@@ -202,6 +203,13 @@ POST /api/scenarios/current/check
 - `AI_BACKEND=openai|gemini`: AITutorEngine (RAG + LLM) 사용
 - `VALIDATION_BACKEND=k8s` 시 K8s API로 실제 Pod 상태 + 이벤트 조회
 - 힌트 레벨 0~3: 방향제시 → 리소스지목 → kubectl 명령어 → 전체 해결
+
+### Qdrant 자동 초기화 (qdrant_init.py)
+서버 시작(lifespan) 시 `auto_ingest_if_empty()` 호출:
+- `AI_BACKEND=mock` → skip (임베딩 API 없음)
+- Qdrant 컬렉션에 문서 있음 → skip
+- 비어있을 때만 `ai-data/knowledge-base` 전체 ingestion 실행
+- 임베딩 생성은 `ThreadPoolExecutor`에서 실행 (blocking I/O 비동기 격리)
 
 ## 게이미피케이션 (analytics_service.py)
 - 티어: Bronze(0) → Silver(201) → Gold(501) → Platinum(1001) → DevOps Master(2001+)

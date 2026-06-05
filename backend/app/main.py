@@ -16,6 +16,7 @@ from app.api.terminal import router as terminal_router
 from app.core.database import Base, async_session, engine, ensure_schema_compatibility
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
 from app.services.seed_data import seed_missions
+from app.services.qdrant_init import auto_ingest_if_empty
 
 # Windows에서 subprocess 지원을 위한 이벤트 루프 설정
 if sys.platform == 'win32':
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI):
         await ensure_schema_compatibility(conn)
     async with async_session() as db:
         await seed_missions(db)
+    await auto_ingest_if_empty()
     yield
 
 
