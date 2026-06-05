@@ -28,7 +28,7 @@
 - Infra: Kubernetes, Chaos Mesh
 - Monitoring: Prometheus, Grafana, Loki, Promtail, AlertManager
 
-## 구현 현황 (2026-06-04 기준)
+## 구현 현황 (2026-06-05 기준)
 
 ### 완료
 - [x] 회원가입 / 로그인 (JWT)
@@ -66,8 +66,13 @@
   - RAG knowledge-base 구축 (troubleshooting/ 전용 문서 + 6개 권위 출처 문서)
   - fault_type 기반 RAG 필터링 구현 (ingest_knowledge.py + rag_service.py + ai_engine.py)
   - Qdrant 217개 청크 ingestion 완료, 채팅 API 연동 검증 완료
+  - ai-data/ingest.py 공용 모듈 분리 (load_all_documents + FAULT_TYPE_TAGS)
   - 미완료: incident-logs/ 실제 운영 장애 로그 문서 미구성
 - [x] **AI 장애 생성 모드 Phase 6** — validation_agent.py 구현 완료 (Mock + OpenAI/Gemini LLM 판정)
+- [x] **Qdrant knowledge-base 자동 ingestion** — 서버 시작 시 컬렉션 비어있으면 자동 적재
+  - AI_BACKEND=mock이거나 이미 문서 있으면 skip
+  - backend/app/services/qdrant_init.py (auto_ingest_if_empty)
+  - main.py lifespan에 통합
 
 ### 진행 중 (캡스톤 1)
 - [ ] AI 장애 생성 모드 Phase 7 (운영 메트릭, 비용 제한, 시드 저장)
@@ -88,7 +93,7 @@
 # 인프라만 (권장 - Method B)
 docker compose up postgres qdrant -d
 
-# 백엔드
+# 백엔드 (AI_BACKEND=openai|gemini 시 서버 시작 시 Qdrant 자동 ingestion)
 cd backend
 source venv/bin/activate
 uvicorn app.main:app --port 8000
@@ -143,6 +148,16 @@ docker compose --profile monitoring up -d
 # Grafana: http://localhost:3001 (admin/admin)
 # Prometheus: http://localhost:9090
 ```
+
+> **주의 (로컬 환경)**: `infra/monitoring/prometheus.yml`의 노드명(`desktop-control-plane`)은 **Docker Desktop 4.x 이상** 기준.
+> 구버전 Docker Desktop은 노드명이 `docker-desktop`이므로 Grafana CPU/Memory가 No Data로 표시됨.
+> ```bash
+> kubectl get nodes          # 노드명 확인
+> docker --version           # Docker Desktop 버전 확인
+> # 구버전이면 Docker Desktop 업데이트 권장 (Settings → Check for Updates)
+> # 업데이트 후 Settings → Kubernetes → Reset Kubernetes Cluster
+> ```
+> 캡스톤 2 (EKS 배포) 때 Kubernetes 서비스 디스커버리(`kubernetes_sd_configs`)로 자동화 예정.
 
 ## 주요 설계 문서
 - [agent.md](agent.md) - AI 장애 생성 모드 전체 설계 및 구현 현황 (Phase 1~7)

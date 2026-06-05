@@ -1,6 +1,6 @@
 # AI Agent Implementation Plan
 
-## 구현 현황 (2026-06-03 기준)
+## 구현 현황 (2026-06-05 기준)
 
 | Phase | 제목 | 상태 |
 |---|---|---|
@@ -8,7 +8,7 @@
 | Phase 2 | ChaosPlan 도입 | ✅ 완료 (inject_plan 미연결, 기존 inject() 재사용 중) |
 | Phase 3 | Prometheus 동적 검증 | ✅ 완료 (k8s 타입 룰 + K8s fallback 방식으로 안정화) |
 | Phase 4 | Runtime Context 기반 튜터 | ✅ 완료 (K8s state + Prometheus 수집, 튜터 연결, TutorMessage DB 저장) |
-| Phase 5 | RAG 장애 로그 저장소 | 🔶 부분 완료 (fault_type 필터링 + knowledge-base 구축 완료, incident-logs 미구성) |
+| Phase 5 | RAG 장애 로그 저장소 | 🔶 부분 완료 (fault_type 필터링 + knowledge-base 구축 + 자동 ingestion 완료, incident-logs 미구성) |
 | Phase 6 | OpenAI/Gemini 기반 생성 활성화 | ✅ 완료 (Gemini 포함, validation_agent 구현 완료) |
 | Phase 7 | 운영 품질 | ❌ 미구현 |
 
@@ -1212,9 +1212,11 @@ Mission Page
 **완료된 항목:**
 1. `knowledge-base/troubleshooting/` 전용 문서 구축 (crashloopbackoff, imagepullbackoff, oomkilled, pending-pods, service-misconfig)
 2. `RAGService.search_knowledge()` `fault_type` 필터 파라미터 추가 (Qdrant `MatchAny` 필터)
-3. ingestion script fault_type/platform metadata 저장 (`_FAULT_TYPE_TAGS` 매핑)
+3. ingestion script fault_type/platform metadata 저장 (`FAULT_TYPE_TAGS` 매핑)
 4. 튜터가 chaos_type 기반으로 관련 문서만 검색 (ai_engine.py → tutor_service.py 연결)
 5. Qdrant k8s_docs 컬렉션 217개 청크 ingestion 완료
+6. `ai-data/ingest.py` 공용 모듈 분리 (`load_all_documents`, `FAULT_TYPE_TAGS`)
+7. 서버 시작 시 Qdrant 자동 ingestion (`backend/app/services/qdrant_init.py`, lifespan 통합)
 
 **미완료:**
 - `incident-logs/` 실제 운영 장애 로그 (EKS/GKE/AKS 사후 분석 문서) 미구성
