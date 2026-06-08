@@ -110,9 +110,8 @@ type PrometheusQueryResponse = {
 const escapePrometheusLabelValue = (value: string) =>
   value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 
-const hasPrometheusData = (payload: PrometheusQueryResponse) =>
-  payload.status === 'success'
-  && Boolean(payload.data?.result?.some((series) => Number(series.value?.[1] ?? 0) > 0))
+const hasPrometheusResponse = (payload: PrometheusQueryResponse) =>
+  payload.status === 'success' && Array.isArray(payload.data?.result)
 
 const getGrafanaDataProbeUrl = (namespace: string | null) => {
   const namespaceMatcher = escapePrometheusLabelValue(namespace || '.*')
@@ -257,7 +256,7 @@ function App() {
         if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
 
         const payload = await response.json() as PrometheusQueryResponse
-        if (hasPrometheusData(payload)) markDataReady()
+        if (hasPrometheusResponse(payload)) markDataReady()
       } catch (error) {
         failures += 1
         console.warn('Grafana data readiness probe failed:', error)
