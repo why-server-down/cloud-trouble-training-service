@@ -6,7 +6,7 @@ if [[ "${1:-}" == "--monitoring" ]]; then
   COMPOSE_ARGS+=(--profile monitoring)
 fi
 
-echo "Starting K8s Survival Camp with Docker Compose..."
+echo "Starting AfterFail with Docker Compose..."
 
 if ! docker info >/dev/null 2>&1; then
   echo "Docker is not running. Start Docker Desktop and retry." >&2

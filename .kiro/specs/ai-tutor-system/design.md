@@ -164,24 +164,27 @@ async def collect_system_state(user_id: str) -> SystemContext:
 ```python
 class SocraticPromptEngine:
     """
-    Generates prompts using Socratic method
+    Generates prompts using Socratic method with 3-level progressive hint system
     """
     
     SYSTEM_PROMPT = """
     You are a Socratic tutor for Kubernetes troubleshooting.
     
-    RULES:
-    1. NEVER give direct answers
-    2. Guide through questions that lead to discovery
-    3. Reference the current system state in your questions
-    4. Adjust difficulty based on user's hint level
-    5. Be encouraging and patient
+    CORE RULES:
+    1. Strictly adhere to hint level constraints - never exceed boundaries
+    2. Guide through observation and questions, not direct answers
+    3. Reference the current system state in your responses
+    4. Progressive disclosure - reveal information gradually
+    5. Be encouraging and celebrate learning moments
     
     HINT LEVELS:
-    - Level 0: General direction only
-    - Level 1: Specific area to investigate
-    - Level 2: Exact command to run
-    - Level 3: Complete solution with explanation
+    - Level 1 (Observational): Ask about observable state, NO answers/causes/commands
+    - Level 2 (Conceptual): Explain concepts, point to log lines, NO direct solutions
+    - Level 3 (Complete): Provide root cause, exact commands, YAML fixes
+    
+    Context will be provided in {context} placeholder.
+    User question in {user_message} placeholder.
+    Current hint level: [Hint_Level]
     """
     
     def generate_prompt(
@@ -191,7 +194,7 @@ class SocraticPromptEngine:
         hint_level: int
     ) -> str:
         """
-        Generates LLM prompt based on context and hint level
+        Generates LLM prompt based on context and hint level (1-3)
         """
         prompt_parts = [
             self.SYSTEM_PROMPT,
@@ -207,12 +210,27 @@ class SocraticPromptEngine:
     
     def _format_hint_level_instruction(self, level: int) -> str:
         instructions = {
-            0: "Provide only directional guidance. Ask questions about what they observe.",
-            1: "Point to specific resources or logs to check. Suggest kubectl commands.",
-            2: "Provide exact commands to run and what to look for in output.",
-            3: "Explain the complete solution step-by-step with reasoning."
+            1: """
+            LEVEL 1 - OBSERVATIONAL GUIDANCE:
+            - FORBIDDEN: Direct answers, root causes, specific commands
+            - ALLOWED: Questions about observable state, general directions
+            - Ask what they SEE, not what to DO
+            Example: "What does the pod Status show? What patterns do you notice in the Events?"
+            """,
+            2: """
+            LEVEL 2 - CONCEPTUAL + DIAGNOSTIC:
+            - FORBIDDEN: Direct solutions, exact fixes
+            - ALLOWED: Explain concepts, point to specific log lines, narrow investigation area
+            Example: "CrashLoopBackOff means the container exits immediately. Line 7 shows exit code 127. What does that error code typically indicate?"
+            """,
+            3: """
+            LEVEL 3 - COMPLETE SOLUTION:
+            - REQUIRED: Root cause statement, exact kubectl commands, YAML snippets
+            - Provide step-by-step fix with explanation
+            Example: "Root Cause: Image typo 'ngnix' → 'nginx'. Run: kubectl edit deployment myapp. Change line 24: image: nginx:latest. Why: Correct image name resolves ImagePullBackOff."
+            """
         }
-        return f"HINT LEVEL {level}: {instructions[level]}"
+        return f"[Hint_Level: {level}]\n{instructions[level]}"
 ```
 
 ### 3.3 RAG Implementation
@@ -294,13 +312,13 @@ class RAGService:
 ```python
 class HintManager:
     """
-    Manages hint levels and scoring
+    Manages hint levels and scoring (3-level system)
     """
     
     HINT_PENALTIES = {
-        1: 5,
-        2: 10,
-        3: 50
+        1: 5,   # Level 1: Observational guidance
+        2: 10,  # Level 2: Conceptual hints
+        3: 50   # Level 3: Complete solution
     }
     
     async def request_hint(
@@ -311,8 +329,9 @@ class HintManager:
     ) -> HintResponse:
         """
         Processes hint request and updates score
+        Valid levels: 1, 2, 3
         """
-        # Increment hint level
+        # Increment hint level (max 3)
         new_level = min(current_level + 1, 3)
         
         # Deduct points

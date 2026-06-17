@@ -67,7 +67,7 @@ async def get_mission_status(
     """진행 중인 미션 상태 조회"""
     service = get_mission_service()
     attempt = await service.get_active_attempt(db, current_user.id)
-    if not attempt:
+    if not attempt or attempt.attempt_type == "ai_scenario":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="진행 중인 미션이 없습니다"
         )
@@ -86,7 +86,7 @@ async def check_mission(
     """미션 해결 여부 확인"""
     service = get_mission_service()
     attempt = await service.get_active_attempt(db, current_user.id)
-    if not attempt:
+    if not attempt or attempt.attempt_type == "ai_scenario":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="진행 중인 미션이 없습니다"
         )
@@ -119,7 +119,7 @@ async def use_hint(
     """힌트 사용 (감점)"""
     service = get_mission_service()
     attempt = await service.get_active_attempt(db, current_user.id)
-    if not attempt:
+    if not attempt or attempt.attempt_type == "ai_scenario":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="진행 중인 미션이 없습니다"
         )

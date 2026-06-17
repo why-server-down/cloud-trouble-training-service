@@ -43,6 +43,9 @@ def print_warning(text):
     print(f"⚠ {text}")
 
 
+from ingest import load_all_documents  # noqa: F401  (re-export for backwards compat)
+
+
 def main():
     """Main ingestion process"""
     print_header("Knowledge Base Ingestion")
@@ -50,15 +53,24 @@ def main():
     # Display configuration
     print("\nConfiguration:")
     print(f"  Knowledge Base Dir: {config.KNOWLEDGE_BASE_DIR}")
-    print(f"  OpenAI API Key: {'✓ Set' if config.OPENAI_API_KEY and config.OPENAI_API_KEY != 'your_openai_api_key_here' else '✗ Not Set'}")
-    print(f"  OpenAI Model: {config.OPENAI_MODEL}")
+    print(f"  AI Backend: {config.AI_BACKEND}")
     
-    # Validate configuration
-    if not config.OPENAI_API_KEY or config.OPENAI_API_KEY == "your_openai_api_key_here":
-        print_error("OpenAI API key not configured!")
-        print("\nPlease set OPENAI_API_KEY in .env file:")
-        print("  OPENAI_API_KEY=your_actual_api_key_here")
-        sys.exit(1)
+    if config.AI_BACKEND == "gemini":
+        print(f"  Gemini API Key: {'✓ Set' if config.GEMINI_API_KEY else '✗ Not Set'}")
+        print(f"  Gemini Embedding Model: {config.GEMINI_EMBEDDING_MODEL}")
+        if not config.GEMINI_API_KEY:
+            print_error("Gemini API key not configured!")
+            print("\nPlease set GEMINI_API_KEY in .env file:")
+            print("  GEMINI_API_KEY=your_actual_api_key_here")
+            sys.exit(1)
+    else:
+        print(f"  OpenAI API Key: {'✓ Set' if config.OPENAI_API_KEY and config.OPENAI_API_KEY != 'your_openai_api_key_here' else '✗ Not Set'}")
+        print(f"  OpenAI Model: {config.OPENAI_MODEL}")
+        if not config.OPENAI_API_KEY or config.OPENAI_API_KEY == "your_openai_api_key_here":
+            print_error("OpenAI API key not configured!")
+            print("\nPlease set OPENAI_API_KEY in .env file:")
+            print("  OPENAI_API_KEY=your_actual_api_key_here")
+            sys.exit(1)
     
     # Check if knowledge base directory exists
     kb_dir = Path(config.KNOWLEDGE_BASE_DIR)
@@ -106,9 +118,9 @@ def main():
             print_warning(f"Could not get collection stats: {e}")
         
         # Step 3: Load documents
-        print_step(3, "Loading documents from knowledge base")
+        print_step(3, "Loading documents from knowledge base (recursive)")
         
-        docs = rag.load_documents(str(kb_dir))
+        docs = load_all_documents(kb_dir)
         print(f"  Found {len(docs)} documents")
         
         if len(docs) == 0:
@@ -116,12 +128,20 @@ def main():
             print(f"\nPlease add markdown files to: {kb_dir}")
             sys.exit(1)
         
-        # List loaded documents
-        print("\n  Loaded documents:")
+        # List loaded documents by category
+        print("\n  Loaded documents by category:")
+        from collections import defaultdict
+        by_category = defaultdict(list)
         for doc in docs:
-            source = doc.metadata.get('source', 'unknown')
-            size = len(doc.page_content)
-            print(f"    - {source} ({size} chars)")
+            category = doc.metadata.get('category', 'root')
+            by_category[category].append(doc.metadata['source'])
+        
+        for category, files in sorted(by_category.items()):
+            print(f"\n  📁 {category}/ ({len(files)} files)")
+            for file in files[:5]:  # Show first 5
+                print(f"    - {file}")
+            if len(files) > 5:
+                print(f"    ... and {len(files) - 5} more")
         
         print_success(f"Loaded {len(docs)} documents")
         
@@ -151,7 +171,10 @@ def main():
         print_step(5, "Generating embeddings and ingesting into Qdrant")
         
         print("  This may take a few minutes...")
-        print(f"  Embedding model: text-embedding-ada-002")
+        if config.AI_BACKEND == "gemini":
+            print(f"  Embedding model: {config.GEMINI_EMBEDDING_MODEL}")
+        else:
+            print(f"  Embedding model: text-embedding-ada-002")
         print(f"  Estimated API calls: {len(chunks)}")
         
         count = rag.ingest_documents(chunks)

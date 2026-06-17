@@ -12,11 +12,23 @@ class Settings(BaseSettings):
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
     PROMETHEUS_URL: str = "http://localhost:9090"
     MOCK_VALIDATION_AUTO_PASS: bool = False
+    DEMO_UNLOCK_AI_SCENARIOS: bool = False
 
-    # AI Tutor
+    # AI Tutor & Scenario
+    AI_BACKEND: str = "mock"  # "mock" | "openai" | "gemini"
+
+    # OpenAI
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
-    AI_BACKEND: str = "mock"  # "mock" | "openai"
+    SCENARIO_MODEL: str = "gpt-4o-mini"
+    TUTOR_MODEL: str = "gpt-4o-mini"
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # Gemini
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_EMBEDDING_MODEL: str = "models/gemini-embedding-001"
+
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
     KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"

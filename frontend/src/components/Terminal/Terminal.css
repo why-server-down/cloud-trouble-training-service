@@ -1,5 +1,7 @@
 .terminal-container {
   display: flex;
+  min-width: 0;
+  min-height: 0;
   width: 100%;
   height: 100%;
   max-height: 100%;
@@ -8,7 +10,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 0;
   background: #090d0c;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: var(--panel-shadow);
 }
 
 .terminal-status {
@@ -53,6 +55,14 @@
 
 .terminal-wrapper .xterm-viewport {
   overflow-y: scroll !important;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.terminal-wrapper .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .terminal-wrapper .xterm-screen {

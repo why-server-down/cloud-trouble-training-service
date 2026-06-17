@@ -29,6 +29,7 @@ class TutorRequest:
     mission_ctx: Optional[MissionContext] = None
     system_ctx: Optional[SystemContext] = None
     user_ctx: Optional[UserContext] = None
+    chaos_type: Optional[str] = None
 
 
 @dataclass
@@ -50,27 +51,32 @@ class AITutorEngine:
         self,
         openai_api_key: Optional[str] = None,
         model: str = "gpt-4",
-        use_rag: bool = True
+        use_rag: bool = True,
+        api_base_url: Optional[str] = None,
     ):
         """
         Initialize AI Tutor Engine
-        
+
         Args:
-            openai_api_key: OpenAI API key (defaults to env var)
-            model: OpenAI model to use
+            openai_api_key: API key (OpenAI or Gemini)
+            model: Model name
             use_rag: Whether to use RAG for knowledge retrieval
+            api_base_url: Custom base URL (Gemini OpenAI-compatible endpoint 등)
         """
         self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
         self.use_rag = use_rag
-        
-        # Initialize OpenAI client
+
+        # OpenAI-compatible client (Gemini은 base_url만 다름)
+        client_kwargs = {"api_key": self.api_key}
+        if api_base_url:
+            client_kwargs["base_url"] = api_base_url
         openai.api_key = self.api_key
-        self.client = openai.OpenAI(api_key=self.api_key)
-        
+        self.client = openai.OpenAI(**client_kwargs)
+
         # Initialize components
         self.prompt_engine = SocraticPromptEngine()
-        
+
         if self.use_rag:
             self.rag_service = RAGService()
     
@@ -105,7 +111,7 @@ class AITutorEngine:
         if self.use_rag and request.hint_level >= 1:
             retrieved_docs = self.rag_service.search_knowledge(
                 request.user_question,
-                top_k=3
+                fault_type=request.chaos_type,
             )
             
             if retrieved_docs:

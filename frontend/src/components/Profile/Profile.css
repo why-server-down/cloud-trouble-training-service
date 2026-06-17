@@ -41,7 +41,8 @@
 .dashboard-tier-card p,
 .tier-progress-wrap span,
 .dashboard-empty,
-.dashboard-error {
+.dashboard-error,
+.dashboard-warning {
   color: var(--muted);
   font-size: 0.75rem;
 }
@@ -191,6 +192,12 @@
   border: 1px solid var(--danger);
 }
 
+.dashboard-warning {
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--warning);
+  background: rgba(213, 163, 74, 0.08);
+}
+
 .profile-page-header {
   display: flex;
   align-items: flex-end;
@@ -204,7 +211,7 @@
   margin-top: 0.7rem;
   color: var(--text);
   font-size: 2rem;
-  letter-spacing: -0.06em;
+  letter-spacing: 0;
 }
 
 .profile-page-header p,

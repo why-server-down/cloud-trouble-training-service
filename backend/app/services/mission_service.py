@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Mission, MissionAttempt, User
+from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.core.metrics import MISSION_COMPLETIONS
 from app.services.chaos_injector import BaseChaosInjector
 from app.services.scoring_service import ScoringService
@@ -55,7 +55,61 @@ class MissionService:
                 )
             )
         )
-        return result.scalar_one_or_none()
+        attempt = result.scalar_one_or_none()
+        if not attempt:
+            return None
+
+        if await self._expire_attempt_if_timed_out(db, attempt):
+            return None
+
+        return attempt
+
+    async def _expire_attempt_if_timed_out(
+        self, db: AsyncSession, attempt: MissionAttempt
+    ) -> bool:
+        if attempt.status != "in_progress":
+            return False
+
+        now = datetime.now(timezone.utc)
+        time_limit: int | None = None
+        scenario: GeneratedScenario | None = None
+
+        if attempt.attempt_type == "ai_scenario":
+            if not attempt.scenario_id:
+                return False
+            result = await db.execute(
+                select(GeneratedScenario).where(GeneratedScenario.id == attempt.scenario_id)
+            )
+            scenario = result.scalar_one_or_none()
+            time_limit = scenario.time_limit if scenario else None
+        else:
+            if not attempt.mission_id:
+                return False
+            result = await db.execute(select(Mission).where(Mission.id == attempt.mission_id))
+            mission = result.scalar_one_or_none()
+            time_limit = mission.time_limit if mission else None
+
+        if time_limit is None:
+            return False
+
+        elapsed = int((now - attempt.start_time).total_seconds())
+        if elapsed < time_limit:
+            return False
+
+        attempt.status = "failed"
+        attempt.end_time = now
+        attempt.final_score = self._scoring.MIN_SCORE
+        if scenario:
+            scenario.status = "failed"
+            if scenario.chaos_id:
+                await self._chaos.revert(scenario.chaos_id)
+                scenario.chaos_id = None
+        else:
+            await self._cleanup_chaos(attempt.id)
+
+        await db.commit()
+        await db.refresh(attempt)
+        return True
 
     async def start_mission(
         self, db: AsyncSession, user: User, mission_id: uuid.UUID
@@ -115,6 +169,8 @@ class MissionService:
             select(Mission).where(Mission.id == attempt.mission_id)
         )
         mission = mission_result.scalar_one_or_none()
+        if not mission:
+            raise ValueError("미션 정보를 찾을 수 없습니다 (AI 시나리오 attempt는 /api/scenarios/status를 사용하세요)")
 
         now = datetime.now(timezone.utc)
         elapsed = int((now - attempt.start_time).total_seconds())

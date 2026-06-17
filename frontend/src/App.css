@@ -1,17 +1,20 @@
 .app {
   display: flex;
+  min-width: 0;
   width: 100%;
   height: 100%;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-header {
   display: flex;
-  min-height: 70px;
+  min-height: 64px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.8rem 1.25rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--line-strong);
   background: rgba(15, 20, 19, 0.96);
 }
@@ -50,13 +53,17 @@
 
 .header-info {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.55rem;
 }
 
 .app-loading {
   display: grid;
   height: 100vh;
+  height: 100dvh;
   place-items: center;
   color: var(--accent);
   background: var(--bg);
@@ -105,22 +112,182 @@
 .workspace,
 .app-layout {
   display: flex;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .workspace {
-  width: 100%;
   flex-direction: column;
 }
 
+.app-layout {
+  gap: var(--layout-gap);
+  padding: var(--layout-pad);
+}
+
+/* ── Environment Tabs ───────────────────────────────────── */
+.env-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  flex-shrink: 0;
+  gap: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+.env-tab {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.65rem 1.1rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.env-tab:last-child {
+  border-right: none;
+}
+
+.env-tab:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+.env-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.env-tab-label {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-tab-sub {
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  opacity: 0.6;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.env-tab.active .env-tab-label {
+  color: var(--accent);
+}
+
+.env-tab.wip .env-tab-label {
+  color: var(--faint);
+}
+
+.env-tab.wip .env-tab-sub {
+  color: #5a7065;
+}
+
+/* ── WIP Screen ─────────────────────────────────────────── */
+.wip-screen {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg);
+}
+
+.wip-content {
+  display: flex;
+  max-width: 480px;
+  flex-direction: column;
+  gap: 1rem;
+  text-align: center;
+}
+
+.wip-eyebrow {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.wip-content h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.wip-content p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.75;
+}
+
+.wip-roadmap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+}
+
+.wip-roadmap > span {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.wip-roadmap ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.wip-roadmap li {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* ── Workspace Tabs (mobile) ────────────────────────────── */
 .workspace-tabs {
   display: none;
 }
 
 .mission-section {
   display: flex;
-  width: 390px;
+  width: clamp(20rem, 28vw, 24.5rem);
+  min-width: 20rem;
+  max-width: 24.5rem;
   flex-shrink: 0;
   flex-direction: column;
   overflow: hidden;
@@ -132,7 +299,6 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  padding: 0.85rem;
   overflow: hidden;
 }
 
@@ -142,7 +308,16 @@
   min-height: 0;
   flex: 1;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 0.85rem;
+  gap: var(--layout-gap);
+  overflow: hidden;
+}
+
+.terminal-tour-target {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .grafana-panel {
@@ -153,7 +328,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: #090d0c;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: var(--panel-shadow);
 }
 
 .tutorial-panel {
@@ -164,7 +339,7 @@
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: #090d0c;
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.16);
+  box-shadow: var(--panel-shadow);
 }
 
 .tutorial-panel-header {
@@ -289,6 +464,16 @@
   background: rgba(5, 8, 7, 0.82);
 }
 
+.grafana-loading-overlay strong {
+  font-size: 0;
+}
+
+.grafana-loading-overlay strong::after {
+  content: "Grafana 대시보드 로딩중입니다";
+  color: #e9f4ec;
+  font-size: 0.82rem;
+}
+
 .grafana-loading-overlay span {
   color: #9eafa4;
   font-size: 0.86rem;
@@ -311,7 +496,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 0.75rem;
+  padding: 1rem;
 }
 
 .workspace-dashboard .dashboard-grid {
@@ -320,17 +505,17 @@
 
 @media (max-width: 768px) {
   .app-header {
-    min-height: 58px;
-    padding: 0.55rem 0.75rem;
+    min-height: 64px;
+    padding: 0.65rem 0.75rem;
   }
 
-  .brand-index,
-  .brand-subtitle {
+  .brand-index {
     display: none;
   }
 
   .brand-lockup {
-    display: block;
+    grid-template-columns: auto;
+    row-gap: 0.12rem;
   }
 
   .brand-lockup h1 {
@@ -338,8 +523,12 @@
     white-space: nowrap;
   }
 
+  .brand-subtitle {
+    display: block;
+    grid-column: auto;
+  }
+
   .header-info {
-    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.3rem;
   }
@@ -352,11 +541,28 @@
   }
 
   .namespace-badge {
-    display: none;
+    display: inline-block;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .env-tab {
+    padding: 0.5rem 0.35rem;
+  }
+
+  .env-tab-label {
+    font-size: 0.68rem;
+  }
+
+  .env-tab-sub {
+    font-size: 0.54rem;
   }
 
   .workspace-tabs {
     display: grid;
+    flex-shrink: 0;
     grid-template-columns: repeat(2, 1fr);
     border-bottom: 1px solid var(--line);
     background: var(--surface);
@@ -382,23 +588,45 @@
   .mission-section,
   .terminal-section {
     width: 100%;
+    min-width: 0;
+    max-width: none;
   }
 
   .mobile-hidden {
     display: none;
   }
 
-  .terminal-section {
-    padding: 0.45rem;
+  .terminal-workspace {
+    grid-auto-rows: minmax(18rem, 1fr);
+    grid-template-columns: 1fr;
+    overflow-y: auto;
   }
 
+  .terminal-container,
+  .tutorial-panel,
   .grafana-panel {
-    display: none;
+    min-height: 18rem;
   }
 }
 
 @media (max-width: 480px) {
+  .app-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .header-info {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .profile-summary {
-    display: none;
+    display: inline-block;
+    max-width: calc(100% - 6rem);
+  }
+
+  .logout-button {
+    margin-left: auto;
   }
 }

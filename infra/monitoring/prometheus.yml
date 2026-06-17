@@ -2,7 +2,7 @@ global:
   scrape_interval: 5s
   evaluation_interval: 5s
   external_labels:
-    cluster: k8s-survival-camp
+    cluster: afterfail
 
 rule_files:
   - /etc/prometheus/recording_rules.yml

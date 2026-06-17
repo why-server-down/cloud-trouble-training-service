@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from 'xterm'
 import { AUTH_EXPIRED_EVENT } from '../services/api'
+import { getTerminalPrompt } from '../utils/terminal'
 
 interface WebSocketMessage {
   type: 'output' | 'error' | 'confirm'
@@ -15,6 +16,7 @@ interface UseTerminalWebSocketProps {
   terminal: Terminal | null
   namespace?: string
   onConfirmRequired?: (command: string) => void
+  onCommandComplete?: () => void
 }
 
 export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnected'
@@ -22,25 +24,44 @@ export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnecte
 const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 2000
 
-export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired }: UseTerminalWebSocketProps) => {
+const getDefaultWsBaseUrl = () => `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+
+const normalizeWsBaseUrl = (configuredUrl?: string) => {
+  if (!configuredUrl) return getDefaultWsBaseUrl()
+
+  try {
+    const url = new URL(configuredUrl)
+    const isSameBrowserHost = url.hostname === window.location.hostname
+    const isDockerServiceName = url.hostname === 'backend'
+
+    if (isDockerServiceName || (isSameBrowserHost && url.port === '8000')) {
+      return getDefaultWsBaseUrl()
+    }
+  } catch {
+    return configuredUrl
+  }
+
+  return configuredUrl.replace(/\/$/, '')
+}
+
+export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired, onCommandComplete }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const initialMessageReceivedRef = useRef(false)
   const confirmHandlerRef = useRef(onConfirmRequired)
+  const completeHandlerRef = useRef(onCommandComplete)
   const [connectionStatus, setConnectionStatus] = useState<TerminalConnectionStatus>('disconnected')
   const [error, setError] = useState<string | null>(null)
   const [reconnectKey, setReconnectKey] = useState(0)
-  const wsBaseUrl = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
+  const wsBaseUrl = normalizeWsBaseUrl(import.meta.env.VITE_WS_BASE_URL)
 
   useEffect(() => {
     confirmHandlerRef.current = onConfirmRequired
-  }, [onConfirmRequired])
+    completeHandlerRef.current = onCommandComplete
+  }, [onConfirmRequired, onCommandComplete])
 
-  const getPrompt = useCallback(() => {
-    if (!namespace) return '$ '
-    return `[${namespace.startsWith('user-') ? namespace.slice(0, 15) + '...' : namespace}]$ `
-  }, [namespace])
+  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
 
   useEffect(() => {
     if (!sessionId || !token || !terminal) return
@@ -68,8 +89,12 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
           } else {
             terminal.write(`\r\n${getPrompt()}`)
           }
+          completeHandlerRef.current?.()
         }
-        if (message.type === 'error' && message.message) terminal.write(`\r\n\x1b[31mError: ${message.message}\x1b[0m\r\n${getPrompt()}`)
+        if (message.type === 'error' && message.message) {
+          terminal.write(`\r\n\x1b[31mError: ${message.message}\x1b[0m\r\n${getPrompt()}`)
+          completeHandlerRef.current?.()
+        }
         if (message.type === 'confirm' && message.command) confirmHandlerRef.current?.(message.command)
       } catch (parseError) {
         console.error('WebSocket 메시지 파싱 실패:', parseError)

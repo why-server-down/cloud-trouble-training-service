@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -92,11 +93,13 @@ class MissionAttemptCreate(BaseModel):
 class MissionAttemptResponse(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
-    mission_id: uuid.UUID
+    mission_id: Optional[uuid.UUID] = None
+    attempt_type: str = "static_mission"
+    scenario_id: Optional[uuid.UUID] = None
     status: str
     start_time: datetime
-    end_time: datetime | None
-    final_score: int | None
+    end_time: Optional[datetime] = None
+    final_score: Optional[int] = None
     hints_used: int
 
     class Config:
@@ -124,4 +127,52 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     hint_level: int
-    mission_name: str | None = None
+    mission_name: Optional[str] = None
+    sources: Optional[list[dict]] = None
+    observations_used: Optional[list[str]] = None
+
+
+# AI Scenario
+class ScenarioGenerateRequest(BaseModel):
+    difficulty: str  # beginner | intermediate | advanced | expert
+    randomize: bool = True
+    demo_unlock: bool = False
+
+
+class ScenarioResponse(BaseModel):
+    scenario_id: uuid.UUID
+    title: str
+    difficulty: str
+    student_brief: str
+    time_limit_seconds: int
+    base_score: int
+    hint_penalty: int
+    safety_status: str = "accepted"
+
+    class Config:
+        from_attributes = True
+
+
+class ScenarioStatusResponse(BaseModel):
+    scenario_id: uuid.UUID
+    attempt_id: uuid.UUID
+    title: str
+    difficulty: str
+    student_brief: str
+    elapsed_seconds: int
+    remaining_seconds: int
+    current_score: int
+    hints_used: int
+    status: str
+
+
+class ScenarioCheckResponse(BaseModel):
+    resolved: bool
+    message: str
+    score: Optional[int] = None
+
+
+class UnlockStatusResponse(BaseModel):
+    unlocked: bool
+    completed_static: int
+    total_static: int

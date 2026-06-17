@@ -20,16 +20,26 @@ from qdrant_client.models import (
     PointStruct,
     Filter,
     FieldCondition,
-    MatchValue
+    MatchValue,
+    MatchAny,
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain.schema import Document
+try:
+    from langchain_core.documents import Document
+except ImportError:
+    from langchain.schema import Document
 from dotenv import load_dotenv
 
 from config import config
 
 load_dotenv()
+
+# 임베딩 차원: OpenAI text-embedding-ada-002=1536, Gemini gemini-embedding-001=3072
+_EMBEDDING_DIMENSIONS = {
+    "openai": 1536,
+    "gemini": 3072,
+}
 
 
 @dataclass
@@ -72,9 +82,10 @@ class RAGService:
     - 2.5: Comprehensive error handling
     """
     
-    # OpenAI text-embedding-ada-002 dimension
-    EMBEDDING_DIMENSION = 1536
-    
+    @property
+    def EMBEDDING_DIMENSION(self) -> int:
+        return _EMBEDDING_DIMENSIONS.get(config.AI_BACKEND, 1536)
+
     def __init__(
         self,
         collection_name: str = "k8s_docs",
@@ -114,15 +125,24 @@ class RAGService:
                     port=6333
                 )
             
-            # Task 2.2: Initialize OpenAI embeddings with error handling
-            api_key = config.OPENAI_API_KEY
-            if not api_key or api_key == "your_openai_api_key_here":
-                raise RAGServiceError("OpenAI API key not configured")
-            
-            self.embeddings = OpenAIEmbeddings(
-                openai_api_key=api_key,
-                model="text-embedding-ada-002"
-            )
+            # 임베딩 초기화: gemini 또는 openai 백엔드 선택
+            if config.AI_BACKEND == "gemini":
+                gemini_key = config.GEMINI_API_KEY
+                if not gemini_key:
+                    raise RAGServiceError("Gemini API key not configured")
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                self.embeddings = GoogleGenerativeAIEmbeddings(
+                    model=config.GEMINI_EMBEDDING_MODEL,
+                    google_api_key=gemini_key,
+                )
+            else:
+                api_key = config.OPENAI_API_KEY
+                if not api_key or api_key == "your_openai_api_key_here":
+                    raise RAGServiceError("OpenAI API key not configured")
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=api_key,
+                    model="text-embedding-ada-002",
+                )
             
             # Task 2.3: Create collection if it doesn't exist
             self._ensure_collection_exists()
@@ -132,27 +152,34 @@ class RAGService:
     
     def _ensure_collection_exists(self):
         """
-        Ensure collection exists with proper configuration
-        Creates collection if it doesn't exist
+        Ensure collection exists with proper configuration.
+        차원이 현재 임베딩 모델과 다르면 컬렉션을 삭제하고 재생성한다.
         """
         try:
-            # Check if collection exists
             collections = self.client.get_collections().collections
             collection_names = [col.name for col in collections]
-            
-            if self.collection_name not in collection_names:
-                # Create collection with vector configuration
-                self.client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(
-                        size=self.EMBEDDING_DIMENSION,
-                        distance=Distance.COSINE  # Cosine similarity
-                    )
-                )
-                print(f"Created collection: {self.collection_name}")
-            else:
-                print(f"Collection already exists: {self.collection_name}")
-                
+            target_dim = self.EMBEDDING_DIMENSION
+
+            if self.collection_name in collection_names:
+                # 기존 컬렉션 차원 확인
+                info = self.client.get_collection(self.collection_name)
+                existing_dim = info.config.params.vectors.size
+                if existing_dim != target_dim:
+                    print(f"Dimension mismatch ({existing_dim} → {target_dim}), recreating collection.")
+                    self.client.delete_collection(self.collection_name)
+                else:
+                    print(f"Collection already exists: {self.collection_name} (dim={existing_dim})")
+                    return
+
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(
+                    size=target_dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+            print(f"Created collection: {self.collection_name} (dim={target_dim})")
+
         except Exception as e:
             raise QdrantConnectionError(f"Failed to ensure collection exists: {str(e)}")
     
@@ -265,26 +292,34 @@ class RAGService:
         try:
             texts = [doc.page_content for doc in documents]
             metadatas = [doc.metadata for doc in documents]
-            
-            # Generate embeddings with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    embeddings_list = self.embeddings.embed_documents(texts)
-                    break
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        print(f"Embedding attempt {attempt + 1} failed, retrying...")
-                        time.sleep(2 ** attempt)  # Exponential backoff
-                    else:
-                        raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
-            
+
+            # Gemini free tier: 분당 100건 제한 → 배치 단위로 임베딩
+            BATCH_SIZE = 80
+            all_embeddings: list = []
+            for batch_start in range(0, len(texts), BATCH_SIZE):
+                batch_texts = texts[batch_start:batch_start + BATCH_SIZE]
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        batch_embeddings = self.embeddings.embed_documents(batch_texts)
+                        all_embeddings.extend(batch_embeddings)
+                        print(f"  Embedded {min(batch_start + BATCH_SIZE, len(texts))}/{len(texts)} chunks")
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            wait = 35 * (attempt + 1)
+                            print(f"  Rate limit hit, {wait}s 대기 후 재시도...")
+                            time.sleep(wait)
+                        else:
+                            raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
+                if batch_start + BATCH_SIZE < len(texts):
+                    time.sleep(35)  # 다음 배치 전 rate limit 회복 대기
+
             # Prepare points for Qdrant
             points = []
-            for i, (text, embedding, metadata) in enumerate(zip(texts, embeddings_list, metadatas)):
+            for i, (text, embedding, metadata) in enumerate(zip(texts, all_embeddings, metadatas)):
                 point_id = str(uuid.uuid4())
-                
-                # Prepare payload (metadata + content)
+
                 payload = {
                     "content": text,
                     "source": metadata.get("source", "unknown"),
@@ -292,12 +327,11 @@ class RAGService:
                     "filepath": metadata.get("filepath", ""),
                     "ingested_at": time.strftime("%Y-%m-%d %H:%M:%S")
                 }
-                
-                # Add any additional metadata fields
+
                 for key, value in metadata.items():
                     if key not in payload:
                         payload[key] = value
-                
+
                 points.append(
                     PointStruct(
                         id=point_id,
@@ -305,13 +339,13 @@ class RAGService:
                         payload=payload
                     )
                 )
-            
+
             # Upsert points to Qdrant
             self.client.upsert(
                 collection_name=self.collection_name,
                 points=points
             )
-            
+
             return len(documents)
             
         except DocumentIngestionError:
@@ -324,33 +358,45 @@ class RAGService:
         query: str,
         top_k: Optional[int] = None,
         min_similarity: Optional[float] = None,
-        filter_source: Optional[str] = None
+        filter_source: Optional[str] = None,
+        fault_type: Optional[str] = None,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
-        
+
         Args:
             query: User query
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
             filter_source: Optional filter by source metadata
-        
+            fault_type: Optional chaos/fault type — filters to matching + general docs
+
         Returns:
             List of retrieved documents with similarity scores
-        
+
         Raises:
             SearchError: If search fails
         """
         try:
             top_k = top_k or config.RAG_TOP_K
             min_similarity = min_similarity or config.RAG_MIN_SIMILARITY
-            
+
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)
-            
-            # Prepare filter if source is specified
+
+            # Prepare filter
             query_filter = None
-            if filter_source:
+            if fault_type:
+                # fault_type에 해당하는 문서 + general 문서 포함
+                query_filter = Filter(
+                    must=[
+                        FieldCondition(
+                            key="fault_types",
+                            match=MatchAny(any=[fault_type, "general"])
+                        )
+                    ]
+                )
+            elif filter_source:
                 query_filter = Filter(
                     must=[
                         FieldCondition(
@@ -360,21 +406,33 @@ class RAGService:
                     ]
                 )
             
-            # Search similar documents in Qdrant
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                limit=top_k,
-                query_filter=query_filter,
-                score_threshold=min_similarity  # Qdrant's built-in threshold
-            )
-            
+            # Search similar documents in Qdrant (qdrant-client 1.7+ API)
+            try:
+                # 신버전 API
+                from qdrant_client.models import QueryRequest
+                search_results = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    limit=top_k,
+                    query_filter=query_filter,
+                    score_threshold=min_similarity,
+                ).points
+            except AttributeError:
+                # 구버전 fallback
+                search_results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    limit=top_k,
+                    query_filter=query_filter,
+                    score_threshold=min_similarity,
+                )
+
             # Format results
             documents = []
             for result in search_results:
                 documents.append(RetrievedDocument(
                     content=result.payload.get("content", ""),
-                    similarity=result.score,  # Cosine similarity (0-1)
+                    similarity=result.score,
                     source=result.payload.get("source", "unknown"),
                     metadata=result.payload
                 ))

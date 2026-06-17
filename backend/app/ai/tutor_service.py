@@ -8,32 +8,34 @@ import asyncio
 import uuid
 from typing import Optional
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 
 # ai-data 경로를 Python path에 추가
-_AI_DATA_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../../ai-data")
+_AI_DATA_PATH_CANDIDATES = (
+    os.getenv("AI_DATA_DIR"),
+    os.path.abspath("/app/ai-data"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../ai-data")),
+)
+_AI_DATA_PATH = next(
+    (path for path in _AI_DATA_PATH_CANDIDATES if path and os.path.exists(path)),
+    _AI_DATA_PATH_CANDIDATES[-1],
 )
 if _AI_DATA_PATH not in sys.path:
     sys.path.insert(0, _AI_DATA_PATH)
 
 
-class ChatMessage:
-    def __init__(self, role: str, content: str):
-        self.role = role
-        self.content = content
-
-
 class TutorService:
     """
     AI 튜터 서비스
-    - openai 모드: ai-data의 AITutorEngine 사용 (RAG + GPT)
+    - openai/gemini 모드: ai-data의 AITutorEngine 사용 (RAG + LLM)
     - mock 모드: 간단한 고정 응답 (OpenAI 키 없을 때)
     """
 
     def __init__(self):
         self._engine = None
-        self._chat_history: dict[str, list[str]] = {}  # attempt_id -> 이전 질문 목록
         self._initialized = False
 
     def _init_engine(self):
@@ -41,15 +43,35 @@ class TutorService:
             return
         self._initialized = True
 
-        if settings.AI_BACKEND != "openai" or not settings.OPENAI_API_KEY:
+        if settings.AI_BACKEND not in ("openai", "gemini"):
             return
+
+        os.environ["AI_BACKEND"] = settings.AI_BACKEND
+
+        if settings.AI_BACKEND == "gemini":
+            if not settings.GEMINI_API_KEY:
+                return
+            os.environ["GEMINI_API_KEY"] = settings.GEMINI_API_KEY
+            os.environ["GEMINI_MODEL"] = settings.GEMINI_MODEL
+            os.environ["GEMINI_EMBEDDING_MODEL"] = settings.GEMINI_EMBEDDING_MODEL
+            api_key = settings.GEMINI_API_KEY
+            model = settings.GEMINI_MODEL
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        else:
+            if not settings.OPENAI_API_KEY:
+                return
+            os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
+            api_key = settings.OPENAI_API_KEY
+            model = settings.TUTOR_MODEL
+            base_url = None
 
         try:
             from ai_engine import AITutorEngine
             self._engine = AITutorEngine(
-                openai_api_key=settings.OPENAI_API_KEY,
-                model=settings.OPENAI_MODEL,
+                openai_api_key=api_key,
+                model=model,
                 use_rag=True,
+                api_base_url=base_url,
             )
         except Exception as e:
             print(f"[AI Tutor] 엔진 초기화 실패 (Mock 모드로 fallback): {e}")
@@ -64,11 +86,42 @@ class TutorService:
         mission_level: int,
         chaos_type: str,
         namespace: str,
+        db: AsyncSession | None = None,
+        scenario_id: uuid.UUID | None = None,
     ) -> str:
         self._init_engine()
 
-        key = str(attempt_id)
-        previous_questions = self._chat_history.get(key, [])
+        # DB에서 이전 질문 이력 로드 (세션 간 연속성)
+        previous_questions = await self._load_previous_questions(attempt_id, db)
+
+        # RuntimeContext 수집 (k8s 환경에서만)
+        runtime_ctx: dict | None = None
+        if db is not None and settings.VALIDATION_BACKEND == "k8s":
+            try:
+                from app.services.runtime_context import (
+                    get_runtime_context_collector,
+                    format_k8s_state,
+                    format_recent_commands,
+                    format_events,
+                )
+                from app.models import MissionAttempt
+                result = await db.execute(
+                    select(MissionAttempt).where(MissionAttempt.id == attempt_id)
+                )
+                attempt = result.scalar_one_or_none()
+                user_id = attempt.user_id if attempt else None
+
+                if user_id:
+                    collector = get_runtime_context_collector()
+                    runtime_ctx = await collector.collect(
+                        user_id=user_id,
+                        namespace=namespace,
+                        db=db,
+                        scenario_title=mission_name,
+                        scenario_id=scenario_id,
+                    )
+            except Exception as e:
+                print(f"[AI Tutor] RuntimeContext 수집 실패 (무시): {e}")
 
         if self._engine is None:
             response = self._mock_response(user_question, hint_level, chaos_type)
@@ -81,14 +134,63 @@ class TutorService:
                 chaos_type=chaos_type,
                 namespace=namespace,
                 previous_questions=previous_questions,
-                attempt_id=key,
+                attempt_id=str(attempt_id),
+                runtime_ctx=runtime_ctx,
+                fault_type=chaos_type,
             )
 
-        # 대화 히스토리 저장 (최근 5개만 유지)
-        previous_questions.append(user_question)
-        self._chat_history[key] = previous_questions[-5:]
+        # TutorMessage DB 저장
+        if db is not None:
+            await self._save_messages(db, attempt_id, user_question, response, hint_level)
 
         return response
+
+    async def _load_previous_questions(
+        self, attempt_id: uuid.UUID, db: AsyncSession | None
+    ) -> list[str]:
+        if db is None:
+            return []
+        try:
+            from app.models import TutorMessage
+            result = await db.execute(
+                select(TutorMessage)
+                .where(
+                    TutorMessage.attempt_id == attempt_id,
+                    TutorMessage.role == "user",
+                )
+                .order_by(TutorMessage.created_at.desc())
+                .limit(5)
+            )
+            msgs = result.scalars().all()
+            return [m.message for m in reversed(msgs)]
+        except Exception:
+            return []
+
+    async def _save_messages(
+        self,
+        db: AsyncSession,
+        attempt_id: uuid.UUID,
+        user_question: str,
+        assistant_response: str,
+        hint_level: int,
+    ):
+        try:
+            from app.models import TutorMessage
+            db.add(TutorMessage(
+                attempt_id=attempt_id,
+                role="user",
+                message=user_question,
+                hint_level=hint_level,
+            ))
+            db.add(TutorMessage(
+                attempt_id=attempt_id,
+                role="assistant",
+                message=assistant_response,
+                hint_level=hint_level,
+            ))
+            await db.commit()
+        except Exception as e:
+            print(f"[AI Tutor] TutorMessage 저장 실패 (무시): {e}")
 
     async def _call_engine(
         self,
@@ -100,6 +202,8 @@ class TutorService:
         namespace: str,
         previous_questions: list[str],
         attempt_id: str,
+        runtime_ctx: dict | None,
+        fault_type: str | None = None,
     ) -> str:
         try:
             from ai_engine import TutorRequest
@@ -112,11 +216,27 @@ class TutorService:
                 chaos_type=chaos_type,
                 expected_solution=chaos_type,
             )
+
+            if runtime_ctx is not None:
+                from app.services.runtime_context import (
+                    format_k8s_state, format_recent_commands, format_events
+                )
+                pod_status = format_k8s_state(runtime_ctx.get("kubernetes_state"))
+                pod_logs = format_recent_commands(runtime_ctx.get("recent_user_commands", []))
+                recent_events = format_events(runtime_ctx.get("kubernetes_state"))
+            elif settings.VALIDATION_BACKEND == "k8s":
+                pod_status, recent_events = self._get_pod_status_fallback(namespace)
+                pod_logs = "(로그는 kubectl logs <pod-name> 으로 직접 확인하세요)"
+            else:
+                pod_status = "Unknown (Mock 환경)"
+                recent_events = "(실제 K8s 환경에서는 이벤트가 제공됩니다)"
+                pod_logs = "(로그는 kubectl logs <pod-name> 으로 직접 확인하세요)"
+
             system_ctx = SystemContext(
                 namespace=namespace,
-                pod_status="Unknown (Mock 환경)",
-                pod_logs="(실제 K8s 환경에서는 실시간 로그가 제공됩니다)",
-                recent_events="(실제 K8s 환경에서는 이벤트가 제공됩니다)",
+                pod_status=pod_status,
+                pod_logs=pod_logs,
+                recent_events=recent_events,
             )
             user_ctx = UserContext(
                 user_id=attempt_id,
@@ -130,9 +250,9 @@ class TutorService:
                 mission_ctx=mission_ctx,
                 system_ctx=system_ctx,
                 user_ctx=user_ctx,
+                chaos_type=fault_type,
             )
 
-            # 동기 함수를 비동기로 실행
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None, lambda: self._engine.get_response(request)
@@ -141,6 +261,44 @@ class TutorService:
 
         except Exception as e:
             return f"AI 튜터 응답 중 오류가 발생했습니다: {str(e)}"
+
+    def _get_pod_status_fallback(self, namespace: str) -> tuple[str, str]:
+        """RuntimeContextCollector 실패 시 직접 K8s 조회 fallback."""
+        try:
+            from kubernetes import client, config
+            try:
+                config.load_incluster_config()
+            except Exception:
+                config.load_kube_config()
+
+            core_api = client.CoreV1Api()
+            pods = core_api.list_namespaced_pod(namespace=namespace)
+            if not pods.items:
+                return "Pod 없음", "네임스페이스에 Pod가 존재하지 않습니다"
+
+            status_lines = []
+            for pod in pods.items:
+                phase = pod.status.phase or "Unknown"
+                for cs in (pod.status.container_statuses or []):
+                    if cs.state.waiting:
+                        phase = cs.state.waiting.reason or "Waiting"
+                    elif cs.state.terminated:
+                        phase = f"Terminated({cs.state.terminated.reason or ''})"
+                status_lines.append(f"{pod.metadata.name}: {phase}")
+
+            events = core_api.list_namespaced_event(namespace=namespace)
+            recent = []
+            for ev in sorted(
+                events.items,
+                key=lambda e: e.last_timestamp.isoformat() if e.last_timestamp else "",
+                reverse=True,
+            )[:5]:
+                if ev.message:
+                    recent.append(f"- {ev.reason}: {ev.message[:100]}")
+
+            return "\n".join(status_lines), "\n".join(recent) if recent else "이벤트 없음"
+        except Exception as e:
+            return "조회 실패", f"K8s API 오류: {e}"
 
     def _mock_response(self, question: str, hint_level: int, chaos_type: str) -> str:
         scenarios = {
@@ -163,10 +321,10 @@ class TutorService:
                 3: "1. `kubectl get svc` 로 Service 목록 확인\n2. `kubectl describe svc <이름>` 에서 Endpoints 확인\n3. `kubectl get pods --show-labels` 로 label 비교\n4. Service selector 또는 Pod label 수정",
             },
             "network_latency": {
-                0: "응답이 매우 느린 상황이에요. 네트워크 레벨에서 문제가 생겼을 수 있는데, 어떤 Pod 간 통신이 느린지 확인해볼까요?",
-                1: "특정 Pod나 Node에서 네트워크 지연이 발생하고 있을 수 있어요. Pod의 상태와 이벤트를 확인해보면 단서가 있을까요?",
-                2: "`kubectl get pods -o wide`로 어떤 Node에 있는지 확인하고, `kubectl describe pod <이름>`의 Events에서 네트워크 관련 메시지를 찾아보세요.",
-                3: "1. `kubectl get pods -o wide` 로 Pod 위치 확인\n2. `kubectl describe pod <이름>` 으로 네트워크 이벤트 확인\n3. NetworkChaos 정책 또는 Pod 재배치로 해결",
+                0: "Pod는 Running인데 서비스 트래픽을 못 받는 상황이에요. Pod가 Running이어도 트래픽을 받으려면 또 다른 조건이 필요한데, 뭔지 알고 있나요?",
+                1: "Readiness Probe라는 개념이 있어요. Pod가 실제로 요청을 처리할 준비가 됐는지 확인하는 건강검진이에요. nginx의 Readiness Probe 설정이 어떻게 되어 있는지 확인해볼까요?",
+                2: "`kubectl describe pod <이름>`의 Conditions 섹션에서 Ready 상태와 Readiness probe 실패 메시지를 확인해보세요. probe가 어떤 경로를 체크하고 있나요?",
+                3: "1. `kubectl describe pod <이름>` 으로 Readiness probe 실패 경로 확인\n2. `kubectl patch deployment nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"readinessProbe\":null}]}}}}'` 로 probe 제거\n3. 또는 `kubectl edit deployment nginx` 로 readinessProbe 섹션 삭제",
             },
         }
 
@@ -179,7 +337,7 @@ class TutorService:
         return scenario.get(hint_level, scenario[0])
 
     def clear_history(self, attempt_id: uuid.UUID):
-        self._chat_history.pop(str(attempt_id), None)
+        pass  # 이제 DB가 단일 진실 공급원
 
 
 # 싱글톤
