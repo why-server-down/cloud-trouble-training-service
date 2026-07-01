@@ -18,8 +18,17 @@
 - 검증 K8s fallback 추가 완료
 - 미션 4 재설계 완료 (network_latency → Readiness Probe 실패로 구현)
 
-### 캡스톤 2 - 멀티 환경 고도화 (예정)
-탭 분리: Kubernetes / Docker-only / Linux / Application
+### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
+K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(기존) / Docker / Linux** 3종.
+(Application 탭은 캡스톤2 스코프에서 제외)
+
+- [x] `environment` 데이터 계층 관통 (feature/env-schema) - 모델·스키마·API·팩토리에 environment 도입, kubernetes만 실동작
+- [ ] injector/validation if-elif → dict 디스패치 리팩토링 (feature/injector-refactor)
+- [ ] Docker 환경 injector/validation 구현체 (feature/docker-env)
+- [ ] Linux 환경 injector/validation 구현체 (feature/linux-env)
+- [ ] AWS EKS 배포 (feature/aws-migration, 별도 트랙)
+
+브랜치는 dev에서 기능별로 분기 → dev PR. env-schema·injector-refactor(기반)를 먼저 머지한 뒤 환경별 브랜치를 병렬 진행한다.
 
 ## 기술 스택
 - Frontend: React (xterm.js 터미널, 채팅 UI, 환경 탭 UI)
@@ -78,9 +87,11 @@
 - [ ] AI 장애 생성 모드 Phase 7 (운영 메트릭, 비용 제한, 시드 저장)
 - [ ] Phase 5 미완료: incident-logs/ 실제 클라우드 장애 로그 문서 추가
 
-### 예정 (캡스톤 2)
-- [ ] AWS EKS 배포
-- [ ] 멀티 환경 탭 실구현 (Docker-only, Linux, Application)
+### 진행 중 (캡스톤 2)
+- [x] `environment` 데이터 계층 관통 (feature/env-schema) - kubernetes만 실동작, docker/linux 예약
+- [ ] injector/validation 전략패턴 리팩토링 (feature/injector-refactor)
+- [ ] Docker / Linux 환경 구현체 (feature/docker-env, feature/linux-env)
+- [ ] AWS EKS 배포 (feature/aws-migration)
 
 ## 브랜치 전략
 - `main` - 배포 브랜치

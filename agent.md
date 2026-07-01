@@ -55,11 +55,17 @@ k8s 타입:
 - 검증 안정화 (`VALIDATION_BACKEND=k8s` 실 테스트)
 - 미션 4 (network_latency) 재설계
 
-### 캡스톤 2 - 멀티 환경 고도화
+### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
 
-- 탭 분리: Kubernetes / Docker-only / Linux / Application
-- 각 환경별 `BaseChaosInjector` 구현체 추가
-- 현재 ABC 구조가 확장을 고려해 설계되어 있어 캡스톤 2 진입 시 자연스럽게 붙인다
+- 환경 3종: **Kubernetes(기존) / Docker / Linux** (Application 탭은 스코프 제외)
+- `environment` 필드를 데이터 계층~API~팩토리까지 관통 (feature/env-schema, 완료)
+  - `core/environments.py` 상수·검증, 모델 3종에 `environment` 컬럼, 기존 DB idempotent 백필
+  - 현재 kubernetes만 실동작. docker/linux는 `assert_implemented`로 예약 → 선택 시 400
+- 각 환경별 `BaseChaosInjector` / `BaseValidationService` 구현체 추가 (예정)
+  - ⚠️ `ChaosMeshInjector`·`K8sValidationService`는 `chaos_type`을 **if-elif 체인으로 하드코딩**하고
+    K8s SDK를 강제 import한다. 환경별 구현체를 붙이기 전에 dict 디스패치로 리팩토링하는
+    선행 브랜치(feature/injector-refactor)가 필요하다. (ABC 껍데기만으로는 곧바로 확장되지 않음)
+- AWS EKS 배포는 별도 트랙(feature/aws-migration)
 
 ---
 
