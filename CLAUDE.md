@@ -24,11 +24,14 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 
 - [x] `environment` 데이터 계층 관통 (feature/env-schema) - 모델·스키마·API·팩토리에 environment 도입, kubernetes만 실동작
 - [ ] injector/validation if-elif → dict 디스패치 리팩토링 (feature/injector-refactor)
+- [ ] 실행/격리 기반: 사용자별 샌드박스 Pod + 터미널 exec 경로 재설계 (feature/env-sandbox, 선행)
 - [ ] Docker 환경 injector/validation 구현체 (feature/docker-env)
 - [ ] Linux 환경 injector/validation 구현체 (feature/linux-env)
 - [ ] AWS EKS 배포 (feature/aws-migration, 별도 트랙)
 
-브랜치는 dev에서 기능별로 분기 → dev PR. env-schema·injector-refactor(기반)를 먼저 머지한 뒤 환경별 브랜치를 병렬 진행한다.
+**실행/격리 설계:** K8s를 실행 기반으로 삼아 환경을 사용자 네임스페이스 안 샌드박스 Pod(kubernetes=nginx, docker=DinD, linux=범용 Pod)로 제공하고, 터미널 명령을 호스트 subprocess가 아닌 Pod 내부 exec로 실행한다. 상세는 [agent.md](agent.md) "실행/격리 아키텍처" 참고.
+
+브랜치는 dev에서 기능별로 분기 → dev PR. env-schema·injector-refactor(기반) 후 env-sandbox(선행)를 머지한 뒤 환경별 브랜치를 병렬 진행한다.
 
 ## 기술 스택
 - Frontend: React (xterm.js 터미널, 채팅 UI, 환경 탭 UI)
@@ -90,6 +93,7 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 ### 진행 중 (캡스톤 2)
 - [x] `environment` 데이터 계층 관통 (feature/env-schema) - kubernetes만 실동작, docker/linux 예약
 - [ ] injector/validation 전략패턴 리팩토링 (feature/injector-refactor)
+- [ ] 실행/격리 기반: 샌드박스 Pod + 터미널 exec 재설계 (feature/env-sandbox, 선행)
 - [ ] Docker / Linux 환경 구현체 (feature/docker-env, feature/linux-env)
 - [ ] AWS EKS 배포 (feature/aws-migration)
 
