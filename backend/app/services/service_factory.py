@@ -1,4 +1,5 @@
 from app.core.config import settings
+from app.core import environments
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.mission_service import MissionService
 from app.services.scenario_service import ScenarioService
@@ -12,7 +13,11 @@ from app.services.validation_service import (
 )
 
 
-def create_chaos_injector() -> BaseChaosInjector:
+def create_chaos_injector(
+    environment: str = environments.DEFAULT_ENVIRONMENT,
+) -> BaseChaosInjector:
+    # 현재 kubernetes 환경만 구현됨. docker/linux injector는 후속 브랜치에서 분기 추가.
+    environments.assert_implemented(environment)
     if settings.CHAOS_BACKEND == "mock":
         return MockChaosInjector()
     if settings.CHAOS_BACKEND == "chaos_mesh":
@@ -20,7 +25,11 @@ def create_chaos_injector() -> BaseChaosInjector:
     raise ValueError(f"Unknown CHAOS_BACKEND: {settings.CHAOS_BACKEND}")
 
 
-def create_validation_service() -> BaseValidationService:
+def create_validation_service(
+    environment: str = environments.DEFAULT_ENVIRONMENT,
+) -> BaseValidationService:
+    # 현재 kubernetes 환경만 구현됨. docker/linux 검증기는 후속 브랜치에서 분기 추가.
+    environments.assert_implemented(environment)
     if settings.VALIDATION_BACKEND == "mock":
         return MockValidationService(auto_pass=settings.MOCK_VALIDATION_AUTO_PASS)
     if settings.VALIDATION_BACKEND == "k8s":
