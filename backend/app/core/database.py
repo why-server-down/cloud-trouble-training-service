@@ -58,3 +58,9 @@ async def ensure_schema_compatibility(conn: AsyncConnection):
             END IF;
         END $$;
     """))
+    # 캡스톤2: 멀티 환경(kubernetes | docker | linux) 구분 컬럼 백필
+    for table in ("missions", "generated_scenarios", "terminal_sessions"):
+        await conn.execute(text(f"""
+            ALTER TABLE {table}
+            ADD COLUMN IF NOT EXISTS environment VARCHAR(20) NOT NULL DEFAULT 'kubernetes'
+        """))

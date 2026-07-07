@@ -32,7 +32,8 @@ app/
 │   └── chat.py          # AI 튜터 채팅 API (정적 미션 + AI 시나리오 모두 지원)
 ├── core/
 │   ├── config.py        # Settings (환경변수, AI 백엔드 선택 - mock/openai/gemini)
-│   ├── database.py      # async engine, session
+│   ├── environments.py  # 훈련 환경 상수(kubernetes|docker|linux) + 지원/구현 검증
+│   ├── database.py      # async engine, session, ensure_schema_compatibility(idempotent ALTER)
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
@@ -50,7 +51,7 @@ app/
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
-│   ├── service_factory.py        # 환경변수 기반 서비스 팩토리
+│   ├── service_factory.py        # 환경변수 기반 서비스 팩토리 (create_*(environment) 시그니처)
 │   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
@@ -163,18 +164,24 @@ POST /api/scenarios/current/check
 
 ## 데이터 모델
 
+> **환경(environment) 필드 (캡스톤2):** `Mission`, `GeneratedScenario`, `TerminalSession`은
+> `environment` 컬럼(`kubernetes` | `docker` | `linux`, default `kubernetes`)을 가진다.
+> 상수·검증은 `core/environments.py`. 현재 실제 장애 주입/검증은 kubernetes만 구현됐고
+> docker/linux는 `assert_implemented`로 막혀 있다(선택 시 400). 기존 로컬 DB는
+> `ensure_schema_compatibility`의 idempotent ALTER로 자동 백필된다.
+
 ### 현재 모델
 - `User` - 사용자 (username, email, hashed_password, total_score)
-- `Mission` - 고정 미션 정의 (level, chaos_type, base_score 등)
+- `Mission` - 고정 미션 정의 (level, chaos_type, `environment`, base_score 등)
 - `MissionAttempt` - 미션 시도 기록
   - `attempt_type`: `static_mission` | `ai_scenario`
   - `mission_id`: 정적 미션 attempt 시 필수, AI 시나리오 attempt 시 NULL
   - `scenario_id`: AI 시나리오 attempt 시 필수, 정적 미션 attempt 시 NULL
   - `last_validation_result`: 마지막 검증 결과 JSON
-- `TerminalSession` - 터미널 세션
+- `TerminalSession` - 터미널 세션 (`environment` 포함)
 - `CommandLog` - kubectl 명령 실행 기록
 - `GeneratedScenario` - AI 생성 시나리오
-  - `difficulty`, `title`, `student_brief`, `fault_type`
+  - `difficulty`, `environment`, `title`, `student_brief`, `fault_type`
   - `scenario_json`, `chaos_plan_json`, `validation_json`
   - `status`: generated | running | completed | failed
   - `base_score`, `time_limit`, `hint_penalty`

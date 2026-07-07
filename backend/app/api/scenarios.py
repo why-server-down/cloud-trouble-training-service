@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core import environments
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -30,12 +31,18 @@ async def start_random_scenario(
             detail="유효하지 않은 난이도입니다. beginner / intermediate / advanced / expert 중 선택하세요",
         )
 
+    try:
+        environments.assert_implemented(body.environment)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     service = get_scenario_service()
     try:
         result = await service.start_random(
             db,
             current_user,
             body.difficulty,
+            environment=body.environment,
             allow_demo_unlock=body.demo_unlock,
         )
     except ValueError as e:
@@ -48,6 +55,7 @@ async def start_random_scenario(
         scenario_id=scenario.id,
         title=scenario.title,
         difficulty=scenario.difficulty,
+        environment=scenario.environment,
         student_brief=scenario.student_brief,
         time_limit_seconds=scenario.time_limit,
         base_score=scenario.base_score,
@@ -75,6 +83,7 @@ async def get_scenario_status(
         attempt_id=attempt.id,
         title=scenario.title,
         difficulty=scenario.difficulty,
+        environment=scenario.environment,
         student_brief=scenario.student_brief,
         elapsed_seconds=result["elapsed_seconds"],
         remaining_seconds=result["remaining_seconds"],

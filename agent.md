@@ -55,11 +55,63 @@ k8s 타입:
 - 검증 안정화 (`VALIDATION_BACKEND=k8s` 실 테스트)
 - 미션 4 (network_latency) 재설계
 
-### 캡스톤 2 - 멀티 환경 고도화
+### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
 
-- 탭 분리: Kubernetes / Docker-only / Linux / Application
-- 각 환경별 `BaseChaosInjector` 구현체 추가
-- 현재 ABC 구조가 확장을 고려해 설계되어 있어 캡스톤 2 진입 시 자연스럽게 붙인다
+- 환경 3종: **Kubernetes(기존) / Docker / Linux** (Application 탭은 스코프 제외)
+- `environment` 필드를 데이터 계층~API~팩토리까지 관통 (feature/env-schema, 완료)
+  - `core/environments.py` 상수·검증, 모델 3종에 `environment` 컬럼, 기존 DB idempotent 백필
+  - 현재 kubernetes만 실동작. docker/linux는 `assert_implemented`로 예약 → 선택 시 400
+- 각 환경별 `BaseChaosInjector` / `BaseValidationService` 구현체 추가 (예정)
+  - ⚠️ `ChaosMeshInjector`·`K8sValidationService`는 `chaos_type`을 **if-elif 체인으로 하드코딩**하고
+    K8s SDK를 강제 import한다. 환경별 구현체를 붙이기 전에 dict 디스패치로 리팩토링하는
+    선행 브랜치(feature/injector-refactor)가 필요하다. (ABC 껍데기만으로는 곧바로 확장되지 않음)
+- AWS EKS 배포는 별도 트랙(feature/aws-migration)
+
+#### 실행/격리 아키텍처 (설계 확정)
+
+멀티 환경의 핵심 난점은 injector가 아니라 **"장애를 어디서 실행하고 사용자별로 어떻게
+격리하느냐"** 이다. 이를 먼저 확정한다.
+
+**결정: K8s를 실행 기반으로 삼고, 환경은 그 위에 얹히는 "샌드박스 종류"로 본다.**
+사용자별 네임스페이스(`user-{id}`, 이미 존재)를 격리 경계로 재사용한다.
+
+```
+user-{id} 네임스페이스 (격리 경계)
+   ├─ [kubernetes] 기존 nginx Pod          → kubectl 로 직접 (현행 방식 유지)
+   ├─ [docker]     DinD(Docker-in-Docker) Pod → kubectl exec ... -- docker ...
+   └─ [linux]      ubuntu 등 범용 Pod          → kubectl exec ... -- sh -c ...
+```
+
+- **격리:** 모든 환경이 사용자 네임스페이스 안의 Pod로 실행된다. Pod에 resource limit +
+  ephemeral-storage limit을 걸어 "진짜 OOM / 디스크 과부하"를 내도 노드·타 사용자에
+  영향이 없도록 한다.
+- **터미널 재설계(가장 큰 변경):** 현재 백엔드는 호스트에서 `kubectl`을 직접 subprocess로
+  실행한다(`command_executor.py`). 이를 **사용자 Pod 안으로 exec해서 실행**하는 경로로 바꾼다.
+  이렇게 해야 docker/shell 명령이 호스트가 아니라 격리 Pod 안에서만 돌아 RCE 위험이 차단된다.
+  → `command_executor` / `websocket_handler` / `terminal.py` / `command_validator`가 함께 바뀐다.
+- **주입 방식:** Chaos Mesh는 K8s 전용이므로 docker/linux엔 쓸 수 없다.
+  - docker: DinD 안에서 `docker` API로 네트워크 단절 / 볼륨 마운트 오류 등 주입
+  - linux: Pod 안에서 stress-ng / dd / fork 등으로 OOM-Killer / I/O 과부하 / Zombie 프로세스 주입
+
+**리스크 (구현 시 결정 필요):**
+- privileged 트레이드오프: 일부 커널 레벨 Linux 장애(I/O throttle 등)는 컨테이너 특권이 필요할
+  수 있다. 특권을 줄수록 격리가 약해진다 → "어디까지 진짜로 낼지 vs 안전" 선을 정해야 한다.
+- DinD는 통상 privileged가 필요 → 진짜 데몬 vs rootless/제한 모드 선택.
+
+#### 캡스톤2 브랜치 로드맵
+
+```
+dev
+ ├─ feature/env-schema        환경 데이터 계층 관통 (완료, PR 대기)
+ ├─ feature/injector-refactor if-elif → dict 디스패치, BaseChaosInjector 인터페이스 정리
+ ├─ feature/env-sandbox       ★선행: 샌드박스 Pod 프로비저닝 + 터미널 exec 경로 + 환경별 명령 정책 + Pod limit
+ ├─ feature/docker-env        DockerChaosInjector(네트워크 단절/볼륨 오류) + 검증  (sandbox 이후)
+ ├─ feature/linux-env         LinuxChaosInjector(OOM/I/O/Zombie) + 검증          (sandbox 이후)
+ └─ feature/aws-migration     EKS 배포 (별도 트랙)
+```
+
+순서 근거: `env-sandbox`(실행 기반)가 injector 구현체보다 먼저다. 실행/격리 환경이 없으면
+injector를 짜도 "장애는 나는데 아무도 못 고치는" 반쪽이 된다.
 
 ---
 

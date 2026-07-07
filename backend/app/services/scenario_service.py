@@ -15,6 +15,7 @@ from app.services.chaos_plan import ChaosPlanCompiler, FAULT_TYPE_TO_CHAOS_TYPE
 from app.services.scoring_service import ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
+from app.core.environments import DEFAULT_ENVIRONMENT
 
 ALLOWED_FAULT_TYPES = [
     "image_pull_error",
@@ -168,6 +169,7 @@ class ScenarioService:
         db: AsyncSession,
         user: User,
         difficulty: str,
+        environment: str = DEFAULT_ENVIRONMENT,
         allow_demo_unlock: bool = False,
     ) -> dict:
         """난이도 선택 → AI 시나리오 생성 + 장애 주입 + attempt 생성 원스텝."""
@@ -209,6 +211,7 @@ class ScenarioService:
         scenario = GeneratedScenario(
             user_id=user.id,
             difficulty=difficulty,
+            environment=environment,
             title=scenario_json.get("title", "AI 생성 시나리오"),
             student_brief=scenario_json.get("student_brief", ""),
             internal_summary=scenario_json.get("internal_summary", ""),

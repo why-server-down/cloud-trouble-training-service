@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from app.core.environments import DEFAULT_ENVIRONMENT
+
 
 # Auth
 class UserCreate(BaseModel):
@@ -44,6 +46,7 @@ class SessionCreate(BaseModel):
 class SessionResponse(BaseModel):
     id: uuid.UUID
     namespace: str
+    environment: str = DEFAULT_ENVIRONMENT
     created_at: datetime
     is_active: bool
 
@@ -77,6 +80,7 @@ class MissionResponse(BaseModel):
     level: int
     description: str
     chaos_type: str
+    environment: str = DEFAULT_ENVIRONMENT
     base_score: int
     time_limit: int
     hint_penalty: int
@@ -135,6 +139,7 @@ class ChatResponse(BaseModel):
 # AI Scenario
 class ScenarioGenerateRequest(BaseModel):
     difficulty: str  # beginner | intermediate | advanced | expert
+    environment: str = DEFAULT_ENVIRONMENT  # kubernetes | docker | linux
     randomize: bool = True
     demo_unlock: bool = False
 
@@ -143,6 +148,7 @@ class ScenarioResponse(BaseModel):
     scenario_id: uuid.UUID
     title: str
     difficulty: str
+    environment: str = DEFAULT_ENVIRONMENT
     student_brief: str
     time_limit_seconds: int
     base_score: int
@@ -158,6 +164,7 @@ class ScenarioStatusResponse(BaseModel):
     attempt_id: uuid.UUID
     title: str
     difficulty: str
+    environment: str = DEFAULT_ENVIRONMENT
     student_brief: str
     elapsed_seconds: int
     remaining_seconds: int
