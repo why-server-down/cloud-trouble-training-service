@@ -102,8 +102,8 @@ user-{id} 네임스페이스 (격리 경계)
 
 ```
 dev
- ├─ feature/env-schema        환경 데이터 계층 관통 (완료, PR 대기)
- ├─ feature/injector-refactor if-elif → dict 디스패치, BaseChaosInjector 인터페이스 정리
+ ├─ feature/env-schema        환경 데이터 계층 관통 (완료, dev 머지됨 PR #30)
+ ├─ feature/injector-refactor if-elif → dict 디스패치, BaseChaosInjector 인터페이스 정리 (완료, PR 대기)
  ├─ feature/env-sandbox       ★선행: 샌드박스 Pod 프로비저닝 + 터미널 exec 경로 + 환경별 명령 정책 + Pod limit
  ├─ feature/docker-env        DockerChaosInjector(네트워크 단절/볼륨 오류) + 검증  (sandbox 이후)
  ├─ feature/linux-env         LinuxChaosInjector(OOM/I/O/Zombie) + 검증          (sandbox 이후)

@@ -41,17 +41,17 @@ app/
 │   ├── command_executor.py       # kubectl 비동기 실행
 │   ├── websocket_handler.py      # WebSocket 연결
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
-│   ├── chaos_injector.py         # 장애 주입 (Mock | ChaosMesh)
+│   ├── chaos_injector.py         # 장애 주입 (Mock | ChaosMesh), chaos_type → (주입,복구) _CHAOS_HANDLERS 레지스트리
 │   ├── chaos_plan.py             # ChaosPlan, ChaosPlanCompiler (allowlist 안전장치)
 │   ├── scenario_service.py       # AI 시나리오 생성/시작/완료 오케스트레이터
-│   ├── validation_service.py     # 해결 검증 (Mock | K8s API | Prometheus)
-│   ├── validation_rule_service.py # AI 생성 검증 조건 저장/실행 + K8s fallback
+│   ├── validation_service.py     # 해결 검증 (Mock | K8s API | Prometheus), chaos_type → _CHECKS 레지스트리
+│   ├── validation_rule_service.py # AI 생성 검증 조건 저장/실행 + K8s fallback, rule_type → _RULE_RUNNERS 레지스트리
 │   ├── promql_guard.py           # PromQL 안전성 검사 (namespace 격리, allowlist)
 │   ├── runtime_context.py        # K8s/Prometheus/CommandLog 수집 (구현 완료, 튜터 연결됨)
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
-│   ├── service_factory.py        # 환경변수 기반 서비스 팩토리 (create_*(environment) 시그니처)
+│   ├── service_factory.py        # 환경변수 기반 서비스 팩토리 (create_*(environment) 시그니처, 백엔드별 팩토리 레지스트리)
 │   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
