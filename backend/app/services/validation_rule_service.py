@@ -86,24 +86,27 @@ class ValidationRuleService:
 
         results: list[RuleCheckResult] = []
         for rule in rules:
-            if use_mock or rule.rule_type == "mock":
-                passed = self._is_mock_resolved(scenario_id, namespace)
-                results.append(RuleCheckResult(rule_id=rule.id, name=rule.name, passed=passed))
-            elif rule.rule_type == "promql":
-                check = await self._run_promql(rule)
-                results.append(check)
-            elif rule.rule_type == "k8s":
-                check = await self._run_k8s(rule, namespace)
-                results.append(check)
-            else:
+            rule_type = "mock" if use_mock else rule.rule_type
+            runner = self._RULE_RUNNERS.get(rule_type)
+            if runner is None:
                 results.append(RuleCheckResult(
                     rule_id=rule.id, name=rule.name, passed=False, error=f"unsupported rule type: {rule.rule_type}"
                 ))
+                continue
+            results.append(await runner(self, rule, namespace, scenario_id))
 
         all_passed = all(r.passed for r in results)
         return all_passed, results
 
-    async def _run_promql(self, rule: ValidationRule) -> RuleCheckResult:
+    async def _run_mock(
+        self, rule: ValidationRule, namespace: str, scenario_id: uuid.UUID
+    ) -> RuleCheckResult:
+        passed = self._is_mock_resolved(scenario_id, namespace)
+        return RuleCheckResult(rule_id=rule.id, name=rule.name, passed=passed)
+
+    async def _run_promql(
+        self, rule: ValidationRule, namespace: str | None = None, scenario_id: uuid.UUID | None = None
+    ) -> RuleCheckResult:
         """Prometheus HTTP API로 PromQL 실행."""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -127,7 +130,9 @@ class ValidationRuleService:
         except Exception as e:
             return RuleCheckResult(rule_id=rule.id, name=rule.name, passed=False, error=str(e))
 
-    async def _run_k8s(self, rule: ValidationRule, namespace: str) -> RuleCheckResult:
+    async def _run_k8s(
+        self, rule: ValidationRule, namespace: str, scenario_id: uuid.UUID | None = None
+    ) -> RuleCheckResult:
         """K8s API로 Deployment/Pod 상태 직접 검증. query 형식: 'deployment:nginx:running'"""
         try:
             def _check():
@@ -185,6 +190,13 @@ class ValidationRuleService:
             return RuleCheckResult(rule_id=rule.id, name=rule.name, passed=passed, last_value=value)
         except Exception as e:
             return RuleCheckResult(rule_id=rule.id, name=rule.name, passed=False, error=str(e))
+
+    # rule_type → 실행 핸들러 레지스트리. 새 rule_type(docker/linux 검증 등)은 여기에 등록한다.
+    _RULE_RUNNERS = {
+        "mock": _run_mock,
+        "promql": _run_promql,
+        "k8s": _run_k8s,
+    }
 
     _FAULT_TYPE_K8S_QUERY: dict[str, str] = {
         "image_pull_error":          "deployment:nginx:running",
