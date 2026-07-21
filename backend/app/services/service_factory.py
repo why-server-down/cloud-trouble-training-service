@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from app.core.config import settings
 from app.core import environments
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
@@ -13,16 +15,30 @@ from app.services.validation_service import (
 )
 
 
+# CHAOS_BACKEND → injector 팩토리 레지스트리.
+# docker/linux 환경 구현체가 생기면 (environment, backend) 조합 키로 확장한다.
+_INJECTOR_FACTORIES: dict[str, Callable[[], BaseChaosInjector]] = {
+    "mock": MockChaosInjector,
+    "chaos_mesh": ChaosMeshInjector,
+}
+
+# VALIDATION_BACKEND → 검증 서비스 팩토리 레지스트리.
+_VALIDATION_FACTORIES: dict[str, Callable[[], BaseValidationService]] = {
+    "mock": lambda: MockValidationService(auto_pass=settings.MOCK_VALIDATION_AUTO_PASS),
+    "k8s": K8sValidationService,
+    "prometheus": lambda: PrometheusValidationService(settings.PROMETHEUS_URL),
+}
+
+
 def create_chaos_injector(
     environment: str = environments.DEFAULT_ENVIRONMENT,
 ) -> BaseChaosInjector:
     # 현재 kubernetes 환경만 구현됨. docker/linux injector는 후속 브랜치에서 분기 추가.
     environments.assert_implemented(environment)
-    if settings.CHAOS_BACKEND == "mock":
-        return MockChaosInjector()
-    if settings.CHAOS_BACKEND == "chaos_mesh":
-        return ChaosMeshInjector()
-    raise ValueError(f"Unknown CHAOS_BACKEND: {settings.CHAOS_BACKEND}")
+    factory = _INJECTOR_FACTORIES.get(settings.CHAOS_BACKEND)
+    if factory is None:
+        raise ValueError(f"Unknown CHAOS_BACKEND: {settings.CHAOS_BACKEND}")
+    return factory()
 
 
 def create_validation_service(
@@ -30,13 +46,10 @@ def create_validation_service(
 ) -> BaseValidationService:
     # 현재 kubernetes 환경만 구현됨. docker/linux 검증기는 후속 브랜치에서 분기 추가.
     environments.assert_implemented(environment)
-    if settings.VALIDATION_BACKEND == "mock":
-        return MockValidationService(auto_pass=settings.MOCK_VALIDATION_AUTO_PASS)
-    if settings.VALIDATION_BACKEND == "k8s":
-        return K8sValidationService()
-    if settings.VALIDATION_BACKEND == "prometheus":
-        return PrometheusValidationService(settings.PROMETHEUS_URL)
-    raise ValueError(f"Unknown VALIDATION_BACKEND: {settings.VALIDATION_BACKEND}")
+    factory = _VALIDATION_FACTORIES.get(settings.VALIDATION_BACKEND)
+    if factory is None:
+        raise ValueError(f"Unknown VALIDATION_BACKEND: {settings.VALIDATION_BACKEND}")
+    return factory()
 
 
 def create_mission_service() -> MissionService:

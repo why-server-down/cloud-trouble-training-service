@@ -159,16 +159,10 @@ class K8sValidationService(BaseValidationService):
             return self._retry()
 
     def _check_resolution_sync(self, chaos_type: str, namespace: str) -> ValidationResult:
-        if chaos_type == "pod_failure":
-            return self._check_pod_failure(namespace)
-        elif chaos_type == "memory_stress":
-            return self._check_memory_stress(namespace)
-        elif chaos_type == "service_misconfig":
-            return self._check_service_misconfig(namespace)
-        elif chaos_type == "network_latency":
-            return self._check_network_latency(namespace)
-        else:
+        check = self._CHECKS.get(chaos_type)
+        if check is None:
             return self._retry()
+        return check(self, namespace)
 
     def _check_pod_failure(self, namespace: str) -> ValidationResult:
         try:
@@ -262,4 +256,12 @@ class K8sValidationService(BaseValidationService):
         except Exception as e:
             print(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
             return self._retry()
+
+    # chaos_type → 검증 핸들러 레지스트리. 새 chaos_type 검증은 여기에 등록한다.
+    _CHECKS = {
+        "pod_failure": _check_pod_failure,
+        "memory_stress": _check_memory_stress,
+        "service_misconfig": _check_service_misconfig,
+        "network_latency": _check_network_latency,
+    }
 

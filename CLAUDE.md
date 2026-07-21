@@ -23,7 +23,7 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 (Application 탭은 캡스톤2 스코프에서 제외)
 
 - [x] `environment` 데이터 계층 관통 (feature/env-schema) - 모델·스키마·API·팩토리에 environment 도입, kubernetes만 실동작
-- [ ] injector/validation if-elif → dict 디스패치 리팩토링 (feature/injector-refactor)
+- [x] injector/validation if-elif → dict 디스패치 리팩토링 (feature/injector-refactor) - _CHAOS_HANDLERS/_CHECKS/_RULE_RUNNERS 레지스트리, BaseChaosInjector에 environment·supports 추가
 - [ ] 실행/격리 기반: 사용자별 샌드박스 Pod + 터미널 exec 경로 재설계 (feature/env-sandbox, 선행)
 - [ ] Docker 환경 injector/validation 구현체 (feature/docker-env)
 - [ ] Linux 환경 injector/validation 구현체 (feature/linux-env)
@@ -92,7 +92,7 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 
 ### 진행 중 (캡스톤 2)
 - [x] `environment` 데이터 계층 관통 (feature/env-schema) - kubernetes만 실동작, docker/linux 예약
-- [ ] injector/validation 전략패턴 리팩토링 (feature/injector-refactor)
+- [x] injector/validation 전략패턴 리팩토링 (feature/injector-refactor) - if-elif → 레지스트리 디스패치, 동작 변경 없음
 - [ ] 실행/격리 기반: 샌드박스 Pod + 터미널 exec 재설계 (feature/env-sandbox, 선행)
 - [ ] Docker / Linux 환경 구현체 (feature/docker-env, feature/linux-env)
 - [ ] AWS EKS 배포 (feature/aws-migration)
