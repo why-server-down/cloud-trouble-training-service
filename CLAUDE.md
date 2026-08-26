@@ -20,18 +20,35 @@
 
 ### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
 K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(기존) / Docker / Linux** 3종.
-(Application 탭은 캡스톤2 스코프에서 제외)
 
-- [x] `environment` 데이터 계층 관통 (feature/env-schema) - 모델·스키마·API·팩토리에 environment 도입, kubernetes만 실동작
-- [x] injector/validation if-elif → dict 디스패치 리팩토링 (feature/injector-refactor) - _CHAOS_HANDLERS/_CHECKS/_RULE_RUNNERS 레지스트리, BaseChaosInjector에 environment·supports 추가
-- [ ] 실행/격리 기반: 사용자별 샌드박스 Pod + 터미널 exec 경로 재설계 (feature/env-sandbox, 선행)
-- [ ] Docker 환경 injector/validation 구현체 (feature/docker-env)
-- [ ] Linux 환경 injector/validation 구현체 (feature/linux-env)
-- [ ] AWS EKS 배포 (feature/aws-migration, 별도 트랙)
+> **실행 명세 우선.** 2학기 구현은 담당별 계획서의 작업 ID 단위로 진행한다.
+> 백엔드 [docs/backend-capstone2-semester-plan.md](docs/backend-capstone2-semester-plan.md) (`BE-00`~`BE-28`),
+> 프론트 [docs/frontend-capstone2-semester-plan.md](docs/frontend-capstone2-semester-plan.md) (`FE-*`),
+> AI [docs/ai-capstone2-semester-plan.md](docs/ai-capstone2-semester-plan.md).
+> 이 파일과 계획서가 어긋나면 계획서가 기준이며, 이 파일을 갱신한다.
 
-**실행/격리 설계:** K8s를 실행 기반으로 삼아 환경을 사용자 네임스페이스 안 샌드박스 Pod(kubernetes=nginx, docker=DinD, linux=범용 Pod)로 제공하고, 터미널 명령을 호스트 subprocess가 아닌 Pod 내부 exec로 실행한다. 상세는 [agent.md](agent.md) "실행/격리 아키텍처" 참고.
+**Application/DB는 목업 한정.** 백엔드 `SUPPORTED_ENVIRONMENTS`에 등록하지 않고 sandbox·injector·validator·명령 정책을 제공하지 않는다. UI에서도 "개발 예정"이 아니라 **후속 연구**로 표기한다. 8주차 범위 게이트(BE-15) 통과 + 실행 계약 확정 시에만 별도 이슈로 승격.
 
-브랜치는 dev에서 기능별로 분기 → dev PR. env-schema·injector-refactor(기반) 후 env-sandbox(선행)를 머지한 뒤 환경별 브랜치를 병렬 진행한다.
+| 단계 | 브랜치 | 작업 ID | 주차 | 상태 |
+|---|---|---|---|---|
+| 기반 | `feature/env-schema` | — | — | [x] environment 데이터 계층 관통 (PR #30) |
+| 기반 | `feature/injector-refactor` | — | — | [x] 레지스트리 디스패치 전환 (PR #31) |
+| 1 | `feature/backend-baseline` | BE-01~03 | 1–2 | [ ] 테스트 녹색화, Alembic 도입, API environment 필드 |
+| 2 | `feature/env-sandbox` | BE-04, BE-07 | 3–4 | [ ] SandboxService, Quota/NetworkPolicy/RBAC, 세션 API |
+| 3 | `feature/safe-terminal-exec` | BE-05, BE-06 | 3–4 | [ ] host shell 제거 → Pod exec, WS 소유권 검증 |
+| 4 | `feature/env-runtime` | BE-08~10 | 5–6 | [ ] environment 기반 factory, 미션 잠금·seed, K8s 회귀 |
+| 5 | `feature/docker-env` | BE-11~15 | 7–8 | [ ] DinD sandbox·injector·validator, 8주차 범위 게이트 |
+| 6 | `feature/linux-env` | BE-16~18 | 9–10 | [ ] Linux sandbox·injector·validator |
+| 7 | `feature/cross-layer-contracts` | BE-19~21 | 11–12 | [ ] RuntimeContext, AI 실행 계약, MTTR·analytics |
+| 8 | `feature/backend-hardening` | BE-22~24 | 13–14 | [ ] 동시성·reconciliation, CORS·메트릭, 테스트 확대 |
+| 9 | `feature/aws-migration` | BE-25 | 15–16 | [ ] EKS 보안 배포 (별도 트랙) |
+| 10 | `feature/backend-release` | BE-26~28 | 15–16 | [ ] E2E·성능·문서 |
+
+**실행/격리 설계:** K8s를 실행 기반으로 삼아 환경을 사용자 네임스페이스 안 샌드박스 Pod(kubernetes=toolbox+target, docker=DinD, linux=범용 Pod)로 제공하고, 터미널 명령을 호스트 subprocess가 아닌 **argv allowlist + Pod 내부 exec**로 실행한다. 실행 대상은 서버가 DB 세션에서 결정하며 클라이언트 값을 신뢰하지 않는다. 상세는 [agent.md](agent.md) "실행/격리 아키텍처" 참고.
+
+**우선 해소 대상 (P0):** ① host `shell=True` 실행 ② WebSocket 세션 소유권 미검증 ③ environment가 세션·명령 실행까지 미연결 ④ active chaos ID가 프로세스 메모리에만 존재(재시작 시 정리 불가).
+
+브랜치는 dev에서 기능별로 분기 → dev PR. 위 표의 순서를 따르되 5·6(Docker/Linux)은 4 머지 후 병렬 가능.
 
 ## 기술 스택
 - Frontend: React (xterm.js 터미널, 채팅 UI, 환경 탭 UI)
@@ -59,6 +76,7 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 - [x] Grafana cAdvisor 패널 수정 (container="" 필터, Docker Desktop 호환)
 - [x] AI 튜터 Pod 상태 조회 datetime 정렬 버그 수정
 - [x] 환경 탭 UI (Kubernetes / Docker / Linux / Application, 미개발 탭 WIP 화면)
+  - 캡스톤2에서 `GET /api/environments` 가용성 기반으로 전환 예정. Application 탭은 목업/후속 연구 표기로 변경.
 - [x] **AI 장애 생성 모드 Phase 1~3** (agent.md 기준)
   - GeneratedScenario / ValidationRule 모델 및 DB 마이그레이션
   - ScenarioAgent: Mock fixture (난이도별 4종) + OpenAI/Gemini 실제 생성
@@ -91,11 +109,17 @@ K8s 전용 훈련을 다중 환경으로 확장한다. 환경은 **Kubernetes(�
 - [ ] Phase 5 미완료: incident-logs/ 실제 클라우드 장애 로그 문서 추가
 
 ### 진행 중 (캡스톤 2)
-- [x] `environment` 데이터 계층 관통 (feature/env-schema) - kubernetes만 실동작, docker/linux 예약
-- [x] injector/validation 전략패턴 리팩토링 (feature/injector-refactor) - if-elif → 레지스트리 디스패치, 동작 변경 없음
-- [ ] 실행/격리 기반: 샌드박스 Pod + 터미널 exec 재설계 (feature/env-sandbox, 선행)
-- [ ] Docker / Linux 환경 구현체 (feature/docker-env, feature/linux-env)
-- [ ] AWS EKS 배포 (feature/aws-migration)
+단계별 진행 상태는 위 "캡스톤 2" 로드맵 표를 기준으로 한다. 현재 기반 2건(env-schema, injector-refactor) 완료, 다음은 `feature/backend-baseline`(BE-01~03).
+
+**백엔드 테스트 기준선 (2026-08-26 실측, `backend/` venv):**
+```
+python -m pytest -q  →  1 failed, 31 passed
+```
+- 실패 1건: `tests/test_command_validator.py::TestBlockedCommands::test_invalid_subcommand`
+  (`kubectl create secret`이 허용됨 → 허용 여부를 미션 요구와 맞추고 resource/flag까지 제한)
+- `pytest-asyncio==0.23.3`은 requirements·venv 모두에 설치되어 async 테스트가 실행된다.
+  단 `pytest.ini`가 없어 `asyncio_mode`가 미명시 → BE-01에서 추가한다.
+- 계획서 §2.2의 "28 passed / 4 failed / pytest-asyncio 미설치"는 다른 환경 기준 수치다.
 
 ## 브랜치 전략
 - `main` - 배포 브랜치

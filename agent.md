@@ -57,15 +57,26 @@ k8s 타입:
 
 ### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
 
-- 환경 3종: **Kubernetes(기존) / Docker / Linux** (Application 탭은 스코프 제외)
+> **실행 명세:** 2학기 구현은 [docs/backend-capstone2-semester-plan.md](docs/backend-capstone2-semester-plan.md)의
+> 작업 ID(`BE-00`~`BE-28`)를 단위로 진행한다. 프론트·AI는 각각
+> [docs/frontend-capstone2-semester-plan.md](docs/frontend-capstone2-semester-plan.md),
+> [docs/ai-capstone2-semester-plan.md](docs/ai-capstone2-semester-plan.md).
+> 아래 내용과 실행 명세가 어긋나면 실행 명세가 우선이며, 이 문서를 갱신한다.
+
+- 환경 3종: **Kubernetes(기존) / Docker / Linux**
+- **Application/DB는 목업 한정.** 백엔드 `SUPPORTED_ENVIRONMENTS`에 등록하지 않고
+  sandbox·injector·validator·명령 정책 어느 것도 제공하지 않는다. UI에서도 "개발 예정"이
+  아니라 **후속 연구**로 표기한다. 8주차 범위 게이트(BE-15)를 통과하고 백엔드가
+  application 실행 계약을 제공하기로 확정될 때만 별도 이슈로 승격한다.
 - `environment` 필드를 데이터 계층~API~팩토리까지 관통 (feature/env-schema, 완료)
   - `core/environments.py` 상수·검증, 모델 3종에 `environment` 컬럼, 기존 DB idempotent 백필
   - 현재 kubernetes만 실동작. docker/linux는 `assert_implemented`로 예약 → 선택 시 400
-- 각 환경별 `BaseChaosInjector` / `BaseValidationService` 구현체 추가 (예정)
-  - ⚠️ `ChaosMeshInjector`·`K8sValidationService`는 `chaos_type`을 **if-elif 체인으로 하드코딩**하고
-    K8s SDK를 강제 import한다. 환경별 구현체를 붙이기 전에 dict 디스패치로 리팩토링하는
-    선행 브랜치(feature/injector-refactor)가 필요하다. (ABC 껍데기만으로는 곧바로 확장되지 않음)
-- AWS EKS 배포는 별도 트랙(feature/aws-migration)
+  - 남은 구멍: `MissionAttempt`에 environment 없음, mission list API가 DB 값을 응답에 싣지 않음,
+    프론트가 environment를 요청 body에 보내지 않음 → `BE-02`/`BE-03`에서 닫는다.
+- injector/validation 레지스트리 디스패치 전환 (feature/injector-refactor, 완료 · PR #31)
+  - `_CHAOS_HANDLERS` / `_CHECKS` / `_RULE_RUNNERS`, `BaseChaosInjector`에 `environment`·`supports()`
+- 각 환경별 `BaseChaosInjector` / `BaseValidationService` 구현체 추가 (`BE-13`,`BE-14`,`BE-17`,`BE-18`)
+- AWS EKS 배포는 별도 트랙(feature/aws-migration, `BE-25`)
 
 #### 실행/격리 아키텍처 (설계 확정)
 
@@ -77,41 +88,76 @@ k8s 타입:
 
 ```
 user-{id} 네임스페이스 (격리 경계)
-   ├─ [kubernetes] 기존 nginx Pod          → kubectl 로 직접 (현행 방식 유지)
-   ├─ [docker]     DinD(Docker-in-Docker) Pod → kubectl exec ... -- docker ...
-   └─ [linux]      ubuntu 등 범용 Pod          → kubectl exec ... -- sh -c ...
+   ├─ ResourceQuota / LimitRange / 기본 deny NetworkPolicy
+   ├─ afterfail-k8s-toolbox     namespace-scoped ServiceAccount + kubectl  (kubernetes 실행 주체)
+   ├─ afterfail-k8s-target      기존 nginx/webapp 훈련 리소스              (kubernetes 공격 대상)
+   ├─ afterfail-docker-sandbox  rootless DinD 우선, 불가 시 제한 privileged DinD
+   └─ afterfail-linux-sandbox   제한 shell + 관측/stress 도구 + resource·ephemeral limit
 ```
 
-- **격리:** 모든 환경이 사용자 네임스페이스 안의 Pod로 실행된다. Pod에 resource limit +
+- **격리:** 모든 환경이 사용자 네임스페이스 안의 Pod로 실행된다. Pod에 CPU/memory/
   ephemeral-storage limit을 걸어 "진짜 OOM / 디스크 과부하"를 내도 노드·타 사용자에
-  영향이 없도록 한다.
-- **터미널 재설계(가장 큰 변경):** 현재 백엔드는 호스트에서 `kubectl`을 직접 subprocess로
-  실행한다(`command_executor.py`). 이를 **사용자 Pod 안으로 exec해서 실행**하는 경로로 바꾼다.
-  이렇게 해야 docker/shell 명령이 호스트가 아니라 격리 Pod 안에서만 돌아 RCE 위험이 차단된다.
-  → `command_executor` / `websocket_handler` / `terminal.py` / `command_validator`가 함께 바뀐다.
+  영향이 없도록 한다. **호스트 커널 OOM과 호스트 디스크 fill은 주입 대상에서 제외한다.**
+- **실행 주체 분리:** kubernetes 환경에서도 사용자 명령은 백엔드 호스트가 아니라
+  toolbox Pod 안에서 실행된다. toolbox의 ServiceAccount는 자기 네임스페이스를 벗어나는
+  권한을 갖지 않는다.
+- **터미널 재설계(가장 큰 변경, `BE-05`·`BE-06`):** 현재 백엔드는 호스트에서 `kubectl`을
+  `shell=True` subprocess로 실행한다(`command_executor.py`). 이를 **사용자 Pod 안으로
+  exec하는 경로**로 바꾼다.
+  - `shell=True` / `create_subprocess_shell` 사용 0건이 완료 조건이다.
+  - validator 출력은 문자열이 아니라 **argv 리스트**가 되고, `shlex.split` 후
+    환경별 allowlist를 통과한 argv만 `connect_get_namespaced_pod_exec`로 실행한다.
+  - pipe·redirect·command substitution·chaining은 파서 이전에 거부한다.
+  - **실행 대상(namespace/pod/container)은 서버가 DB 세션에서 결정한다.** 브라우저가 보낸
+    값은 신뢰하지 않는다.
+  - WebSocket 연결 시 `session_id + user_id + is_active`로 소유권을 검증한다.
+    close code: `4001` 토큰 무효 / `4003` 소유자 불일치·비활성 / `4004` 세션·sandbox 없음 /
+    `4010` 환경 미가용.
+  - → `command_executor` / `websocket_handler` / `terminal.py` / `command_validator` /
+    신규 `sandbox_service.py`가 함께 바뀐다.
+- **상태 영속화(`BE-02`·`BE-08`):** 현재 활성 chaos ID가 프로세스 메모리 dict에만 있어
+  서버 재시작 시 장애를 정리할 수 없다. `MissionAttempt`에 `environment`·`chaos_id`·
+  `sandbox_id`를 저장하고 startup reconciliation으로 복구한다.
 - **주입 방식:** Chaos Mesh는 K8s 전용이므로 docker/linux엔 쓸 수 없다.
-  - docker: DinD 안에서 `docker` API로 네트워크 단절 / 볼륨 마운트 오류 등 주입
-  - linux: Pod 안에서 stress-ng / dd / fork 등으로 OOM-Killer / I/O 과부하 / Zombie 프로세스 주입
+  - docker: DinD 안에서 `docker` API로 네트워크 단절 / 볼륨·마운트 오류 / 리소스 고갈 주입
+  - linux: Pod 안에서 cgroup memory limit·`dd`/stress-ng·교육용 helper로
+    OOM / I/O 포화 / Zombie·Orphan 프로세스 주입
+  - 주입 전 원상태 snapshot을 저장하고 inject/revert는 idempotent해야 한다.
 
-**리스크 (구현 시 결정 필요):**
+**리스크 (구현 시 결정 필요 — `BE-00`):**
 - privileged 트레이드오프: 일부 커널 레벨 Linux 장애(I/O throttle 등)는 컨테이너 특권이 필요할
   수 있다. 특권을 줄수록 격리가 약해진다 → "어디까지 진짜로 낼지 vs 안전" 선을 정해야 한다.
-- DinD는 통상 privileged가 필요 → 진짜 데몬 vs rootless/제한 모드 선택.
+  교육 목표를 container cgroup / ephemeral storage / PID 범위로 재정의하는 것이 기본 방침이다.
+- DinD는 통상 privileged가 필요 → rootless를 먼저 검증하고, 불가능하면 사유를 문서화한 뒤
+  제한 privileged를 쓰되 전용 node·strict quota·local demo 한정 여부를 함께 정한다.
+- 세션 재사용·만료·sandbox cleanup 정책을 한 가지로 고정한다(권장: 준비된 세션 재사용).
 
-#### 캡스톤2 브랜치 로드맵
+#### 캡스톤2 브랜치 로드맵 (16주 / 8스프린트 / 백엔드 PR 10개)
 
-```
-dev
- ├─ feature/env-schema        환경 데이터 계층 관통 (완료, dev 머지됨 PR #30)
- ├─ feature/injector-refactor if-elif → dict 디스패치, BaseChaosInjector 인터페이스 정리 (완료, PR 대기)
- ├─ feature/env-sandbox       ★선행: 샌드박스 Pod 프로비저닝 + 터미널 exec 경로 + 환경별 명령 정책 + Pod limit
- ├─ feature/docker-env        DockerChaosInjector(네트워크 단절/볼륨 오류) + 검증  (sandbox 이후)
- ├─ feature/linux-env         LinuxChaosInjector(OOM/I/O/Zombie) + 검증          (sandbox 이후)
- └─ feature/aws-migration     EKS 배포 (별도 트랙)
-```
+| # | 브랜치 | 작업 ID | 주차 | 내용 |
+|---|---|---|---|---|
+| — | `feature/env-schema` | — | 완료 | 환경 데이터 계층 관통 (PR #30) |
+| — | `feature/injector-refactor` | — | 완료 | 레지스트리 디스패치 전환 (PR #31) |
+| 1 | `feature/backend-baseline` | BE-01~03 | 1–2 | 테스트 녹색화, **Alembic 정식 도입**, API environment 필드 |
+| 2 | `feature/env-sandbox` | BE-04, BE-07 | 3–4 | `SandboxService`, Quota/NetworkPolicy/RBAC, 환경별 세션 API |
+| 3 | `feature/safe-terminal-exec` | BE-05, BE-06 | 3–4 | host shell 제거 → Pod exec, WebSocket 소유권 검증 |
+| 4 | `feature/env-runtime` | BE-08~10 | 5–6 | environment 기반 factory, 환경별 미션 잠금·seed, K8s 회귀 |
+| 5 | `feature/docker-env` | BE-11~15 | 7–8 | DinD sandbox·명령 정책·injector·validator, **8주차 범위 게이트** |
+| 6 | `feature/linux-env` | BE-16~18 | 9–10 | Linux sandbox·injector(OOM/I/O/Zombie)·validator |
+| 7 | `feature/cross-layer-contracts` | BE-19~21 | 11–12 | 환경별 RuntimeContext, AI 실행 계약, MTTR·competency analytics |
+| 8 | `feature/backend-hardening` | BE-22~24 | 13–14 | 동시성·재시작 reconciliation, CORS·메트릭, 테스트 확대 |
+| 9 | `feature/aws-migration` | BE-25 | 15–16 | EKS 보안 배포 (별도 트랙) |
+| 10 | `feature/backend-release` | BE-26~28 | 15–16 | 환경별 E2E, 성능 검증, 문서·시연 |
 
-순서 근거: `env-sandbox`(실행 기반)가 injector 구현체보다 먼저다. 실행/격리 환경이 없으면
-injector를 짜도 "장애는 나는데 아무도 못 고치는" 반쪽이 된다.
+순서 근거:
+- `backend-baseline`이 맨 앞이다. attempt에 `environment`·`chaos_id`가 없고 migration 이력이
+  없는 상태에서 sandbox를 얹으면 재시작 복구와 스키마 롤백이 불가능해진다.
+- `env-sandbox`(실행 기반)가 injector 구현체보다 먼저다. 실행/격리 환경이 없으면
+  injector를 짜도 "장애는 나는데 아무도 못 고치는" 반쪽이 된다.
+- Docker/Linux는 sandbox·safe-exec·factory가 끝난 뒤에야 병렬로 진행할 수 있다.
+
+**우선 해소 대상 (P0):** ① host `shell=True` 실행 ② WebSocket 소유권 미검증
+③ environment가 세션·명령 실행까지 미연결 ④ active chaos ID가 프로세스 메모리에만 존재.
 
 ---
 

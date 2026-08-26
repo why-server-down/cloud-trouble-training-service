@@ -3,6 +3,32 @@
 ## 개요
 FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스템, AI 시나리오 생성 담당.
 
+## 캡스톤2 작업 기준
+
+구현은 [docs/backend-capstone2-semester-plan.md](../docs/backend-capstone2-semester-plan.md)의
+작업 ID(`BE-00`~`BE-28`) 단위로 진행한다. **한 번에 하나의 `BE-xx`만** 구현하고,
+선행 조건과 API 계약을 먼저 확인한다. 로드맵 표는 루트 [CLAUDE.md](../CLAUDE.md) 참고.
+
+### 현재 P0 결손
+
+| 결손 | 위험 | 해소 |
+|---|---|---|
+| `CommandExecutor`가 host에서 `shell=True` 실행 | validator 우회 시 host RCE | BE-05 |
+| WebSocket이 session 소유권을 검증하지 않음 | 타 사용자 세션 오용·로그 오염 | BE-06 |
+| environment가 session 생성·명령 실행까지 미연결 | Docker 탭에서 K8s 명령 실행 | BE-03·BE-07 |
+| active chaos ID가 프로세스 메모리 dict에만 존재 | 서버 재시작 시 장애 정리 불가 | BE-02·BE-08 |
+
+### 테스트 기준선 (2026-08-26 실측)
+
+```bash
+cd backend && source venv/bin/activate && python -m pytest -q
+# → 1 failed, 31 passed
+```
+실패 1건은 `test_command_validator.py::TestBlockedCommands::test_invalid_subcommand`
+(`kubectl create secret` 허용). `pytest-asyncio==0.23.3`은 설치되어 있고 async 테스트도
+실행된다. `pytest.ini`가 없어 `asyncio_mode` 미명시 상태 → BE-01에서 추가한다.
+실패 테스트를 삭제하거나 xfail로 숨기지 않는다.
+
 ## 기술 스택
 - Python 3.11, FastAPI, Pydantic v2
 - SQLAlchemy async + PostgreSQL (asyncpg)
@@ -167,8 +193,20 @@ POST /api/scenarios/current/check
 > **환경(environment) 필드 (캡스톤2):** `Mission`, `GeneratedScenario`, `TerminalSession`은
 > `environment` 컬럼(`kubernetes` | `docker` | `linux`, default `kubernetes`)을 가진다.
 > 상수·검증은 `core/environments.py`. 현재 실제 장애 주입/검증은 kubernetes만 구현됐고
-> docker/linux는 `assert_implemented`로 막혀 있다(선택 시 400). 기존 로컬 DB는
-> `ensure_schema_compatibility`의 idempotent ALTER로 자동 백필된다.
+> docker/linux는 `assert_implemented`로 막혀 있다(선택 시 400).
+> `application`은 목업 한정이라 `SUPPORTED_ENVIRONMENTS`에 넣지 않는다.
+>
+> **아직 관통되지 않은 구간 (BE-02·BE-03에서 닫는다):**
+> - `MissionAttempt`에 `environment`·`chaos_id`·`sandbox_id` 컬럼이 없다.
+> - mission list API가 DB의 `mission.environment`를 응답에 싣지 않는다.
+> - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다.
+> - WebSocket이 session의 environment를 로드하지 않는다.
+> - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다.
+> - `GET /api/environments`(환경 가용성) 미구현.
+>
+> **마이그레이션:** 현재는 `ensure_schema_compatibility`의 idempotent ALTER로 백필한다.
+> `BE-02`에서 **Alembic 정식 도입**으로 전환하며, 그 변경분을 첫 migration에 반영하고
+> `create_all`은 테스트/초기 개발 한정으로 남긴다.
 
 ### 현재 모델
 - `User` - 사용자 (username, email, hashed_password, total_score)
@@ -190,8 +228,9 @@ POST /api/scenarios/current/check
   - `query`: k8s 타입은 `deployment:nginx:running` 형식, promql은 PromQL 문자열
   - `guard_status`: `accepted` | `rejected`
 
-### 예정
-- `TutorMessage` - 튜터 대화 영구 저장 (현재 인메모리 최근 5개만 유지)
+- `TutorMessage` - 튜터 대화 영구 저장. 모델과 저장 로직 모두 구현 완료
+  (`ai/tutor_service.py`에서 user/assistant 메시지를 DB에 저장하고 최근 이력을 조회한다.
+  저장 실패는 무시하고 응답을 계속한다.)
 
 ## AI 백엔드 구성
 
@@ -258,6 +297,21 @@ KNOWLEDGE_BASE_DIR=          # knowledge-base 절대 경로 (기본값: ai-data/
 - 환경 변수는 .env + pydantic-settings
 - 비동기 우선 (async/await)
 - K8s 동기 API는 `run_in_executor` 패턴으로 비동기 래핑
+
+### 보안 규칙 (캡스톤2 이후 필수)
+- 사용자 명령을 host shell에서 실행하지 않는다. `shell=True`,
+  `create_subprocess_shell` 경로를 새로 추가하지 않는다.
+- 입력 검증만으로 shell 실행을 안전하다고 간주하지 않는다. 핵심 방어는
+  **argv allowlist + sandbox exec**이고 blacklist는 보조 수단이다.
+- 실행 대상 namespace/pod/container는 **서버가 DB session과 config에서 결정**한다.
+  브라우저가 보낸 값을 execution target으로 쓰지 않는다.
+- session 조회 조건에는 항상 `session_id + user_id + is_active`가 들어간다.
+- 미구현 environment를 kubernetes로 fallback하지 않는다.
+- 장애 주입·복구·채점에 필요한 식별자는 재시작 후 복구할 수 있도록 DB에 저장한다.
+- 사용자에게 내부 정답·secret·stack trace를 노출하지 않고, metrics label에
+  user ID·namespace·명령 원문·시나리오 제목을 넣지 않는다.
+- 작업 종료 전 `python -m pytest -q`를 실행하고, 실패가 있으면 이번 변경으로 인한
+  회귀와 기존 실패를 구분해 보고한다.
 
 ## 실행
 ```bash
