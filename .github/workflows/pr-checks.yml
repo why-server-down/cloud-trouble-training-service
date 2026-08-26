@@ -1,0 +1,117 @@
+name: PR Checks
+
+# 사람 리뷰 없이 자동 머지하는 정책이므로, 이 체크들이 유일한 안전장치다.
+# GitHub Settings → Branches → dev 규칙에서 아래 3개 job을
+# Required status checks 로 지정해야 실제로 머지가 막힌다.
+# (Required approvals 는 설정하지 않는다 — 사람 승인 대기는 두지 않는다.)
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  path-ownership:
+    name: 소유 경로 검사
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # job 자체를 skip 하면 required check 가 pending 으로 남아 머지가 막히므로
+      # 반드시 step 단위로 건너뛴다.
+      - name: override 라벨 확인
+        id: override
+        run: |
+          if [ "${{ contains(github.event.pull_request.labels.*.name, 'path-override') }}" = "true" ]; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::path-override 라벨이 있어 소유 경로 검사를 건너뛴다. PR 본문에 사유가 있어야 한다."
+          else
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 담당 소유 경로 밖 변경 검사
+        if: steps.override.outputs.on == 'false'
+        run: |
+          bash .github/scripts/check-path-ownership.sh \
+            "${{ github.head_ref }}" \
+            "${{ github.event.pull_request.base.sha }}"
+
+  backend:
+    name: 백엔드 테스트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 백엔드 변경 여부 확인
+        id: changed
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '^(backend/|\.github/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "백엔드 변경 없음 — 건너뛴다."
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.changed.outputs.run == 'true'
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 의존성 설치
+        if: steps.changed.outputs.run == 'true'
+        run: pip install -r backend/requirements.txt
+
+      - name: pytest
+        if: steps.changed.outputs.run == 'true'
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: 프론트엔드 빌드/린트
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 프론트엔드 변경 여부 확인
+        id: changed
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '^(frontend/|\.github/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "프론트엔드 변경 없음 — 건너뛴다."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.run == 'true'
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 의존성 설치
+        if: steps.changed.outputs.run == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: 타입 체크 + 빌드
+        if: steps.changed.outputs.run == 'true'
+        working-directory: frontend
+        run: npm run build
+
+      - name: 린트
+        if: steps.changed.outputs.run == 'true'
+        working-directory: frontend
+        run: npm run lint

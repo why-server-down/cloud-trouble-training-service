@@ -126,9 +126,13 @@ python -m pytest -q  →  1 failed, 31 passed
 
 ## 팀 협업 & Git 규칙
 
-3인(백엔드 / 프론트엔드 / AI)이 각자 계획서를 기준으로 **동시에** 개발한다.
+3인(백엔드 / 프론트엔드 / AI)이 각자 계획서를 기준으로 **AI 자율 실행을 병렬로** 돌린다.
 아래 규칙은 저장소 전체에 적용되며, 개인 전역 규칙(`~/.claude/CLAUDE.md`)과 충돌하면
 **이 문서가 우선**한다. (예: 전역 "squash merge 기본"은 이 저장소에서 적용하지 않는다.)
+
+> **실행을 시작하기 전에 [docs/parallel-execution-order.md](docs/parallel-execution-order.md)를 먼저 읽는다.**
+> 세 계획서는 서로의 머지를 기다리도록 쓰여 있어서, 동시에 출발하면 프론트·AI가
+> 존재하지 않는 API에 대고 구현하게 된다. 웨이브 게이트를 통과했는지 확인하고 시작한다.
 
 ### 1. 담당 분야와 소유 경로
 
@@ -181,6 +185,10 @@ docs/<주제>
 
 - 한 브랜치 = 한 PR = 계획서의 PR 묶음 하나. 여러 담당 분야를 한 브랜치에 섞지 않는다.
 - 브랜치는 오래 두지 않는다. **길어도 3~4일 안에 PR을 올린다** (오래될수록 충돌이 커진다).
+- **브랜치 이름으로 소유 경로가 판정된다.** CI가 이름을 보고 담당(be/fe/ai)을 정한 뒤,
+  그 담당의 경로 밖 파일이 바뀌었으면 PR을 실패시킨다
+  (판정 규칙: `.github/scripts/check-path-ownership.sh`). 위 명명 규칙을 벗어나면
+  담당을 판정할 수 없어 그대로 실패하므로, 새 브랜치는 반드시 접두어를 지킨다.
 
 ### 4. 작업 절차
 
@@ -220,6 +228,9 @@ git switch dev && git pull origin dev
   - 다른 담당자가 후속으로 해야 할 일
 - **리뷰 대기 없이 본인이 바로 머지한다.** 다른 사람의 승인이나 리뷰 코멘트를 기다리지 않는다.
   여기서 PR은 검토 절차가 아니라 **변경 기록과 머지 커밋을 남기기 위한 장치**다.
+- 사람 리뷰가 없으므로 **PR Checks(`.github/workflows/pr-checks.yml`)가 유일한 안전장치**다.
+  3개 job(소유 경로 검사 / 백엔드 테스트 / 프론트엔드 빌드·린트)이 녹색이어야 머지된다.
+  검사가 빨간데 억지로 머지하거나, 실패하는 테스트를 삭제·`xfail` 처리해서 통과시키지 않는다.
 - **머지는 "Create a merge commit"(= `--no-ff`)만 사용한다.**
   커밋 내역이 그대로 남아야 하므로 **Squash merge·Rebase merge 금지**.
   ```bash
@@ -337,6 +348,7 @@ docker compose --profile monitoring up -d
 > 캡스톤 2 (EKS 배포) 때 Kubernetes 서비스 디스커버리(`kubernetes_sd_configs`)로 자동화 예정.
 
 ## 주요 설계 문서
+- [docs/parallel-execution-order.md](docs/parallel-execution-order.md) - **3인 병렬 AI 실행 순서와 웨이브 게이트 (실행 전 필독)**
 - [agent.md](agent.md) - AI 장애 생성 모드 전체 설계 및 구현 현황 (Phase 1~7)
 - [backend/CLAUDE.md](backend/CLAUDE.md) - 백엔드 API 및 서비스 상세
 - [README.md](README.md) - 프로젝트 공개 소개
