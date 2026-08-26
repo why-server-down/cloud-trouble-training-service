@@ -125,3 +125,77 @@ CI 소유 경로 검사로 대부분의 충돌은 막히지만, **계획서상 �
 - [ ] Wave 0 게이트가 전부 체크됐는지 확인
 
 관련 규칙은 [../AGENTS.md](../AGENTS.md) "팀 협업 & Git 규칙" 참고.
+
+---
+
+## 5. 게이트 확인 방법 (AI 에이전트용)
+
+작업을 시작하기 전에 **사람에게 묻지 말고 아래 명령으로 직접 판정한다.**
+결과가 조건과 다르면 [../AGENTS.md](../AGENTS.md) §7-1의 보고 양식으로 사람에게 알린다.
+
+### 5-1. 내 작업이 어느 웨이브인가
+
+| 작업 ID | 웨이브 |
+|---|---|
+| BE-01 ~ BE-03 / AI-00 / FE-00 | Wave 0 |
+| BE-04 ~ BE-07 / AI-01 ~ AI-02 / FE-01 ~ FE-05 | Wave 1 |
+| BE-08 ~ BE-18 / AI-03 ~ AI-06 / FE-06 ~ FE-09 | Wave 2 |
+| BE-19 ~ BE-21 / AI-07 ~ AI-17 / FE-11 ~ FE-15 | Wave 3 |
+| BE-22 ~ BE-28 / AI-18 ~ AI-28 / FE-16 ~ FE-21 | Wave 4 |
+
+### 5-2. 공통 사전 확인
+
+```bash
+# dev 최신 상태로 맞춘다 (이걸 안 하면 아래 판정이 전부 틀린다)
+git fetch origin && git log origin/dev --oneline -15
+```
+
+### 5-3. Wave 0 게이트 — Wave 1 이상을 시작하려면 전부 충족
+
+```bash
+# (1) 백엔드 테스트가 녹색인가?  → "failed"가 0이어야 한다
+cd backend && python -m pytest -q; cd ..
+
+# (2) API 계약에 environment 필드가 반영됐는가?  → 결과가 나와야 한다
+git grep -n "environment" origin/dev -- backend/app/schemas.py
+
+# (3) Alembic이 도입됐는가?  → 디렉터리가 있어야 한다
+git ls-tree origin/dev --name-only backend/alembic
+
+# (4) PR Checks가 dev에 required로 걸려 있는가?  → 404가 아니어야 한다
+gh api repos/why-server-down/cloud-trouble-training-service/branches/dev/protection \
+  --jq '.required_status_checks.contexts'
+```
+
+> (1)의 현재 기준선은 `1 failed, 31 passed`다. **BE-01이 이걸 고치기 전까지
+> Wave 1 이상은 시작하지 않는다.** 실패 테스트를 삭제하거나 `xfail`로 숨겨서
+> 녹색을 만드는 것은 게이트 통과가 아니다.
+
+### 5-4. Wave 1 게이트 — Wave 2를 시작하려면
+
+```bash
+# host shell 실행이 제거됐는가?  → 결과가 없어야 한다 (P0 보안 결손)
+git grep -n "shell=True" origin/dev -- backend/app
+
+# 샌드박스 서비스가 들어왔는가?  → 파일이 있어야 한다
+git ls-tree origin/dev --name-only backend/app/services | grep -i sandbox
+```
+
+### 5-5. Wave 2 게이트 — Wave 3을 시작하려면
+
+BE-15(8주차 범위 게이트) 판정 결과가 필요하다. **이건 명령으로 확인할 수 없다.**
+Docker/Linux 실구현을 계속할지 범위를 줄일지는 사람이 결정하므로, 사람에게 물어본다.
+
+### 5-6. Wave 3 게이트 — Wave 4를 시작하려면
+
+```bash
+# AI 실행 계약이 schemas.py에 반영됐는가?
+git grep -nE "TutorResult|ValidationJudgment" origin/dev -- backend/app/schemas.py
+```
+
+### 5-7. 프론트·AI 담당이 특히 주의할 것
+
+프론트와 AI 작업은 **거의 전부 백엔드 머지에 의존한다.**
+"백엔드가 아직 안 만들었으니 mock으로 만들어두자"는 선택을 하지 않는다.
+확정되지 않은 계약 위에 만든 코드는 계약이 바뀌는 순간 전부 폐기된다 —
+그 판단은 사람이 내리도록 보고하고 대기한다.
