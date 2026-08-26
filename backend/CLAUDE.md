@@ -7,7 +7,7 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 
 구현은 [docs/backend-capstone2-semester-plan.md](../docs/backend-capstone2-semester-plan.md)의
 작업 ID(`BE-00`~`BE-28`) 단위로 진행한다. **한 번에 하나의 `BE-xx`만** 구현하고,
-선행 조건과 API 계약을 먼저 확인한다. 로드맵 표는 루트 [CLAUDE.md](../CLAUDE.md) 참고.
+선행 조건과 API 계약을 먼저 확인한다. 로드맵 표와 팀 협업·Git 규칙은 루트 [AGENTS.md](../AGENTS.md) 참고.
 
 ### 현재 P0 결손
 

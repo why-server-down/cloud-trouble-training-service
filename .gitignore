@@ -39,3 +39,9 @@ Thumbs.db
 *.log
 .runtime/
 tmp/
+
+# AI coding tools (작업 흔적 커밋 금지)
+.claude/
+.kiro/
+.antigravitycli/
+session-summary.md
