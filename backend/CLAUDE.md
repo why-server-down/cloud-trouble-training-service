@@ -57,10 +57,11 @@ app/
 │   ├── missions.py      # 고정 4개 미션 API (AI 시나리오 attempt 혼용 방어 처리됨)
 │   ├── scenarios.py     # AI 시나리오 API (/api/scenarios/*)
 │   ├── dashboard.py     # 대시보드/리더보드/업적 API
+│   ├── environments.py  # GET /api/environments (환경 가용 상태)
 │   └── chat.py          # AI 튜터 채팅 API (정적 미션 + AI 시나리오 모두 지원)
 ├── core/
 │   ├── config.py        # Settings (환경변수, AI 백엔드 선택 - mock/openai/gemini)
-│   ├── environments.py  # 훈련 환경 상수(kubernetes|docker|linux) + 지원/구현 검증
+│   ├── environments.py  # 환경 상수·EnvironmentId(Literal)·검증·가용성(availability)
 │   ├── database.py      # async engine, session (스키마 관리는 Alembic 담당)
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
@@ -96,6 +97,12 @@ app/
 - `POST /api/auth/login` - 로그인 (JWT 발급, form-data 형식)
 - `GET /api/auth/me` - 프로필 조회 (완료 미션 수, 총 점수 포함) 🔒
 - `POST /api/auth/logout` - 로그아웃 (204 반환) 🔒
+
+### 환경
+- `GET /api/environments` - 훈련 환경 가용 상태 목록 🔒
+  - Response: `{"items":[{"id":"kubernetes","status":"available","capabilities":[...]}, ...]}`
+  - `available`은 실제로 세션 생성·주입·검증이 가능한 환경, `preparing`은 계약상 존재하나 미구현
+  - source of truth는 `core/environments.py`. label·설명 문구는 프론트 책임
 
 ### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성 + K8s 네임스페이스/nginx Pod 자동 생성 🔒
@@ -198,13 +205,18 @@ POST /api/scenarios/current/check
 > docker/linux는 `assert_implemented`로 막혀 있다(선택 시 400).
 > `application`은 목업 한정이라 `SUPPORTED_ENVIRONMENTS`에 넣지 않는다.
 >
-> **아직 관통되지 않은 구간 (BE-03에서 닫는다):**
+> **아직 관통되지 않은 구간:**
 > - ~~`MissionAttempt`에 `environment`·`chaos_id`·`sandbox_id` 컬럼이 없다.~~ (BE-02 완료)
-> - mission list API가 DB의 `mission.environment`를 응답에 싣지 않는다.
-> - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다.
-> - WebSocket이 session의 environment를 로드하지 않는다.
-> - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다.
-> - `GET /api/environments`(환경 가용성) 미구현.
+> - ~~mission list API가 DB의 `mission.environment`를 응답에 싣지 않는다.~~ (BE-03 완료)
+> - ~~`GET /api/environments`(환경 가용성) 미구현.~~ (BE-03 완료)
+> - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다. → BE-07
+> - WebSocket이 session의 environment를 로드하지 않는다. → BE-06
+> - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다. → BE-08
+> - mission 목록·잠금이 environment로 필터되지 않는다. → BE-09
+>
+> **API 계약 검증:** `environment`는 `EnvironmentId`(Literal) 타입이라 허용 외 값은
+> Pydantic이 422로 거절한다. `EnvironmentId`와 `SUPPORTED_ENVIRONMENTS`가 갈라지지
+> 않도록 `core/environments.py` import 시점에 일치를 단언하고 테스트로도 고정한다.
 >
 > **마이그레이션:** Alembic이 스키마의 단일 출처다(BE-02 완료).
 > 자세한 내용은 아래 "데이터베이스 마이그레이션" 참고.

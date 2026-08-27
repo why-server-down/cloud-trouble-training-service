@@ -4,9 +4,16 @@
 미션/시나리오/터미널 세션이 어느 환경에서 동작하는지를 이 값으로 구분한다.
 """
 
+from typing import Literal, get_args
+
 KUBERNETES = "kubernetes"
 DOCKER = "docker"
 LINUX = "linux"
+
+# API 계약에서 environment 를 검증하기 위한 타입.
+# Pydantic 이 Literal 을 읽어 잘못된 값을 422 로 거절한다.
+# (Literal 은 정적 값이어야 하므로 아래에서 SUPPORTED_ENVIRONMENTS 와 일치를 강제한다)
+EnvironmentId = Literal["kubernetes", "docker", "linux"]
 
 # 프론트 환경 탭과 계약되는 enum. (Application 탭은 캡스톤2 스코프에서 제외)
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER, LINUX)
@@ -44,3 +51,35 @@ def assert_implemented(environment: str) -> str:
             f"현재 이용 가능: {', '.join(IMPLEMENTED_ENVIRONMENTS)}"
         )
     return environment
+
+
+# 환경별로 현재 제공되는 기능. 프론트가 탭을 그릴 때 쓰는 값이며
+# label/설명 같은 표시 문구는 프론트 책임이다.
+_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    KUBERNETES: ("static_mission", "ai_scenario", "terminal", "tutor", "observability"),
+}
+
+AVAILABLE = "available"
+PREPARING = "preparing"
+
+
+def availability() -> list[dict]:
+    """지원 환경의 가용 상태 목록. `GET /api/environments` 의 원본이다."""
+    items = []
+    for environment in SUPPORTED_ENVIRONMENTS:
+        implemented = is_implemented(environment)
+        items.append(
+            {
+                "id": environment,
+                "status": AVAILABLE if implemented else PREPARING,
+                "capabilities": list(_CAPABILITIES.get(environment, ())) if implemented else [],
+            }
+        )
+    return items
+
+
+# EnvironmentId(API 계약)와 SUPPORTED_ENVIRONMENTS(런타임 검증)가 갈라지면
+# 한쪽만 고쳤을 때 조용히 어긋난다. import 시점에 못 박는다.
+assert set(get_args(EnvironmentId)) == set(SUPPORTED_ENVIRONMENTS), (
+    "EnvironmentId 와 SUPPORTED_ENVIRONMENTS 가 일치하지 않는다"
+)
