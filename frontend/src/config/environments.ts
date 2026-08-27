@@ -1,4 +1,9 @@
-import { ENVIRONMENT_IDS, EnvironmentId } from '../types/training'
+import {
+  ENVIRONMENT_IDS,
+  EnvironmentId,
+  EnvironmentStatus,
+  isEnvironmentStatus,
+} from '../types/training'
 
 /**
  * 환경 탭에 쓰는 표시 문구.
@@ -25,3 +30,48 @@ export const ENVIRONMENT_ORDER: readonly EnvironmentId[] = ENVIRONMENT_IDS
 
 export const getEnvironmentMeta = (environment: EnvironmentId): EnvironmentDisplayMeta =>
   ENVIRONMENT_META[environment]
+
+/**
+ * 상태별 보조 문구. tooltip 없이도 읽히도록 탭 안에 직접 노출한다(FE-03 인수 조건).
+ * 백엔드가 아직 내보내지 않는 status 는 `statusNote()` 가 '상태 확인 불가'로 처리한다.
+ */
+export const ENVIRONMENT_STATUS_NOTES: Record<EnvironmentStatus, string> = {
+  available: '훈련 가능',
+  degraded: '일부 기능 불안정',
+  preparing: '준비 중',
+  disabled: '사용 중지',
+}
+
+export const statusNote = (status: string): string =>
+  isEnvironmentStatus(status) ? ENVIRONMENT_STATUS_NOTES[status] : '상태 확인 불가'
+
+/**
+ * 선택 가능한 상태. degraded 는 경고를 띄우되 진입은 허용한다.
+ * 모르는 status 는 선택 불가로 처리한다 — 실행 가능 여부를 낙관하지 않는다.
+ */
+export const isSelectableStatus = (status: string): boolean =>
+  status === 'available' || status === 'degraded'
+
+/** 준비 중 환경에서 무엇이 열릴 예정인지. 탭이 눌리지 않으므로 별도 섹션에 보여준다. */
+export const ENVIRONMENT_ROADMAP: Record<EnvironmentId, string[]> = {
+  kubernetes: [],
+  docker: [
+    'Docker Compose 서비스 장애 시뮬레이션',
+    '컨테이너 리소스 제한 실습',
+    '네트워크 격리 및 볼륨 마운트 문제 해결',
+  ],
+  linux: [
+    '프로세스 및 서비스 장애 대응',
+    '디스크 / 메모리 / CPU 포화 상태 복구',
+    '시스템 로그 분석 및 트러블슈팅',
+  ],
+}
+
+/**
+ * 캡스톤2 스코프에서 빠진 영역. AGENTS.md 결정에 따라 "개발 예정" 탭이 아니라
+ * 후속 연구로 표기하며, 백엔드 SUPPORTED_ENVIRONMENTS 에도 없다.
+ */
+export const RESEARCH_TOPICS: { label: string; note: string }[] = [
+  { label: 'Application', note: '앱 성능 저하 · API 에러 패턴 분석' },
+  { label: 'Database', note: '쿼리 지연 · 커넥션 풀 고갈 대응' },
+]

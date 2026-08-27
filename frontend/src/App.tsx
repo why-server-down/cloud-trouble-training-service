@@ -4,12 +4,21 @@ import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
 import DashboardOverview from './components/Profile/DashboardOverview'
 import ProfileDetails from './components/Profile/ProfileDetails'
+import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
+import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
-import { ENVIRONMENT_ORDER, getEnvironmentMeta } from './config/environments'
-import { DEFAULT_ENVIRONMENT, EnvironmentId } from './types/training'
+import { getEnvironmentMeta, isSelectableStatus } from './config/environments'
+import {
+  ActiveAttemptSummary,
+  DEFAULT_ENVIRONMENT,
+  EnvironmentId,
+  EnvironmentItem,
+  isEnvironmentId,
+} from './types/training'
 import {
   AUTH_EXPIRED_EVENT,
   createTerminalSession,
+  getEnvironments,
   getProfile,
   logoutUser,
   UserProfileResponse,
@@ -18,29 +27,8 @@ import './App.css'
 
 type WorkspaceTab = 'missions' | 'terminal'
 
-/**
- * Application 은 캡스톤2 스코프에서 빠진 후속 연구 영역이라 EnvironmentId 가 아니다.
- * 탭 자체의 처리(제거 또는 후속 연구 섹션 이동)는 FE-03 에서 결정한다.
- */
-const RESEARCH_TAB_ID = 'application'
-
-type EnvTab = EnvironmentId | typeof RESEARCH_TAB_ID
-
-/**
- * 지금 실제로 열려 있는 환경. 백엔드 IMPLEMENTED_ENVIRONMENTS 와 같은 값이며,
- * FE-03 에서 `GET /api/environments` 응답으로 대체한다.
- */
-const AVAILABLE_ENVIRONMENTS: readonly EnvironmentId[] = [DEFAULT_ENVIRONMENT]
-
-const ENV_TABS: { id: EnvTab; label: string; subtitle: string; wip: boolean }[] = [
-  ...ENVIRONMENT_ORDER.map((id) => ({
-    id,
-    label: getEnvironmentMeta(id).label,
-    subtitle: getEnvironmentMeta(id).subtitle,
-    wip: !AVAILABLE_ENVIRONMENTS.includes(id),
-  })),
-  { id: RESEARCH_TAB_ID, label: 'Application', subtitle: '앱 트러블슈팅', wip: true },
-]
+/** 사용자별 마지막 선택 환경. 계획서에 정해진 키를 그대로 쓴다. */
+const ENVIRONMENT_STORAGE_KEY = 'afterfail:environment:v1'
 
 const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
 const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
@@ -63,7 +51,7 @@ const INTRO_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="env-tabs"]',
     eyebrow: 'TOUR / ENVIRONMENT',
     title: '훈련 환경 선택',
-    body: 'Kubernetes 훈련이 먼저 열려 있고, Docker, Linux, Application 환경은 이후 확장될 영역입니다.',
+    body: 'Kubernetes 훈련이 먼저 열려 있습니다. Docker와 Linux는 준비가 끝나면 탭이 열리고, Application·DB는 후속 연구 영역입니다.',
     placement: 'bottom',
   },
   {
@@ -143,11 +131,13 @@ function App() {
   const [namespace, setNamespace] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('missions')
-  const [activeEnvTab, setActiveEnvTab] = useState<EnvTab>('kubernetes')
+  const [environments, setEnvironments] = useState<EnvironmentItem[] | null>(null)
+  const [environmentsError, setEnvironmentsError] = useState<string | null>(null)
+  const [activeEnvironment, setActiveEnvironment] = useState<EnvironmentId | null>(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [hasActiveMission, setHasActiveMission] = useState(false)
+  const [activeAttempt, setActiveAttempt] = useState<ActiveAttemptSummary | null>(null)
   const [isGrafanaFrameReady, setIsGrafanaFrameReady] = useState(false)
   const [isGrafanaDataReady, setIsGrafanaDataReady] = useState(false)
   const [activeTour, setActiveTour] = useState<'intro' | 'mission' | null>(null)
@@ -155,14 +145,20 @@ function App() {
   const [hasSeenMissionTour, setHasSeenMissionTour] = useState(() => localStorage.getItem(MISSION_TOUR_STORAGE_KEY) === 'done')
   const accountStorageScope = profile?.id || namespace
   const grafanaUrl = getGrafanaUrl(namespace)
-  const isGrafanaLoading = hasActiveMission && (!isGrafanaFrameReady || !isGrafanaDataReady)
+  const hasActiveAttempt = activeAttempt !== null
+  const isGrafanaLoading = hasActiveAttempt && (!isGrafanaFrameReady || !isGrafanaDataReady)
+  const activeEnvironmentItem = environments?.find((item) => item.id === activeEnvironment) ?? null
+  const isActiveEnvironmentDegraded = activeEnvironmentItem?.status === 'degraded'
 
   const clearAuthState = useCallback(() => {
     setToken(null)
     setSessionId(null)
     setNamespace(null)
     setProfile(null)
-    setHasActiveMission(false)
+    setActiveAttempt(null)
+    setEnvironments(null)
+    setEnvironmentsError(null)
+    setActiveEnvironment(null)
     setActiveTab('missions')
     setIsProfileOpen(false)
     localStorage.removeItem('token')
@@ -223,6 +219,54 @@ function App() {
     return () => window.clearInterval(interval)
   }, [loadProfile, token])
 
+  const loadEnvironments = useCallback(async () => {
+    if (!token) return
+
+    setEnvironmentsError(null)
+    try {
+      setEnvironments(await getEnvironments(token))
+    } catch (error) {
+      console.error('환경 목록 조회 실패:', error)
+      setEnvironments(null)
+      setEnvironmentsError(error instanceof Error ? error.message : '환경 목록을 불러오지 못했습니다')
+    }
+  }, [token])
+
+  useEffect(() => {
+    void loadEnvironments()
+  }, [loadEnvironments])
+
+  /**
+   * 활성 환경 확정. 우선순위는
+   * ① 서버가 알려준 활성 attempt 의 환경 (실행 대상의 원본은 서버다)
+   * ② 사용자별 저장값 ③ kubernetes ④ 첫 선택 가능 환경 ⑤ 없음
+   * 이다. attempt 가 끝나면 다시 저장값으로 돌아온다.
+   */
+  useEffect(() => {
+    if (!environments) return
+
+    if (activeAttempt) {
+      setActiveEnvironment(activeAttempt.environment)
+      return
+    }
+
+    const selectable = environments.filter((item) => isSelectableStatus(item.status)).map((item) => item.id)
+    const saved = accountStorageScope
+      ? localStorage.getItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope))
+      : null
+
+    if (saved && isEnvironmentId(saved) && selectable.includes(saved)) {
+      setActiveEnvironment(saved)
+      return
+    }
+    setActiveEnvironment(selectable.includes(DEFAULT_ENVIRONMENT) ? DEFAULT_ENVIRONMENT : selectable[0] ?? null)
+  }, [accountStorageScope, activeAttempt, environments])
+
+  useEffect(() => {
+    if (!activeEnvironment || !accountStorageScope) return
+    localStorage.setItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope), activeEnvironment)
+  }, [accountStorageScope, activeEnvironment])
+
   useEffect(() => {
     if (!accountStorageScope) return
     setHasSeenIntroTour(localStorage.getItem(scopedStorageKey(INTRO_TOUR_STORAGE_KEY, accountStorageScope)) === 'done')
@@ -236,27 +280,25 @@ function App() {
 
   useEffect(() => {
     if (!token || !sessionId || hasSeenIntroTour || isProfileOpen || activeTour) return
-    setActiveEnvTab('kubernetes')
     setActiveTab('missions')
     const timer = window.setTimeout(() => setActiveTour('intro'), 450)
     return () => window.clearTimeout(timer)
   }, [activeTour, hasSeenIntroTour, isProfileOpen, sessionId, token])
 
   useEffect(() => {
-    if (!token || !sessionId || !hasActiveMission || hasSeenMissionTour || activeTour) return
-    setActiveEnvTab('kubernetes')
+    if (!token || !sessionId || !hasActiveAttempt || hasSeenMissionTour || activeTour) return
     setActiveTab(window.innerWidth <= 768 ? 'missions' : 'terminal')
     const timer = window.setTimeout(() => setActiveTour('mission'), 650)
     return () => window.clearTimeout(timer)
-  }, [activeTour, hasActiveMission, hasSeenMissionTour, sessionId, token])
+  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, sessionId, token])
 
   useEffect(() => {
     setIsGrafanaFrameReady(false)
     setIsGrafanaDataReady(false)
-  }, [grafanaUrl, hasActiveMission])
+  }, [grafanaUrl, hasActiveAttempt])
 
   useEffect(() => {
-    if (!hasActiveMission) return
+    if (!hasActiveAttempt) return
 
     let cancelled = false
     let failures = 0
@@ -289,7 +331,7 @@ function App() {
       cancelled = true
       if (intervalId) window.clearInterval(intervalId)
     }
-  }, [grafanaUrl, hasActiveMission, isGrafanaFrameReady, namespace])
+  }, [grafanaUrl, hasActiveAttempt, isGrafanaFrameReady, namespace])
 
   const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
     setToken(newToken)
@@ -325,7 +367,6 @@ function App() {
 
   const replayIntroTour = () => {
     setIsProfileOpen(false)
-    setActiveEnvTab('kubernetes')
     setActiveTab('missions')
     setActiveTour('intro')
   }
@@ -336,9 +377,9 @@ function App() {
     if (step.target === '[data-tour="terminal"]' || step.target === '[data-tour="grafana"]') setActiveTab('terminal')
   }
 
-  const handleActiveMissionChange = useCallback((active: boolean) => {
-    setHasActiveMission(active)
-    if (active) {
+  const handleActiveAttemptChange = useCallback((summary: ActiveAttemptSummary | null) => {
+    setActiveAttempt(summary)
+    if (summary) {
       setIsGrafanaFrameReady(false)
       setIsGrafanaDataReady(false)
     }
@@ -371,69 +412,62 @@ function App() {
           <ProfileDetails token={token} profile={profile} loading={isProfileLoading} onBack={() => setIsProfileOpen(false)} onRefresh={() => void loadProfile()} />
         ) : (
           <div className="workspace">
-            <nav className="env-tabs" aria-label="환경 선택" data-tour="env-tabs">
-              {ENV_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`env-tab${activeEnvTab === tab.id ? ' active' : ''}${tab.wip ? ' wip' : ''}`}
-                  onClick={() => setActiveEnvTab(tab.id)}
-                >
-                  <span className="env-tab-label">{tab.label}</span>
-                  <span className="env-tab-sub">{tab.wip ? '개발 예정' : tab.subtitle}</span>
+            {environmentsError ? (
+              <section className="env-notice env-notice-error" role="alert">
+                <span className="env-notice-title">환경 목록을 불러오지 못했습니다</span>
+                <p>{environmentsError}</p>
+                <button className="env-notice-action" type="button" onClick={() => void loadEnvironments()}>
+                  다시 시도
                 </button>
-              ))}
-            </nav>
-
-            {activeEnvTab !== 'kubernetes' ? (
-              <div className="wip-screen">
-                <div className="wip-content">
-                  <span className="wip-eyebrow">COMING SOON / CAPSTONE 2</span>
-                  <h2>{ENV_TABS.find((t) => t.id === activeEnvTab)?.label} 환경</h2>
-                  <p>
-                    {ENV_TABS.find((t) => t.id === activeEnvTab)?.subtitle} 훈련 환경은 현재 개발 중입니다.
-                    <br />
-                    캡스톤 2에서 만나볼 수 있습니다.
-                  </p>
-                  <div className="wip-roadmap">
-                    <span>ROADMAP</span>
-                    <ul>
-                      {activeEnvTab === 'docker' && (
-                        <>
-                          <li>Docker Compose 서비스 장애 시뮬레이션</li>
-                          <li>컨테이너 리소스 제한 실습</li>
-                          <li>네트워크 격리 및 볼륨 마운트 문제 해결</li>
-                        </>
-                      )}
-                      {activeEnvTab === 'linux' && (
-                        <>
-                          <li>프로세스 및 서비스 장애 대응</li>
-                          <li>디스크 / 메모리 / CPU 포화 상태 복구</li>
-                          <li>시스템 로그 분석 및 트러블슈팅</li>
-                        </>
-                      )}
-                      {activeEnvTab === 'application' && (
-                        <>
-                          <li>애플리케이션 성능 저하 원인 분석</li>
-                          <li>API 에러 패턴 및 데드락 해결</li>
-                          <li>분산 추적 기반 병목 지점 탐지</li>
-                        </>
-                      )}
-                    </ul>
-                  </div>
-                </div>
-              </div>
+              </section>
+            ) : !environments ? (
+              <section className="env-notice" role="status" aria-live="polite">
+                <span className="env-notice-title">훈련 환경 목록을 불러오는 중...</span>
+              </section>
             ) : (
               <>
+                <EnvironmentTabs
+                  items={environments}
+                  active={activeEnvironment}
+                  lockedTo={activeAttempt?.environment ?? null}
+                  onSelect={setActiveEnvironment}
+                />
+
+                {activeAttempt && (
+                  <p className="env-notice env-notice-lock" role="status">
+                    진행 중인 {getEnvironmentMeta(activeAttempt.environment).label} 훈련이 있어 다른 환경으로 전환할 수 없습니다.
+                    미션을 완료하거나 포기하면 해제됩니다.
+                  </p>
+                )}
+
+                {isActiveEnvironmentDegraded && (
+                  <p className="env-notice env-notice-degraded" role="alert">
+                    이 환경은 일부 기능이 불안정한 상태입니다. 명령은 실행되지만 검증 결과가 늦게 반영될 수 있습니다.
+                  </p>
+                )}
+
+                {!activeEnvironment ? (
+                  <section className="env-notice env-notice-empty" id="env-panel" role="tabpanel">
+                    <span className="env-notice-title">지금 선택할 수 있는 훈련 환경이 없습니다</span>
+                    <p>모든 환경이 준비 중이거나 사용 중지 상태입니다.</p>
+                    <EnvironmentRoadmap items={environments} />
+                  </section>
+                ) : (
+                  <>
                 <nav className="workspace-tabs" aria-label="작업 화면">
                   <button className={activeTab === 'missions' ? 'active' : ''} type="button" onClick={() => setActiveTab('missions')}>미션</button>
                   <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
                 </nav>
-                <div className="app-layout">
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvTab} onActiveMissionChange={handleActiveMissionChange} /></div>
+                <div
+                  className="app-layout"
+                  id="env-panel"
+                  role="tabpanel"
+                  aria-labelledby={`env-tab-${activeEnvironment}`}
+                >
+                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} onActiveAttemptChange={handleActiveAttemptChange} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
-                      {hasActiveMission ? (
+                      {hasActiveAttempt ? (
                         <div className="terminal-tour-target" data-tour="terminal">
                           <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
                         </div>
@@ -467,15 +501,16 @@ function App() {
                               <code>kubectl get services</code>
                               <code>kubectl get events --sort-by=.metadata.creationTimestamp</code>
                             </div>
+                            <EnvironmentRoadmap items={environments} />
                           </div>
                         </section>
                       )}
-                      <section className="grafana-panel" data-tour={hasActiveMission ? 'grafana' : 'learning-dashboard'}>
+                      <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
                         <div className="grafana-panel-header">
-                          <span className="terminal-label">{hasActiveMission ? 'OBSERVABILITY / GRAFANA' : 'PROFILE / LEARNING DASHBOARD'}</span>
-                          {hasActiveMission && <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>}
+                          <span className="terminal-label">{hasActiveAttempt ? 'OBSERVABILITY / GRAFANA' : 'PROFILE / LEARNING DASHBOARD'}</span>
+                          {hasActiveAttempt && <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>}
                         </div>
-                        {hasActiveMission ? (
+                        {hasActiveAttempt ? (
                           <div className="grafana-frame-wrap">
                             <iframe
                               className="grafana-frame"
@@ -498,6 +533,8 @@ function App() {
                     </div>
                   </div>
                 </div>
+                  </>
+                )}
               </>
             )}
           </div>

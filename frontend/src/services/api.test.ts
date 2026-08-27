@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  getEnvironments,
   getMissionStatus,
   listMissions,
   startRandomScenario,
@@ -146,5 +147,41 @@ describe('getMissionStatus', () => {
     // MissionStatus 컴포넌트는 404 만 "미션 종료"로 처리하므로, 계약 위반이
     // 미션 종료로 오해되지 않는지까지 확인한다.
     await expect(getMissionStatus(TOKEN)).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('getEnvironments', () => {
+  it('서버가 준 환경 목록을 그대로 돌려준다', async () => {
+    stubFetchOnce({
+      items: [
+        { id: 'kubernetes', status: 'available', capabilities: ['terminal'] },
+        { id: 'docker', status: 'preparing', capabilities: [] },
+      ],
+    })
+
+    const items = await getEnvironments(TOKEN)
+
+    expect(items.map((item) => item.id)).toEqual(['kubernetes', 'docker'])
+    expect(items[0].capabilities).toContain('terminal')
+  })
+
+  it('프론트가 모르는 환경은 건너뛰되 나머지는 살린다', async () => {
+    stubFetchOnce({
+      items: [
+        { id: 'kubernetes', status: 'available', capabilities: [] },
+        { id: 'windows', status: 'available', capabilities: [] },
+      ],
+    })
+
+    const items = await getEnvironments(TOKEN)
+
+    // 목록에 모르는 환경이 있어도 이미 열린 환경의 훈련이 멈추면 안 된다.
+    expect(items.map((item) => item.id)).toEqual(['kubernetes'])
+  })
+
+  it('items 가 배열이 아니면 계약 오류로 올린다', async () => {
+    stubFetchOnce({ items: null })
+
+    await expect(getEnvironments(TOKEN)).rejects.toMatchObject({ status: 502 })
   })
 })
