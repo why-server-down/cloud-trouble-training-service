@@ -19,7 +19,7 @@ import {
   startRandomScenario,
   UnlockStatusResponse,
 } from '../../services/api'
-import { AttemptType, EnvironmentId } from '../../types/training'
+import { ActiveAttemptSummary, AttemptType, EnvironmentId } from '../../types/training'
 import MissionCard from './MissionCard'
 import MissionStatus from './MissionStatus'
 import TutorChat from './TutorChat'
@@ -30,7 +30,8 @@ interface MissionListProps {
   storageScope: string | null
   /** 현재 선택된 훈련 환경. AI 시나리오 생성 요청에 그대로 실려 나간다. */
   environment: EnvironmentId
-  onActiveMissionChange: (hasActiveMission: boolean) => void
+  /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
+  onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
 }
 
 interface Confirmation {
@@ -54,7 +55,7 @@ const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
 const DEMO_AI_UNLOCK_STORAGE_KEY = 'demoAiScenarioUnlocked'
 const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
-const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environment, onActiveMissionChange }) => {
+const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environment, onActiveAttemptChange }) => {
   const [missions, setMissions] = useState<MissionResponse[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
   const [hintsUsed, setHintsUsed] = useState(0)
@@ -101,54 +102,67 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
       const missionList = await listMissions(token)
       setMissions(missionList)
 
-      const activeAttemptType = localStorage.getItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope))
-      let hasActive = false
+      // localStorage 의 attempt type 은 **조회 순서를 정하는 힌트일 뿐**이다.
+      // 값이 없거나 낡아도 두 종류를 모두 확인해 서버 상태를 그대로 따른다 (FE-05).
+      const hint = localStorage.getItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope))
+      const probeOrder: AttemptType[] = hint === 'ai_scenario'
+        ? ['ai_scenario', 'static_mission']
+        : ['static_mission', 'ai_scenario']
 
-      if (activeAttemptType === 'static_mission') {
-        try {
-          const missionStatus = await getMissionStatus(token)
-          if (missionStatus.attempt.status === 'in_progress') {
-            setActiveMissionId(missionStatus.attempt.mission_id ?? null)
-            setHintsUsed(missionStatus.attempt.hints_used)
-            hasActive = true
-          } else {
-            forgetActiveAttempt()
-            setActiveMissionId(null)
-            setHintsUsed(0)
+      let summary: ActiveAttemptSummary | null = null
+
+      for (const kind of probeOrder) {
+        if (summary) break
+
+        if (kind === 'static_mission') {
+          try {
+            const missionStatus = await getMissionStatus(token)
+            if (missionStatus.attempt.status === 'in_progress') {
+              summary = {
+                attemptId: missionStatus.attempt.id,
+                attemptType: 'static_mission',
+                environment: missionStatus.attempt.environment,
+                status: missionStatus.attempt.status,
+              }
+              setActiveMissionId(missionStatus.attempt.mission_id ?? null)
+              setHintsUsed(missionStatus.attempt.hints_used)
+            }
+          } catch {
+            // 활성 정적 미션이 없으면 404 다. 다음 종류를 확인한다.
           }
-        } catch {
-          forgetActiveAttempt()
-          setActiveMissionId(null)
-          setHintsUsed(0)
+        } else {
+          try {
+            const scenarioStatus = await getScenarioStatus(token)
+            if (scenarioStatus.status === 'in_progress') {
+              summary = {
+                attemptId: scenarioStatus.attempt_id,
+                attemptType: 'ai_scenario',
+                environment: scenarioStatus.environment,
+                status: scenarioStatus.status,
+              }
+              setActiveScenario(scenarioStatus)
+              setScenarioHintsUsed(scenarioStatus.hints_used)
+            }
+          } catch {
+            // 활성 AI 시나리오가 없으면 404 다.
+          }
         }
-      } else {
+      }
+
+      if (summary?.attemptType !== 'static_mission') {
         setActiveMissionId(null)
         setHintsUsed(0)
       }
-
-      if (activeAttemptType === 'ai_scenario') {
-        try {
-          const scenarioStatus = await getScenarioStatus(token)
-          if (scenarioStatus.status === 'in_progress') {
-            setActiveScenario(scenarioStatus)
-            setScenarioHintsUsed(scenarioStatus.hints_used)
-            hasActive = true
-          } else {
-            forgetActiveAttempt()
-            setActiveScenario(null)
-            setScenarioHintsUsed(0)
-          }
-        } catch {
-          forgetActiveAttempt()
-          setActiveScenario(null)
-          setScenarioHintsUsed(0)
-        }
-      } else {
+      if (summary?.attemptType !== 'ai_scenario') {
         setActiveScenario(null)
         setScenarioHintsUsed(0)
       }
 
-      onActiveMissionChange(hasActive)
+      // 서버에 활성 attempt 가 없으면 stale localStorage 값을 지운다.
+      if (summary) rememberActiveAttempt(summary.attemptType)
+      else forgetActiveAttempt()
+
+      onActiveAttemptChange(summary)
 
       // AI 잠금 해제 상태
       try {
@@ -161,7 +175,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
       console.error('미션 목록 조회 실패:', err)
       setError('미션 목록을 불러오지 못했습니다.')
     }
-  }, [forgetActiveAttempt, onActiveMissionChange, storageScope, token])
+  }, [forgetActiveAttempt, onActiveAttemptChange, rememberActiveAttempt, storageScope, token])
 
   useEffect(() => {
     setDemoAiUnlocked(localStorage.getItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope)) === 'true')
@@ -169,8 +183,8 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
     setActiveScenario(null)
     setHintsUsed(0)
     setScenarioHintsUsed(0)
-    onActiveMissionChange(false)
-  }, [onActiveMissionChange, storageScope])
+    onActiveAttemptChange(null)
+  }, [onActiveAttemptChange, storageScope])
 
   useEffect(() => {
     void fetchMissions()
@@ -194,18 +208,18 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           forgetActiveAttempt()
           setActiveScenario(null)
           setScenarioHintsUsed(0)
-          onActiveMissionChange(false)
+          onActiveAttemptChange(null)
           await fetchMissions()
         }
       } catch {
         // 시나리오 종료 시 404 발생 → 정리
         forgetActiveAttempt()
         setActiveScenario(null)
-        onActiveMissionChange(false)
+        onActiveAttemptChange(null)
       }
     }, 1000)
     return () => window.clearInterval(interval)
-  }, [activeScenario, token, onActiveMissionChange, fetchMissions, forgetActiveAttempt])
+  }, [activeScenario, token, onActiveAttemptChange, fetchMissions, forgetActiveAttempt])
 
   const runConfirmedAction = async () => {
     const action = confirmation?.action
@@ -229,11 +243,16 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
       confirmLabel: '시작',
       action: async () => {
         try {
-          await startMission(token, missionId)
+          const attempt = await startMission(token, missionId)
           rememberActiveAttempt('static_mission')
           setActiveMissionId(missionId)
           setHintsUsed(0)
-          onActiveMissionChange(true)
+          onActiveAttemptChange({
+            attemptId: attempt.id,
+            attemptType: 'static_mission',
+            environment: attempt.environment,
+            status: attempt.status,
+          })
           setStatusRefreshKey((k) => k + 1)
           await fetchMissions()
           showToast('success', '미션을 시작했습니다. 터미널에서 문제를 해결해 보세요.')
@@ -262,7 +281,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
         forgetActiveAttempt()
         setActiveMissionId(null)
         setHintsUsed(0)
-        onActiveMissionChange(false)
+        onActiveAttemptChange(null)
         await fetchMissions()
       }
     } catch (err) {
@@ -286,7 +305,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           forgetActiveAttempt()
           setActiveMissionId(null)
           setHintsUsed(0)
-          onActiveMissionChange(false)
+          onActiveAttemptChange(null)
           await fetchMissions()
           showToast('info', '미션을 포기했습니다.')
         } catch (err) {
@@ -326,9 +345,9 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
     forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
-    onActiveMissionChange(false)
+    onActiveAttemptChange(null)
     void fetchMissions()
-  }, [fetchMissions, forgetActiveAttempt, onActiveMissionChange])
+  }, [fetchMissions, forgetActiveAttempt, onActiveAttemptChange])
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
@@ -341,7 +360,16 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
         try {
           const scenario = await startRandomScenario(token, selectedDifficulty, environment, demoAiUnlocked)
           rememberActiveAttempt('ai_scenario')
-          onActiveMissionChange(true)
+          // ScenarioResponse 에는 attempt id 가 없다. 요약은 서버 status 로 만든다.
+          const started = await getScenarioStatus(token)
+          setActiveScenario(started)
+          setScenarioHintsUsed(started.hints_used)
+          onActiveAttemptChange({
+            attemptId: started.attempt_id,
+            attemptType: 'ai_scenario',
+            environment: started.environment,
+            status: started.status,
+          })
           await fetchMissions()
           showToast('success', `"${scenario.title}" 시나리오가 시작됐습니다. 터미널에서 문제를 해결해 보세요.`)
         } catch (err) {
@@ -369,7 +397,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
-        onActiveMissionChange(false)
+        onActiveAttemptChange(null)
         await fetchMissions()
       }
     } catch (err) {
@@ -393,7 +421,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           forgetActiveAttempt()
           setActiveScenario(null)
           setScenarioHintsUsed(0)
-          onActiveMissionChange(false)
+          onActiveAttemptChange(null)
           await fetchMissions()
           showToast('info', 'AI 시나리오를 포기했습니다.')
         } catch (err) {

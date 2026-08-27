@@ -23,12 +23,15 @@ export const isEnvironmentId = (value: unknown): value is EnvironmentId =>
 
 /**
  * `GET /api/environments` 의 status.
- * 현재 백엔드가 내보내는 값은 available / preparing 두 개뿐이다
- * (`core/environments.py` 의 AVAILABLE, PREPARING).
- * 백엔드가 degraded / disabled 를 추가하면 그때 이 목록에 넣는다 — 계약이
- * 확정되기 전에 프론트가 먼저 상태를 만들어두지 않는다.
+ *
+ * 백엔드가 **현재 실제로 내보내는 값은 available / preparing 두 개**뿐이다
+ * (`core/environments.py` 의 AVAILABLE, PREPARING). degraded / disabled 는
+ * FE-03 요구사항이 UI 처리를 명시한 상태이고 백엔드 필드 타입이 `str` 이므로,
+ * 값이 추가되는 순간 바로 동작하도록 화면 처리만 먼저 갖춘다.
+ * 목록에 없는 status 가 와도 탭 전체가 깨지지 않아야 한다 —
+ * `EnvironmentItem.status` 를 string 으로 받는 이유다.
  */
-export const ENVIRONMENT_STATUSES = ['available', 'preparing'] as const
+export const ENVIRONMENT_STATUSES = ['available', 'degraded', 'preparing', 'disabled'] as const
 
 export type EnvironmentStatus = (typeof ENVIRONMENT_STATUSES)[number]
 
@@ -57,6 +60,17 @@ export type AttemptType = (typeof ATTEMPT_TYPES)[number]
 
 export const isAttemptType = (value: unknown): value is AttemptType =>
   typeof value === 'string' && (ATTEMPT_TYPES as readonly string[]).includes(value)
+
+/**
+ * 활성 시도 요약. MissionList 가 서버 status 로 만들어 App 에 올리고, App 은 이걸로
+ * 환경 탭을 잠근다. 실행 환경의 원본은 항상 서버 응답이다(클라이언트 값 신뢰 금지).
+ */
+export interface ActiveAttemptSummary {
+  attemptId: string
+  attemptType: AttemptType
+  environment: EnvironmentId
+  status: string
+}
 
 // ── environment 를 포함하는 응답 타입 ────────────────────────────────
 

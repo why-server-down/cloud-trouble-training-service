@@ -1,6 +1,8 @@
 import {
   DEFAULT_ENVIRONMENT,
   EnvironmentId,
+  EnvironmentItem,
+  EnvironmentListResponse,
   isEnvironmentId,
   MissionAttemptResponse,
   MissionCompleteResponse,
@@ -399,6 +401,35 @@ export const getLeaderboard = (token: string) =>
 
 export const getAchievements = (token: string) =>
   getAuthorizedJson<AchievementsResponse>(token, '/api/achievements', 'Failed to load achievements.')
+
+// Environments
+
+/**
+ * 훈련 환경 가용 상태 목록.
+ *
+ * 계약에 없는 id 는 응답 전체를 실패시키지 않고 건너뛴다 — 백엔드가 환경을 먼저
+ * 추가해도 이미 열려 있는 환경의 훈련이 멈추면 안 된다. 반대로 미션·attempt·세션의
+ * environment 는 사용자의 실제 훈련 대상이라 잘못된 값이면 오류로 올린다
+ * (`withEnvironment`). 같은 필드가 아니라 역할이 다르다.
+ */
+export const getEnvironments = async (token: string): Promise<EnvironmentItem[]> => {
+  const payload = await getAuthorizedJson<EnvironmentListResponse>(
+    token,
+    '/api/environments',
+    '환경 목록을 불러오지 못했습니다',
+  )
+
+  if (!Array.isArray(payload?.items)) {
+    throw new ApiError('환경 목록 응답 형식이 올바르지 않습니다', 502)
+  }
+
+  const known = payload.items.filter((item) => isEnvironmentId(item.id))
+  if (known.length !== payload.items.length) {
+    console.warn(`프론트가 모르는 환경 ${payload.items.length - known.length}건을 건너뛰었습니다.`)
+  }
+
+  return known
+}
 
 // AI Scenario
 
