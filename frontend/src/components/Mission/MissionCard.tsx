@@ -1,19 +1,8 @@
 import React from 'react'
-
-interface Mission {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
-}
+import { MissionResponse } from '../../types/training'
 
 interface MissionCardProps {
-  mission: Mission
+  mission: MissionResponse
   isActive: boolean
   onStart: (missionId: string) => void
 }

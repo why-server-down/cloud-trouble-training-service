@@ -10,34 +10,26 @@ import {
   getScenarioStatus,
   getUnlockStatus,
   listMissions,
+  MissionResponse,
   MissionStatusResponse,
+  requestHint,
+  requestScenarioHint,
   ScenarioStatusResponse,
   startMission,
   startRandomScenario,
   UnlockStatusResponse,
-  useHint,
-  useScenarioHint,
 } from '../../services/api'
+import { AttemptType, EnvironmentId } from '../../types/training'
 import MissionCard from './MissionCard'
 import MissionStatus from './MissionStatus'
 import TutorChat from './TutorChat'
 import './Mission.css'
 
-interface Mission {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
-}
-
 interface MissionListProps {
   token: string
   storageScope: string | null
+  /** 현재 선택된 훈련 환경. AI 시나리오 생성 요청에 그대로 실려 나간다. */
+  environment: EnvironmentId
   onActiveMissionChange: (hasActiveMission: boolean) => void
 }
 
@@ -62,8 +54,8 @@ const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
 const DEMO_AI_UNLOCK_STORAGE_KEY = 'demoAiScenarioUnlocked'
 const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
-const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActiveMissionChange }) => {
-  const [missions, setMissions] = useState<Mission[]>([])
+const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environment, onActiveMissionChange }) => {
+  const [missions, setMissions] = useState<MissionResponse[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
   const [hintsUsed, setHintsUsed] = useState(0)
   const [statusRefreshKey, setStatusRefreshKey] = useState(0)
@@ -84,7 +76,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActive
 
   const showToast = useCallback((kind: ToastMessage['kind'], text: string) => setToast({ kind, text }), [])
 
-  const rememberActiveAttempt = useCallback((type: 'static_mission' | 'ai_scenario') => {
+  const rememberActiveAttempt = useCallback((type: AttemptType) => {
     localStorage.setItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope), type)
   }, [storageScope])
 
@@ -313,7 +305,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActive
       confirmLabel: '힌트 사용',
       action: async () => {
         try {
-          const attempt = await useHint(token)
+          const attempt = await requestHint(token)
           setHintsUsed(attempt.hints_used)
           setStatusRefreshKey((k) => k + 1)
           showToast('info', '힌트를 사용했습니다. 현재 점수를 확인해 주세요.')
@@ -347,7 +339,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActive
       confirmLabel: '시작',
       action: async () => {
         try {
-          const scenario = await startRandomScenario(token, selectedDifficulty, demoAiUnlocked)
+          const scenario = await startRandomScenario(token, selectedDifficulty, environment, demoAiUnlocked)
           rememberActiveAttempt('ai_scenario')
           onActiveMissionChange(true)
           await fetchMissions()
@@ -420,7 +412,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, onActive
       confirmLabel: '힌트 사용',
       action: async () => {
         try {
-          const attempt = await useScenarioHint(token)
+          const attempt = await requestScenarioHint(token)
           setScenarioHintsUsed(attempt.hints_used)
           showToast('info', '힌트를 사용했습니다.')
         } catch (err) {
