@@ -16,6 +16,13 @@ class CommandValidator:
         "auth", "certificate", "alpha", "cp", "plugin", "attach"
     ]
 
+    # kubectl create 는 훈련 시나리오 복구에 실제로 필요한 리소스만 허용한다.
+    # (secret_ref_missing 미션의 정답 경로에 Secret 생성이 포함된다)
+    CREATE_ALLOWED_RESOURCES = ("secret", "configmap")
+
+    # secret 은 타입까지 지정해야 실제로 생성 가능한 명령이 된다.
+    CREATE_SECRET_TYPES = ("generic", "docker-registry", "tls")
+
     BLACKLIST_PATTERNS = [
         r"\|",      # Pipe
         r">",       # Redirect
@@ -55,6 +62,11 @@ class CommandValidator:
                     is_valid=False,
                     error="Command contains forbidden characters",
                 )
+
+        if subcommand == "create":
+            create_error = self._validate_create(parts)
+            if create_error is not None:
+                return create_error
 
         if subcommand == "delete":
             return ValidationResult(
@@ -103,6 +115,40 @@ class CommandValidator:
             )
 
         return ValidationResult(is_valid=True, command=command)
+
+    def _validate_create(self, parts: list[str]) -> ValidationResult | None:
+        """kubectl create 의 허용 범위를 검사한다. 문제가 없으면 None."""
+        resource = parts[2] if len(parts) > 2 else ""
+
+        if resource not in self.CREATE_ALLOWED_RESOURCES:
+            allowed = ", ".join(self.CREATE_ALLOWED_RESOURCES)
+            target = f"create {resource}".strip()
+            return ValidationResult(
+                is_valid=False,
+                error=f"'{target}' is not allowed. Only these resources can be created: {allowed}",
+            )
+
+        if resource == "secret":
+            secret_type = parts[3] if len(parts) > 3 else ""
+            if secret_type not in self.CREATE_SECRET_TYPES:
+                types = ", ".join(self.CREATE_SECRET_TYPES)
+                target = f"create secret {secret_type}".strip()
+                return ValidationResult(
+                    is_valid=False,
+                    error=f"'{target}' is not allowed. Specify a secret type: {types}",
+                )
+            name_index = 4
+        else:
+            name_index = 3
+
+        name = parts[name_index] if len(parts) > name_index else ""
+        if not name or name.startswith("-"):
+            return ValidationResult(
+                is_valid=False,
+                error=f"'create {resource}' is not allowed without a resource name",
+            )
+
+        return None
 
     def _inject_namespace(self, command: str, namespace: str) -> str:
         parts = command.split()

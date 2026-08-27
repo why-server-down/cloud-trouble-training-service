@@ -18,16 +18,18 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 | environment가 session 생성·명령 실행까지 미연결 | Docker 탭에서 K8s 명령 실행 | BE-03·BE-07 |
 | active chaos ID가 프로세스 메모리 dict에만 존재 | 서버 재시작 시 장애 정리 불가 | BE-02·BE-08 |
 
-### 테스트 기준선 (2026-08-26 실측)
+### 테스트 기준선 (BE-01 완료 기준)
 
 ```bash
 cd backend && source venv/bin/activate && python -m pytest -q
-# → 1 failed, 31 passed
+# → 38 passed
 ```
-실패 1건은 `test_command_validator.py::TestBlockedCommands::test_invalid_subcommand`
-(`kubectl create secret` 허용). `pytest-asyncio==0.23.3`은 설치되어 있고 async 테스트도
-실행된다. `pytest.ini`가 없어 `asyncio_mode` 미명시 상태 → BE-01에서 추가한다.
-실패 테스트를 삭제하거나 xfail로 숨기지 않는다.
+`pytest.ini`에서 `asyncio_mode = strict`를 명시한다. 기존 async 테스트가
+`@pytest.mark.asyncio`를 붙여 쓰고 있어 strict가 의도에 맞고, 마크를 빠뜨린 async
+테스트가 조용히 통과하지 않고 드러난다. `pytest-asyncio==0.23.3`은 requirements와
+venv 양쪽에 있으며 async 테스트는 skip되지 않는다.
+
+**실패 테스트를 삭제하거나 xfail로 숨겨서 녹색을 만들지 않는다.**
 
 ## 기술 스택
 - Python 3.11, FastAPI, Pydantic v2
@@ -63,7 +65,7 @@ app/
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py      # kubectl 명령어 검증
+│   ├── command_validator.py      # kubectl 명령어 검증 (create는 secret/configmap만, 이름 필수)
 │   ├── command_executor.py       # kubectl 비동기 실행
 │   ├── websocket_handler.py      # WebSocket 연결
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
@@ -316,9 +318,18 @@ KNOWLEDGE_BASE_DIR=          # knowledge-base 절대 경로 (기본값: ai-data/
 ## 실행
 ```bash
 cd backend
-pip install -r requirements.txt
+python -m venv venv && source venv/bin/activate   # 최초 1회
+pip install -r requirements.txt                   # pytest, pytest-asyncio 포함
 uvicorn app.main:app --reload --port 8000
 ```
+
+### 테스트
+```bash
+cd backend && source venv/bin/activate
+python -m pytest -q          # 전체
+python -m pytest -q -rs      # skip된 테스트까지 확인
+```
+설정은 `backend/pytest.ini` (`testpaths = tests`, `asyncio_mode = strict`).
 
 ## 의존 서비스
 - PostgreSQL: localhost:5432 (k8s_survival DB)
