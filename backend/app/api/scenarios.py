@@ -51,6 +51,16 @@ async def start_random_scenario(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     scenario = result["scenario"]
+    # 요청 환경과 생성된 시나리오 환경이 어긋나면 그대로 응답하지 않는다.
+    # 미구현 환경 요청을 kubernetes 로 fallback 하는 것을 막기 위한 방어선이다.
+    if scenario.environment != body.environment:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"요청 환경('{body.environment}')과 생성된 시나리오 환경"
+                f"('{scenario.environment}')이 일치하지 않습니다"
+            ),
+        )
     return ScenarioResponse(
         scenario_id=scenario.id,
         title=scenario.title,

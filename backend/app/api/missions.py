@@ -31,6 +31,7 @@ async def list_missions(
             level=m["mission"].level,
             description=m["mission"].description,
             chaos_type=m["mission"].chaos_type,
+            environment=m["mission"].environment,
             base_score=m["mission"].base_score,
             time_limit=m["mission"].time_limit,
             hint_penalty=m["mission"].hint_penalty,

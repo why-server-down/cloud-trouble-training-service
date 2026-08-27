@@ -2,9 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-from app.core.environments import DEFAULT_ENVIRONMENT
+from app.core.environments import DEFAULT_ENVIRONMENT, EnvironmentId
 
 
 # Auth
@@ -18,8 +18,7 @@ class UserResponse(BaseModel):
     username: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Token(BaseModel):
@@ -34,8 +33,7 @@ class UserProfileResponse(BaseModel):
     missions_completed: int
     total_score: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Terminal
@@ -46,12 +44,11 @@ class SessionCreate(BaseModel):
 class SessionResponse(BaseModel):
     id: uuid.UUID
     namespace: str
-    environment: str = DEFAULT_ENVIRONMENT
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     created_at: datetime
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # WebSocket Messages
@@ -73,6 +70,17 @@ class ErrorMessage(BaseModel):
     code: str = "UNKNOWN"
 
 
+# Environments
+class EnvironmentItem(BaseModel):
+    id: EnvironmentId
+    status: str  # available | preparing
+    capabilities: list[str] = []
+
+
+class EnvironmentListResponse(BaseModel):
+    items: list[EnvironmentItem]
+
+
 # Mission
 class MissionResponse(BaseModel):
     id: uuid.UUID
@@ -80,14 +88,13 @@ class MissionResponse(BaseModel):
     level: int
     description: str
     chaos_type: str
-    environment: str = DEFAULT_ENVIRONMENT
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     base_score: int
     time_limit: int
     hint_penalty: int
     is_unlocked: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MissionAttemptCreate(BaseModel):
@@ -100,14 +107,14 @@ class MissionAttemptResponse(BaseModel):
     mission_id: Optional[uuid.UUID] = None
     attempt_type: str = "static_mission"
     scenario_id: Optional[uuid.UUID] = None
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     status: str
     start_time: datetime
     end_time: Optional[datetime] = None
     final_score: Optional[int] = None
     hints_used: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MissionStatusResponse(BaseModel):
@@ -139,7 +146,7 @@ class ChatResponse(BaseModel):
 # AI Scenario
 class ScenarioGenerateRequest(BaseModel):
     difficulty: str  # beginner | intermediate | advanced | expert
-    environment: str = DEFAULT_ENVIRONMENT  # kubernetes | docker | linux
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     randomize: bool = True
     demo_unlock: bool = False
 
@@ -148,15 +155,14 @@ class ScenarioResponse(BaseModel):
     scenario_id: uuid.UUID
     title: str
     difficulty: str
-    environment: str = DEFAULT_ENVIRONMENT
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     student_brief: str
     time_limit_seconds: int
     base_score: int
     hint_penalty: int
     safety_status: str = "accepted"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScenarioStatusResponse(BaseModel):
@@ -164,7 +170,7 @@ class ScenarioStatusResponse(BaseModel):
     attempt_id: uuid.UUID
     title: str
     difficulty: str
-    environment: str = DEFAULT_ENVIRONMENT
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     student_brief: str
     elapsed_seconds: int
     remaining_seconds: int

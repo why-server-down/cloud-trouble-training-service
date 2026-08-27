@@ -1,8 +1,12 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival"
+    # 스키마의 단일 출처는 Alembic 마이그레이션이다.
+    # 로컬 개발/테스트 편의를 위해서만 startup 시 create_all 을 허용하고,
+    # 배포 환경에서는 False 로 두고 `alembic upgrade head` 를 배포 단계에서 실행한다.
+    AUTO_CREATE_SCHEMA: bool = True
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
@@ -33,8 +37,7 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = ""
     KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env")
 
 
 settings = Settings()
