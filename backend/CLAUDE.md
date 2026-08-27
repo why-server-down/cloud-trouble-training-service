@@ -46,7 +46,7 @@ app/
 ├── main.py              # FastAPI 앱, 라우터 등록, lifespan (DB init → seed → Qdrant auto-ingest)
 ├── models.py            # SQLAlchemy 모델
 │                        #   User, TerminalSession, CommandLog
-│                        #   Mission, MissionAttempt (attempt_type, scenario_id 포함)
+│                        #   Mission, MissionAttempt (attempt_type, scenario_id, environment, chaos_id, sandbox_id)
 │                        #   GeneratedScenario, ValidationRule
 │                        #   TutorMessage (DB 모델 정의 완료, 인메모리 히스토리 병행)
 ├── schemas.py           # Pydantic 스키마 (요청/응답)
@@ -61,7 +61,7 @@ app/
 ├── core/
 │   ├── config.py        # Settings (환경변수, AI 백엔드 선택 - mock/openai/gemini)
 │   ├── environments.py  # 훈련 환경 상수(kubernetes|docker|linux) + 지원/구현 검증
-│   ├── database.py      # async engine, session, ensure_schema_compatibility(idempotent ALTER)
+│   ├── database.py      # async engine, session (스키마 관리는 Alembic 담당)
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
@@ -198,17 +198,16 @@ POST /api/scenarios/current/check
 > docker/linux는 `assert_implemented`로 막혀 있다(선택 시 400).
 > `application`은 목업 한정이라 `SUPPORTED_ENVIRONMENTS`에 넣지 않는다.
 >
-> **아직 관통되지 않은 구간 (BE-02·BE-03에서 닫는다):**
-> - `MissionAttempt`에 `environment`·`chaos_id`·`sandbox_id` 컬럼이 없다.
+> **아직 관통되지 않은 구간 (BE-03에서 닫는다):**
+> - ~~`MissionAttempt`에 `environment`·`chaos_id`·`sandbox_id` 컬럼이 없다.~~ (BE-02 완료)
 > - mission list API가 DB의 `mission.environment`를 응답에 싣지 않는다.
 > - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다.
 > - WebSocket이 session의 environment를 로드하지 않는다.
 > - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다.
 > - `GET /api/environments`(환경 가용성) 미구현.
 >
-> **마이그레이션:** 현재는 `ensure_schema_compatibility`의 idempotent ALTER로 백필한다.
-> `BE-02`에서 **Alembic 정식 도입**으로 전환하며, 그 변경분을 첫 migration에 반영하고
-> `create_all`은 테스트/초기 개발 한정으로 남긴다.
+> **마이그레이션:** Alembic이 스키마의 단일 출처다(BE-02 완료).
+> 자세한 내용은 아래 "데이터베이스 마이그레이션" 참고.
 
 ### 현재 모델
 - `User` - 사용자 (username, email, hashed_password, total_score)
@@ -218,6 +217,12 @@ POST /api/scenarios/current/check
   - `mission_id`: 정적 미션 attempt 시 필수, AI 시나리오 attempt 시 NULL
   - `scenario_id`: AI 시나리오 attempt 시 필수, 정적 미션 attempt 시 NULL
   - `last_validation_result`: 마지막 검증 결과 JSON
+  - `environment`: 이 시도가 수행된 훈련 환경. mission/scenario를 join하지 않고도
+    정리·복구·통계가 가능하도록 attempt에 직접 저장한다
+  - `chaos_id`, `sandbox_id`: 주입된 장애와 샌드박스 식별자. 서버 재시작 후에도
+    DB만으로 정리할 수 있어야 한다
+  - DB 제약: `attempt_type` 허용값 CHECK, `attempt_type`↔FK 조합 일치 CHECK,
+    사용자당 `in_progress` 1개 partial unique index
 - `TerminalSession` - 터미널 세션 (`environment` 포함)
 - `CommandLog` - kubectl 명령 실행 기록
 - `GeneratedScenario` - AI 생성 시나리오
@@ -267,6 +272,7 @@ POST /api/scenarios/current/check
 ## 환경변수
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
+AUTO_CREATE_SCHEMA=true      # 로컬 개발/테스트 편의용. 배포 환경에서는 false
 
 AI_BACKEND=mock              # mock | openai | gemini
 
@@ -330,6 +336,44 @@ python -m pytest -q          # 전체
 python -m pytest -q -rs      # skip된 테스트까지 확인
 ```
 설정은 `backend/pytest.ini` (`testpaths = tests`, `asyncio_mode = strict`).
+
+## 데이터베이스 마이그레이션
+
+스키마의 단일 출처는 **Alembic**이다(`backend/alembic/`). 모델을 바꾸면 반드시
+리비전을 만들고, `Base.metadata.create_all`에 의존하지 않는다.
+
+```bash
+cd backend && source venv/bin/activate
+alembic upgrade head                          # 최신 스키마로 적용
+alembic revision --autogenerate -m "설명"      # 모델 변경 후 리비전 생성
+alembic downgrade -1                          # 한 단계 되돌리기
+alembic current                               # 현재 리비전 확인
+```
+
+접속 URL은 `alembic.ini`가 아니라 `alembic/env.py`가 `app.core.config.settings`에서
+주입한다. 따라서 `DATABASE_URL` 환경변수만 맞추면 된다.
+
+### 리비전 이력
+| 리비전 | 내용 |
+|---|---|
+| `0001` | baseline 스키마. 빈 DB면 전체 생성, Alembic 이전에 만들어진 기존 DB면 예전 `ensure_schema_compatibility()`가 하던 idempotent 보정을 수행해 같은 상태로 수렴시킨다 (`alembic stamp` 불필요) |
+| `0002` | `mission_attempts`에 `environment`·`chaos_id`·`sandbox_id` 추가 + backfill, environment/attempt_type/FK조합 CHECK, 사용자당 `in_progress` partial unique index |
+
+> `0001`은 테이블이 **전부 있거나 전부 없는** DB를 가정한다. 일부 테이블만 있는
+> DB는 대상이 아니므로 재생성한다.
+
+> `0002`의 downgrade는 스키마만 되돌린다. upgrade 중 수행한 데이터 보정(중복
+> `in_progress`를 `abandoned`로 정리)은 어떤 행이 원래 진행 중이었는지 기록하지
+> 않으므로 되돌리지 않는다.
+
+### 새 로컬 DB 준비
+```bash
+docker compose up -d postgres
+cd backend && source venv/bin/activate && alembic upgrade head
+```
+`AUTO_CREATE_SCHEMA=true`(기본값)이면 앱 startup에서도 `create_all`로 빈 스키마를
+만들지만, 이는 로컬 편의 장치일 뿐이다. 배포 환경에서는 `false`로 두고 배포
+단계에서 `alembic upgrade head`를 실행한다.
 
 ## 의존 서비스
 - PostgreSQL: localhost:5432 (k8s_survival DB)

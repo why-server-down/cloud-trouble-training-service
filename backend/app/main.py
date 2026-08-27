@@ -13,7 +13,8 @@ from app.api.dashboard import router as dashboard_router
 from app.api.missions import router as missions_router
 from app.api.scenarios import router as scenarios_router
 from app.api.terminal import router as terminal_router
-from app.core.database import Base, async_session, engine, ensure_schema_compatibility
+from app.core.config import settings
+from app.core.database import Base, async_session, engine
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
 from app.services.seed_data import seed_missions
 from app.services.qdrant_init import auto_ingest_if_empty
@@ -25,9 +26,12 @@ if sys.platform == 'win32':
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await ensure_schema_compatibility(conn)
+    # 스키마 관리는 Alembic 이 담당한다(`alembic upgrade head`).
+    # AUTO_CREATE_SCHEMA 는 로컬 개발/테스트에서 빈 DB 를 바로 쓰기 위한 편의 장치이며,
+    # 배포 환경에서는 꺼두고 마이그레이션을 배포 단계에서 실행한다.
+    if settings.AUTO_CREATE_SCHEMA:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     async with async_session() as db:
         await seed_missions(db)
     await auto_ingest_if_empty()

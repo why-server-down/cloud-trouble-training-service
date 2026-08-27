@@ -1,12 +1,39 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.core.environments import DEFAULT_ENVIRONMENT
+from app.core.environments import DEFAULT_ENVIRONMENT, SUPPORTED_ENVIRONMENTS
+
+# environment 컬럼의 허용 값을 DB CHECK 제약으로도 강제한다.
+# 애플리케이션(core/environments.py)과 DB가 같은 목록을 쓰도록 여기서 한 번만 만든다.
+_ENVIRONMENT_VALUES = ", ".join(f"'{env}'" for env in SUPPORTED_ENVIRONMENTS)
+
+
+def environment_check(table_name: str) -> CheckConstraint:
+    return CheckConstraint(
+        f"environment IN ({_ENVIRONMENT_VALUES})",
+        name=f"ck_{table_name}_environment",
+    )
+
+
+ATTEMPT_TYPES = ("static_mission", "ai_scenario")
+_ATTEMPT_TYPE_VALUES = ", ".join(f"'{value}'" for value in ATTEMPT_TYPES)
 
 
 class User(Base):
@@ -23,6 +50,7 @@ class User(Base):
 
 class TerminalSession(Base):
     __tablename__ = "terminal_sessions"
+    __table_args__ = (environment_check("terminal_sessions"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -54,6 +82,7 @@ class CommandLog(Base):
 
 class Mission(Base):
     __tablename__ = "missions"
+    __table_args__ = (environment_check("missions"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -74,6 +103,7 @@ class Mission(Base):
 # GeneratedScenario를 MissionAttempt 앞에 선언 (FK 참조 순서)
 class GeneratedScenario(Base):
     __tablename__ = "generated_scenarios"
+    __table_args__ = (environment_check("generated_scenarios"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
@@ -103,15 +133,46 @@ class GeneratedScenario(Base):
 
 class MissionAttempt(Base):
     __tablename__ = "mission_attempts"
+    __table_args__ = (
+        environment_check("mission_attempts"),
+        CheckConstraint(
+            f"attempt_type IN ({_ATTEMPT_TYPE_VALUES})",
+            name="ck_mission_attempts_attempt_type",
+        ),
+        # attempt_type 과 실제 참조가 어긋난 행을 DB 단에서 막는다.
+        CheckConstraint(
+            "(attempt_type = 'static_mission'"
+            " AND mission_id IS NOT NULL AND scenario_id IS NULL)"
+            " OR (attempt_type = 'ai_scenario'"
+            " AND scenario_id IS NOT NULL AND mission_id IS NULL)",
+            name="ck_mission_attempts_type_refs",
+        ),
+        # 사용자당 진행 중 attempt 는 최대 1개. 기존 코드가 scalar_one_or_none() 을
+        # 전제하고 있어 동시 요청 시 MultipleResultsFound 가 날 수 있었다.
+        Index(
+            "uq_mission_attempts_user_in_progress",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status = 'in_progress'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     # static_mission: mission_id 필수, scenario_id null
     # ai_scenario: scenario_id 필수, mission_id null
-    # NOTE: 기존 DB에서 mission_id NOT NULL 제약이 있다면 DROP 후 재생성 필요
     mission_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("missions.id"), nullable=True)
     attempt_type: Mapped[str] = mapped_column(String(20), default="static_mission")
     scenario_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("generated_scenarios.id"), nullable=True)
+    # 이 attempt 가 어느 훈련 환경에서 수행되는지. mission/scenario 를 join 하지 않고도
+    # 정리·복구·통계를 할 수 있어야 한다.
+    environment: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=DEFAULT_ENVIRONMENT, server_default=DEFAULT_ENVIRONMENT
+    )
+    # 주입된 장애와 샌드박스 식별자. 서버가 재시작돼도 DB 만으로 정리할 수 있어야 한다.
+    # (기존에는 프로세스 메모리 dict 에만 있었다)
+    chaos_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sandbox_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="in_progress")
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
