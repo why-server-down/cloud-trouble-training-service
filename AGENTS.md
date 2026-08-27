@@ -261,9 +261,18 @@ git switch dev && git pull origin dev
   단, **제품 기능으로서의 AI**(AI 튜터, AI 시나리오 생성 등)를 설명하는 문구는 당연히 정상이다.
 - 커밋 전 자체 점검:
   ```bash
-  git log origin/dev..HEAD --format='%an <%ae> | %cn <%ce>%n%B' | grep -iE 'claude|anthropic|co-authored|generated with'
-  # 아무것도 안 나와야 정상
+  # 1) author/committer 신원 확인
+  git log origin/dev..HEAD --format='%an <%ae> | %cn <%ce>' | grep -iE 'claude|anthropic'
+
+  # 2) 커밋 메시지의 AI 생성 표시 확인
+  git log origin/dev..HEAD --format='%B' | grep -iE 'co-authored-by|generated with|claude code|anthropic|🤖'
+
+  # 둘 다 아무것도 출력되지 않아야 정상
   ```
+  신원 검사와 메시지 검사를 나누고, 메시지 쪽에서 `claude` 단독을 찾지 않는다.
+  커밋 메시지에 `backend/CLAUDE.md` 같은 **파일명**이 들어가면 오탐이 나기 때문이다.
+  실제로 막아야 하는 것은 파일명이 아니라 `Co-Authored-By`, `Generated with`, `🤖` 같은
+  생성 표시 문구다.
 
 ### 7. AI 에이전트(Claude Code 등)에게 적용되는 규칙
 
