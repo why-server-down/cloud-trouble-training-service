@@ -5,6 +5,8 @@ import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour
 import DashboardOverview from './components/Profile/DashboardOverview'
 import ProfileDetails from './components/Profile/ProfileDetails'
 import Terminal from './components/Terminal/Terminal'
+import { ENVIRONMENT_ORDER, getEnvironmentMeta } from './config/environments'
+import { DEFAULT_ENVIRONMENT, EnvironmentId } from './types/training'
 import {
   AUTH_EXPIRED_EVENT,
   createTerminalSession,
@@ -15,13 +17,29 @@ import {
 import './App.css'
 
 type WorkspaceTab = 'missions' | 'terminal'
-type EnvTab = 'kubernetes' | 'docker' | 'linux' | 'application'
+
+/**
+ * Application 은 캡스톤2 스코프에서 빠진 후속 연구 영역이라 EnvironmentId 가 아니다.
+ * 탭 자체의 처리(제거 또는 후속 연구 섹션 이동)는 FE-03 에서 결정한다.
+ */
+const RESEARCH_TAB_ID = 'application'
+
+type EnvTab = EnvironmentId | typeof RESEARCH_TAB_ID
+
+/**
+ * 지금 실제로 열려 있는 환경. 백엔드 IMPLEMENTED_ENVIRONMENTS 와 같은 값이며,
+ * FE-03 에서 `GET /api/environments` 응답으로 대체한다.
+ */
+const AVAILABLE_ENVIRONMENTS: readonly EnvironmentId[] = [DEFAULT_ENVIRONMENT]
 
 const ENV_TABS: { id: EnvTab; label: string; subtitle: string; wip: boolean }[] = [
-  { id: 'kubernetes', label: 'Kubernetes', subtitle: '쿠버네티스 장애 대응', wip: false },
-  { id: 'docker', label: 'Docker', subtitle: '컨테이너 운영', wip: true },
-  { id: 'linux', label: 'Linux', subtitle: '시스템 관리', wip: true },
-  { id: 'application', label: 'Application', subtitle: '앱 트러블슈팅', wip: true },
+  ...ENVIRONMENT_ORDER.map((id) => ({
+    id,
+    label: getEnvironmentMeta(id).label,
+    subtitle: getEnvironmentMeta(id).subtitle,
+    wip: !AVAILABLE_ENVIRONMENTS.includes(id),
+  })),
+  { id: RESEARCH_TAB_ID, label: 'Application', subtitle: '앱 트러블슈팅', wip: true },
 ]
 
 const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
@@ -412,7 +430,7 @@ function App() {
                   <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
                 </nav>
                 <div className="app-layout">
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} onActiveMissionChange={handleActiveMissionChange} /></div>
+                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvTab} onActiveMissionChange={handleActiveMissionChange} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
                       {hasActiveMission ? (

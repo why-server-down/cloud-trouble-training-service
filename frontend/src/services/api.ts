@@ -1,3 +1,33 @@
+import {
+  DEFAULT_ENVIRONMENT,
+  EnvironmentId,
+  isEnvironmentId,
+  MissionAttemptResponse,
+  MissionCompleteResponse,
+  MissionResponse,
+  MissionStatusResponse,
+  ScenarioResponse,
+  ScenarioStatusResponse,
+  SessionResponse,
+} from '../types/training'
+
+// 응답 타입의 단일 원본은 `types/training.ts` 다. 기존 호출부가 api 모듈에서
+// 타입을 가져오고 있으므로 여기서 다시 내보내 import 경로를 깨지 않는다.
+export type {
+  AttemptType,
+  EnvironmentId,
+  EnvironmentItem,
+  EnvironmentListResponse,
+  EnvironmentStatus,
+  MissionAttemptResponse,
+  MissionCompleteResponse,
+  MissionResponse,
+  MissionStatusResponse,
+  ScenarioResponse,
+  ScenarioStatusResponse,
+  SessionResponse,
+} from '../types/training'
+
 const normalizeApiBaseUrl = (configuredUrl?: string) => {
   if (!configuredUrl) return ''
 
@@ -34,13 +64,6 @@ interface LoginResponse {
   token_type: string
 }
 
-interface SessionResponse {
-  id: string
-  namespace: string
-  created_at: string
-  is_active: boolean
-}
-
 interface RegisterResponse {
   id: string
   username: string
@@ -55,46 +78,43 @@ export interface UserProfileResponse {
   total_score: number
 }
 
-interface MissionResponse {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
-}
-
-export interface MissionAttemptResponse {
-  id: string
-  user_id: string
-  mission_id: string
-  status: string
-  start_time: string
-  end_time: string | null
-  final_score: number | null
-  hints_used: number
-}
-
-export interface MissionStatusResponse {
-  attempt: MissionAttemptResponse
-  elapsed_seconds: number
-  remaining_seconds: number
-  current_score: number
-}
-
-interface MissionCompleteResponse {
-  attempt: MissionAttemptResponse
-  message: string
-}
-
 interface ChatResponse {
   response: string
   hint_level: number
   mission_name: string | null
 }
+
+/**
+ * 응답의 environment 를 검증한다.
+ *
+ * - 값이 있고 계약에 없는 문자열이면 ApiError 로 올려 사용자에게 표시한다.
+ *   (백엔드는 Literal 로 검증하므로 여기서 걸리면 계약이 어긋난 것이다)
+ * - 필드가 아예 없으면 kubernetes 로 폴백한다. 백엔드는 기본값과 함께 항상
+ *   내보내지만, environment 이전 버전 백엔드에 붙었을 때 화면 전체가 죽는 것을 막는다.
+ */
+const ensureEnvironment = (payload: { environment?: unknown }, context: string): EnvironmentId => {
+  const raw = payload.environment
+
+  if (raw === undefined || raw === null) return DEFAULT_ENVIRONMENT
+  if (!isEnvironmentId(raw)) {
+    throw new ApiError(`${context} 응답의 환경 값이 올바르지 않습니다: ${String(raw)}`, 502)
+  }
+
+  return raw
+}
+
+const withEnvironment = <T extends { environment?: unknown }>(payload: T, context: string) => ({
+  ...payload,
+  environment: ensureEnvironment(payload, context),
+})
+
+const withAttemptEnvironment = <T extends { attempt: MissionAttemptResponse }>(
+  payload: T,
+  context: string,
+) => ({
+  ...payload,
+  attempt: withEnvironment(payload.attempt, context),
+})
 
 const notifyIfUnauthorized = (response: Response) => {
   if (response.status === 401) {
@@ -216,7 +236,7 @@ export const createTerminalSession = async (token: string): Promise<SessionRespo
     throw new Error(await getErrorDetail(response, '터미널 세션 생성에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as SessionResponse, '터미널 세션')
 }
 
 export const getProfile = async (token: string): Promise<UserProfileResponse> => {
@@ -257,7 +277,8 @@ export const listMissions = async (token: string): Promise<MissionResponse[]> =>
     throw new Error(await getErrorDetail(response, '미션 목록 조회에 실패했습니다'))
   }
 
-  return response.json()
+  const missions = await response.json() as MissionResponse[]
+  return missions.map((mission) => withEnvironment(mission, '미션 목록'))
 }
 
 export const startMission = async (token: string, missionId: string): Promise<MissionAttemptResponse> => {
@@ -274,7 +295,7 @@ export const startMission = async (token: string, missionId: string): Promise<Mi
     throw new Error(await getErrorDetail(response, '미션 시작에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '미션 시작')
 }
 
 export const getMissionStatus = async (token: string): Promise<MissionStatusResponse> => {
@@ -288,7 +309,7 @@ export const getMissionStatus = async (token: string): Promise<MissionStatusResp
     throw new ApiError(await getErrorDetail(response, '미션 상태 조회에 실패했습니다'), response.status)
   }
 
-  return response.json()
+  return withAttemptEnvironment(await response.json() as MissionStatusResponse, '미션 상태')
 }
 
 export const checkMission = async (token: string): Promise<MissionCompleteResponse> => {
@@ -303,7 +324,7 @@ export const checkMission = async (token: string): Promise<MissionCompleteRespon
     throw new Error(await getErrorDetail(response, '미션 확인에 실패했습니다'))
   }
 
-  return response.json()
+  return withAttemptEnvironment(await response.json() as MissionCompleteResponse, '미션 확인')
 }
 
 export const abandonMission = async (token: string): Promise<MissionAttemptResponse> => {
@@ -318,10 +339,10 @@ export const abandonMission = async (token: string): Promise<MissionAttemptRespo
     throw new Error(await getErrorDetail(response, '미션 포기에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '미션 포기')
 }
 
-export const useHint = async (token: string): Promise<MissionAttemptResponse> => {
+export const requestHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/hint`, {
     method: 'POST',
     headers: {
@@ -333,7 +354,7 @@ export const useHint = async (token: string): Promise<MissionAttemptResponse> =>
     throw new Error(await getErrorDetail(response, '힌트 사용에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '힌트 사용')
 }
 
 export const askTutor = async (token: string, message: string, hintLevel: number = 0): Promise<ChatResponse> => {
@@ -381,30 +402,6 @@ export const getAchievements = (token: string) =>
 
 // AI Scenario
 
-export interface ScenarioResponse {
-  scenario_id: string
-  title: string
-  difficulty: string
-  student_brief: string
-  time_limit_seconds: number
-  base_score: number
-  hint_penalty: number
-  safety_status: string
-}
-
-export interface ScenarioStatusResponse {
-  scenario_id: string
-  attempt_id: string
-  title: string
-  difficulty: string
-  student_brief: string
-  elapsed_seconds: number
-  remaining_seconds: number
-  current_score: number
-  hints_used: number
-  status: string
-}
-
 export interface ScenarioCheckResponse {
   resolved: boolean
   message: string
@@ -420,21 +417,28 @@ export interface UnlockStatusResponse {
 export const getUnlockStatus = (token: string) =>
   getAuthorizedJson<UnlockStatusResponse>(token, '/api/scenarios/unlock-status', 'AI 잠금 상태를 불러오지 못했습니다')
 
-export const getScenarioStatus = (token: string) =>
-  getAuthorizedJson<ScenarioStatusResponse>(token, '/api/scenarios/status', 'AI 시나리오 상태를 불러오지 못했습니다')
+export const getScenarioStatus = async (token: string) => {
+  const status = await getAuthorizedJson<ScenarioStatusResponse>(
+    token,
+    '/api/scenarios/status',
+    'AI 시나리오 상태를 불러오지 못했습니다',
+  )
+  return withEnvironment(status, 'AI 시나리오 상태')
+}
 
 export const startRandomScenario = async (
   token: string,
   difficulty: string,
+  environment: EnvironmentId,
   demoUnlock: boolean = false,
 ): Promise<ScenarioResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/scenarios/start-random`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ difficulty, randomize: true, demo_unlock: demoUnlock }),
+    body: JSON.stringify({ difficulty, environment, randomize: true, demo_unlock: demoUnlock }),
   })
   if (!response.ok) throw new Error(await getErrorDetail(response, 'AI 시나리오 시작에 실패했습니다'))
-  return response.json()
+  return withEnvironment(await response.json() as ScenarioResponse, 'AI 시나리오 시작')
 }
 
 export const checkScenario = async (token: string): Promise<ScenarioCheckResponse> => {
@@ -454,12 +458,12 @@ export const abandonScenario = async (token: string): Promise<void> => {
   if (!response.ok) throw new Error(await getErrorDetail(response, 'AI 시나리오 포기에 실패했습니다'))
 }
 
-export const useScenarioHint = async (token: string): Promise<MissionAttemptResponse> => {
+export const requestScenarioHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/scenarios/current/hint`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new Error(await getErrorDetail(response, '힌트 사용에 실패했습니다'))
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, 'AI 시나리오 힌트')
 }
 
