@@ -127,3 +127,42 @@ class TestDeleteConfirmation:
         result = validator.validate_delete("kubectl delete pod my-pod", NAMESPACE, confirmed=False)
         assert not result.is_valid
         assert result.requires_confirmation
+
+
+class TestCreateRestrictions:
+    """kubectl create 는 훈련 복구에 필요한 리소스만, 이름까지 갖춘 형태로 허용한다."""
+
+    def test_create_secret_without_type_blocked(self, validator):
+        result = validator.validate_command("kubectl create secret", NAMESPACE)
+        assert not result.is_valid
+        assert "not allowed" in result.error
+
+    def test_create_secret_generic_allowed(self, validator):
+        result = validator.validate_command(
+            "kubectl create secret generic app-secret --from-literal=key=value", NAMESPACE
+        )
+        assert result.is_valid
+        assert f"-n {NAMESPACE}" in result.command
+
+    def test_create_secret_without_name_blocked(self, validator):
+        result = validator.validate_command(
+            "kubectl create secret generic --from-literal=key=value", NAMESPACE
+        )
+        assert not result.is_valid
+        assert "not allowed" in result.error
+
+    def test_create_configmap_allowed(self, validator):
+        result = validator.validate_command("kubectl create configmap app-config", NAMESPACE)
+        assert result.is_valid
+
+    def test_create_deployment_blocked(self, validator):
+        result = validator.validate_command(
+            "kubectl create deployment nginx --image=nginx", NAMESPACE
+        )
+        assert not result.is_valid
+        assert "not allowed" in result.error
+
+    def test_create_without_resource_blocked(self, validator):
+        result = validator.validate_command("kubectl create", NAMESPACE)
+        assert not result.is_valid
+        assert "not allowed" in result.error
