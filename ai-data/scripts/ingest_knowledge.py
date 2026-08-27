@@ -7,10 +7,14 @@ Loads documents from knowledge-base directory and ingests them into Qdrant
 import os
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add ai-data to Python path
 AI_DATA_PATH = Path(__file__).parent.parent
 sys.path.insert(0, str(AI_DATA_PATH))
+
+# CLI boundary에서만 .env를 읽고, production module import는 환경을 변경하지 않는다.
+load_dotenv()
 
 from rag_service import RAGService, RAGServiceError
 from config import config

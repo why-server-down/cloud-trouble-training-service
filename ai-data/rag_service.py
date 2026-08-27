@@ -9,6 +9,7 @@ Task 2: Vector Database Setup (Migrated to Qdrant)
 """
 
 import os
+import hashlib
 import time
 import uuid
 from typing import List, Dict, Optional
@@ -29,17 +30,31 @@ try:
     from langchain_core.documents import Document
 except ImportError:
     from langchain.schema import Document
-from dotenv import load_dotenv
-
-from config import config
-
-load_dotenv()
+from config import AISettings, config
 
 # 임베딩 차원: OpenAI text-embedding-ada-002=1536, Gemini gemini-embedding-001=3072
 _EMBEDDING_DIMENSIONS = {
     "openai": 1536,
     "gemini": 3072,
+    "mock": 1536,
 }
+
+
+class _OfflineEmbeddings:
+    """API key와 network 없이 사용하는 결정적 sparse embedding."""
+
+    def __init__(self, dimension: int):
+        self.dimension = dimension
+
+    def embed_query(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimension
+        for token in text.lower().split():
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[int.from_bytes(digest[:4], "big") % self.dimension] += 1.0
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_query(text) for text in texts]
 
 
 @dataclass
@@ -84,14 +99,15 @@ class RAGService:
     
     @property
     def EMBEDDING_DIMENSION(self) -> int:
-        return _EMBEDDING_DIMENSIONS.get(config.AI_BACKEND, 1536)
+        return _EMBEDDING_DIMENSIONS.get(self.settings.AI_BACKEND, 1536)
 
     def __init__(
         self,
         collection_name: str = "k8s_docs",
         qdrant_url: Optional[str] = None,
         qdrant_api_key: Optional[str] = None,
-        use_memory: bool = False
+        use_memory: bool = False,
+        settings: Optional[AISettings] = None,
     ):
         """
         Initialize RAG service with Qdrant
@@ -106,17 +122,18 @@ class RAGService:
             QdrantConnectionError: If Qdrant initialization fails
         """
         self.collection_name = collection_name
+        self.settings = settings or config
         
         try:
             # Task 2.2: Initialize Qdrant client
-            if use_memory:
+            if use_memory or self.settings.AI_BACKEND == "mock":
                 # In-memory mode for testing
                 self.client = QdrantClient(":memory:")
-            elif qdrant_url or config.QDRANT_URL:
+            elif qdrant_url or self.settings.QDRANT_URL:
                 # Connect to Qdrant server (local or cloud)
                 self.client = QdrantClient(
-                    url=qdrant_url or config.QDRANT_URL,
-                    api_key=qdrant_api_key or config.QDRANT_API_KEY or None
+                    url=qdrant_url or self.settings.QDRANT_URL,
+                    api_key=qdrant_api_key or self.settings.QDRANT_API_KEY or None
                 )
             else:
                 # Default: connect to local Qdrant server
@@ -126,29 +143,33 @@ class RAGService:
                 )
             
             # 임베딩 초기화: gemini 또는 openai 백엔드 선택
-            if config.AI_BACKEND == "gemini":
-                gemini_key = config.GEMINI_API_KEY
+            if self.settings.AI_BACKEND == "mock":
+                self.embeddings = _OfflineEmbeddings(self.EMBEDDING_DIMENSION)
+            elif self.settings.AI_BACKEND == "gemini":
+                gemini_key = self.settings.GEMINI_API_KEY
                 if not gemini_key:
                     raise RAGServiceError("Gemini API key not configured")
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
                 self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model=config.GEMINI_EMBEDDING_MODEL,
+                    model=self.settings.GEMINI_EMBEDDING_MODEL,
                     google_api_key=gemini_key,
                 )
             else:
-                api_key = config.OPENAI_API_KEY
+                api_key = self.settings.OPENAI_API_KEY
                 if not api_key or api_key == "your_openai_api_key_here":
                     raise RAGServiceError("OpenAI API key not configured")
                 self.embeddings = OpenAIEmbeddings(
                     openai_api_key=api_key,
-                    model="text-embedding-ada-002",
+                    model=self.settings.EMBEDDING_MODEL,
                 )
             
             # Task 2.3: Create collection if it doesn't exist
             self._ensure_collection_exists()
             
-        except Exception as e:
-            raise QdrantConnectionError(f"Failed to initialize Qdrant: {str(e)}")
+        except Exception as exc:
+            raise QdrantConnectionError(
+                "Failed to initialize Qdrant/RAG service"
+            ) from exc
     
     def _ensure_collection_exists(self):
         """
@@ -256,8 +277,12 @@ class RAGService:
             if not documents:
                 return []
             
-            chunk_size = chunk_size or config.RAG_CHUNK_SIZE
-            chunk_overlap = chunk_overlap or config.RAG_CHUNK_OVERLAP
+            chunk_size = self.settings.RAG_CHUNK_SIZE if chunk_size is None else chunk_size
+            chunk_overlap = (
+                self.settings.RAG_CHUNK_OVERLAP
+                if chunk_overlap is None
+                else chunk_overlap
+            )
             
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=chunk_size,
@@ -378,8 +403,12 @@ class RAGService:
             SearchError: If search fails
         """
         try:
-            top_k = top_k or config.RAG_TOP_K
-            min_similarity = min_similarity or config.RAG_MIN_SIMILARITY
+            top_k = self.settings.RAG_TOP_K if top_k is None else top_k
+            min_similarity = (
+                self.settings.RAG_MIN_SIMILARITY
+                if min_similarity is None
+                else min_similarity
+            )
 
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)

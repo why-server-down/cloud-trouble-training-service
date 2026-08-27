@@ -4,12 +4,11 @@ Main interface for AI tutoring functionality
 Integrates RAG, Prompt Engineering, and LLM
 """
 
-import os
 from typing import Dict, Optional
 from dataclasses import dataclass
 import openai
-from dotenv import load_dotenv
 
+from config import AISettings, config
 from rag_service import RAGService
 from prompt_engine import (
     SocraticPromptEngine,
@@ -17,9 +16,6 @@ from prompt_engine import (
     SystemContext,
     UserContext
 )
-
-load_dotenv()
-
 
 @dataclass
 class TutorRequest:
@@ -50,9 +46,10 @@ class AITutorEngine:
     def __init__(
         self,
         openai_api_key: Optional[str] = None,
-        model: str = "gpt-4",
+        model: Optional[str] = None,
         use_rag: bool = True,
         api_base_url: Optional[str] = None,
+        settings: Optional[AISettings] = None,
     ):
         """
         Initialize AI Tutor Engine
@@ -63,28 +60,29 @@ class AITutorEngine:
             use_rag: Whether to use RAG for knowledge retrieval
             api_base_url: Custom base URL (Gemini OpenAI-compatible endpoint 등)
         """
-        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        self.model = model
+        self.settings = settings or config
+        self.api_key = openai_api_key or self.settings.provider_api_key
+        self.model = model or self.settings.tutor_model
         self.use_rag = use_rag
+        api_base_url = api_base_url or self.settings.api_base_url
 
         # OpenAI-compatible client (Gemini은 base_url만 다름)
         client_kwargs = {"api_key": self.api_key}
         if api_base_url:
             client_kwargs["base_url"] = api_base_url
-        openai.api_key = self.api_key
         self.client = openai.OpenAI(**client_kwargs)
 
         # Initialize components
         self.prompt_engine = SocraticPromptEngine()
 
         if self.use_rag:
-            self.rag_service = RAGService()
+            self.rag_service = RAGService(settings=self.settings)
     
     def get_response(
         self,
         request: TutorRequest,
-        max_tokens: int = 500,
-        temperature: float = 0.7
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ) -> TutorResponse:
         """
         Get AI tutor response
@@ -97,6 +95,11 @@ class AITutorEngine:
         Returns:
             TutorResponse with message and metadata
         """
+        if max_tokens is None:
+            max_tokens = self.settings.OPENAI_MAX_TOKENS
+        if temperature is None:
+            temperature = self.settings.OPENAI_TEMPERATURE
+
         # Generate base prompt
         prompt = self.prompt_engine.generate_prompt(
             user_question=request.user_question,
@@ -139,7 +142,7 @@ class AITutorEngine:
                 ],
                 max_tokens=max_tokens,
                 temperature=temperature,
-                timeout=10.0
+                timeout=self.settings.OPENAI_TIMEOUT
             )
             
             message = response.choices[0].message.content

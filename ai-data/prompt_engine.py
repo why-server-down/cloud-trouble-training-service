@@ -6,10 +6,6 @@ Generates context-aware prompts based on hint levels
 import os
 from typing import Dict, Optional
 from dataclasses import dataclass
-from dotenv import load_dotenv
-
-load_dotenv()
-
 
 @dataclass
 class MissionContext:

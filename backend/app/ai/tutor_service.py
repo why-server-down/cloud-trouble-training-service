@@ -46,35 +46,24 @@ class TutorService:
         if settings.AI_BACKEND not in ("openai", "gemini"):
             return
 
-        os.environ["AI_BACKEND"] = settings.AI_BACKEND
-
         if settings.AI_BACKEND == "gemini":
             if not settings.GEMINI_API_KEY:
                 return
-            os.environ["GEMINI_API_KEY"] = settings.GEMINI_API_KEY
-            os.environ["GEMINI_MODEL"] = settings.GEMINI_MODEL
-            os.environ["GEMINI_EMBEDDING_MODEL"] = settings.GEMINI_EMBEDDING_MODEL
-            api_key = settings.GEMINI_API_KEY
-            model = settings.GEMINI_MODEL
-            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
         else:
             if not settings.OPENAI_API_KEY:
                 return
-            os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
-            api_key = settings.OPENAI_API_KEY
-            model = settings.TUTOR_MODEL
-            base_url = None
 
         try:
             from ai_engine import AITutorEngine
+            from config import AISettings
+
+            ai_settings = AISettings.from_backend_settings(settings)
             self._engine = AITutorEngine(
-                openai_api_key=api_key,
-                model=model,
                 use_rag=True,
-                api_base_url=base_url,
+                settings=ai_settings,
             )
-        except Exception as e:
-            print(f"[AI Tutor] 엔진 초기화 실패 (Mock 모드로 fallback): {e}")
+        except Exception:
+            print("[AI Tutor] 엔진 초기화 실패 (Mock 모드로 fallback)")
             self._engine = None
 
     async def get_hint(
