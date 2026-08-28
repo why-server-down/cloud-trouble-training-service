@@ -1,9 +1,11 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import asyncio
 import re
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 import httpx
+
+from app.core import environments
 
 
 RETRY_MESSAGE = "틀렸습니다. 다시 시도해 주세요."
@@ -18,6 +20,14 @@ class ValidationResult:
 
 
 class BaseValidationService(ABC):
+    """해결 검증 공통 인터페이스.
+
+    environment: 이 검증기가 담당하는 훈련 환경.
+    docker/linux 구현체는 후속 브랜치에서 이 클래스를 상속해 추가한다.
+    """
+
+    environment: str = environments.KUBERNETES
+
     @abstractmethod
     async def check_resolution(self, chaos_type: str, namespace: str) -> ValidationResult:
         pass
@@ -26,7 +36,8 @@ class BaseValidationService(ABC):
 class MockValidationService(BaseValidationService):
     """Docker 개발 환경용 Mock 구현. debug/resolve 엔드포인트로 수동 해결 트리거."""
 
-    def __init__(self, auto_pass: bool = False):
+    def __init__(self, auto_pass: bool = False, environment: str = environments.KUBERNETES):
+        self.environment = environment
         self._auto_pass = auto_pass
         self._resolved_namespaces: set[str] = set()
 
