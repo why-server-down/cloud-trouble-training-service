@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "parse-valid-scenario",
+      "kind": "json_parse",
+      "input": "{\"environment\": \"kubernetes\", \"fault_type\": \"image_pull_error\"}",
+      "expected": {
+        "environment": "kubernetes",
+        "fault_type": "image_pull_error"
+      }
+    },
+    {
+      "id": "retrieve-crashloop-guide",
+      "kind": "keyword_retrieval",
+      "query": "pod crashloop logs",
+      "documents": [
+        {"id": "crashloop", "text": "CrashLoop pod logs previous container"},
+        {"id": "service", "text": "service selector endpoint mismatch"}
+      ],
+      "expected_id": "crashloop"
+    },
+    {
+      "id": "filter-docker-only",
+      "kind": "metadata_filter",
+      "requested_environment": "docker",
+      "documents": [
+        {"id": "docker", "environments": ["docker"]},
+        {"id": "general", "environments": ["general"]},
+        {"id": "kubernetes", "environments": ["kubernetes"]}
+      ],
+      "expected_ids": ["docker", "general"]
+    }
+  ]
+}
