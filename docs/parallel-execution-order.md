@@ -174,8 +174,10 @@ gh api repos/why-server-down/cloud-trouble-training-service/branches/dev/protect
 ### 5-4. Wave 1 게이트 — Wave 2를 시작하려면
 
 ```bash
-# host shell 실행이 제거됐는가?  → 결과가 없어야 한다 (P0 보안 결손)
-git grep -n "shell=True" origin/dev -- backend/app
+# host shell 실행이 제거됐는가?  → 통과해야 한다 (P0 보안 결손)
+# 문자열 grep 은 주석·docstring 에 적힌 "shell=True" 까지 잡아 오판한다.
+# AST 로 실제 호출 노드를 검사하는 테스트를 쓴다.
+cd backend && python -m pytest tests/test_terminal_security.py::TestNoHostShellExecution -q; cd ..
 
 # 샌드박스 서비스가 들어왔는가?  → 파일이 있어야 한다
 # (경로 끝 슬래시가 없으면 디렉터리 이름만 나와서 항상 실패로 보인다)
