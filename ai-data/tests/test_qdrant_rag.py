@@ -5,6 +5,7 @@ Tests document ingestion, search, and error handling
 
 import pytest
 from langchain.schema import Document
+from config import AISettings
 from rag_service import (
     RAGService,
     RAGServiceError,
@@ -12,15 +13,19 @@ from rag_service import (
     DocumentIngestionError,
     SearchError
 )
+from tests.fakes import DeterministicFakeEmbeddings
 
 
 @pytest.fixture
 def rag_service():
     """Create RAG service with in-memory Qdrant for testing"""
-    return RAGService(
+    service = RAGService(
         collection_name="test_k8s_docs",
-        use_memory=True  # Use in-memory mode for tests
+        use_memory=True,
+        settings=AISettings(AI_BACKEND="mock", RAG_MIN_SIMILARITY=0.1),
     )
+    service.embeddings = DeterministicFakeEmbeddings(service.EMBEDDING_DIMENSION)
+    return service
 
 
 @pytest.fixture
@@ -106,7 +111,7 @@ class TestSearch:
         results = rag_service.search_knowledge("Pod CrashLoopBackOff", top_k=2)
         
         assert len(results) > 0
-        assert results[0].similarity > 0.5
+        assert results[0].similarity > 0.2
         assert "CrashLoopBackOff" in results[0].content
     
     def test_search_with_top_k(self, rag_service, sample_documents):
@@ -138,6 +143,29 @@ class TestSearch:
         
         if len(results) > 0:
             assert all(r.source == "commands.md" for r in results)
+
+    def test_fault_filter_excludes_other_fault_documents(self, rag_service):
+        documents = [
+            Document(
+                page_content="CrashLoop logs and restart count",
+                metadata={"source": "crash.md", "fault_types": ["crash_loop"]},
+            ),
+            Document(
+                page_content="CrashLoop and image registry",
+                metadata={"source": "image.md", "fault_types": ["image_pull_error"]},
+            ),
+            Document(
+                page_content="General diagnostic workflow",
+                metadata={"source": "general.md", "fault_types": ["general"]},
+            ),
+        ]
+        rag_service.ingest_documents(documents)
+
+        results = rag_service.search_knowledge(
+            "CrashLoop logs", fault_type="crash_loop", min_similarity=0
+        )
+
+        assert {result.source for result in results} == {"crash.md", "general.md"}
     
     def test_search_empty_collection(self, rag_service):
         """Test search on empty collection"""
