@@ -96,7 +96,10 @@ class K8sSetupService:
                 raise
 
     async def teardown_user_namespace(self, namespace: str) -> None:
-        """네임스페이스 전체 삭제 (세션 종료 시 정리용)."""
+        """사용자 계정 전체 정리에만 사용한다.
+
+        개별 터미널 세션 종료는 SandboxService.cleanup()으로 처리한다.
+        """
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: self._teardown_sync(namespace))
 
