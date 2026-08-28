@@ -1,9 +1,12 @@
 import asyncio
+import logging
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.core import environments
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,8 +30,27 @@ class BaseChaosInjector(ABC):
         pass
 
     @abstractmethod
-    async def revert(self, chaos_id: str) -> bool:
-        pass
+    async def revert(self, chaos_id: str, namespace: str) -> bool:
+        """주입한 장애를 되돌린다.
+
+        namespace 를 인자로 받는 이유: 서버가 재시작되면 프로세스 메모리의
+        주입 이력이 사라진다. chaos_id 와 namespace 만으로 복구할 수 있어야
+        DB 에 저장된 attempt.chaos_id 로 뒷정리가 가능하다.
+        """
+
+    @staticmethod
+    def chaos_type_from_id(chaos_id: str) -> str | None:
+        """chaos_id 에서 chaos_type 을 복원한다.
+
+        inject 가 만드는 형식은 `{chaos-type}-{uuid8}` 이다.
+        (예: `compound-probe-cascade-a1b2c3d4` -> `compound_probe_cascade`)
+        """
+        if not chaos_id:
+            return None
+        head, _, tail = chaos_id.rpartition("-")
+        if not head or not tail:
+            return None
+        return head.replace("-", "_")
 
     def supported_chaos_types(self) -> frozenset[str] | None:
         """주입 가능한 chaos_type 집합. None이면 타입 제한 없음(Mock 등)."""
@@ -42,27 +64,36 @@ class BaseChaosInjector(ABC):
 class MockChaosInjector(BaseChaosInjector):
     """Docker 개발 환경용 Mock 구현. 실제 장애 주입 없이 시뮬레이션."""
 
-    def __init__(self, delay: float = 0.5):
+    def __init__(
+        self,
+        delay: float = 0.5,
+        environment: str = environments.KUBERNETES,
+    ):
         self._delay = delay
+        self.environment = environment
         self._active_chaos: dict[str, dict] = {}
 
     async def inject(self, chaos_type: str, namespace: str) -> ChaosResult:
         await asyncio.sleep(self._delay)
-        chaos_id = f"mock-{chaos_type}-{uuid.uuid4().hex[:8]}"
+        # chaos_type 을 복원할 수 있는 형식을 실제 주입기와 동일하게 유지한다.
+        chaos_id = f"{chaos_type.replace('_', '-')}-{uuid.uuid4().hex[:8]}"
         self._active_chaos[chaos_id] = {"type": chaos_type, "namespace": namespace}
-        print(f"[MOCK] Chaos injected: {chaos_type} -> {namespace} (id={chaos_id})")
+        logger.info(
+            "mock chaos injected",
+            extra={"chaos_type": chaos_type, "namespace": namespace, "chaos_id": chaos_id},
+        )
         return ChaosResult(
             success=True,
             chaos_id=chaos_id,
             message=f"[MOCK] {chaos_type} injected into {namespace}",
         )
 
-    async def revert(self, chaos_id: str) -> bool:
-        if chaos_id in self._active_chaos:
-            del self._active_chaos[chaos_id]
-            print(f"[MOCK] Chaos reverted: {chaos_id}")
-            return True
-        return False
+    async def revert(self, chaos_id: str, namespace: str) -> bool:
+        # 실제 리소스를 만들지 않으므로 프로세스 메모리에 없어도 성공으로 본다.
+        # (서버 재시작 뒤 DB 의 chaos_id 로 정리하는 경로를 막지 않기 위함)
+        self._active_chaos.pop(chaos_id, None)
+        logger.info("mock chaos reverted", extra={"chaos_id": chaos_id, "namespace": namespace})
+        return True
 
 
 class ChaosMeshInjector(BaseChaosInjector):
@@ -114,7 +145,10 @@ class ChaosMeshInjector(BaseChaosInjector):
         apply_handler(self, chaos_id, namespace)
 
         self._active_chaos[chaos_id] = {"type": chaos_type, "namespace": namespace}
-        print(f"[Chaos Mesh] Injected: {chaos_type} -> {namespace} (id={chaos_id})")
+        logger.info(
+            "chaos injected",
+            extra={"chaos_type": chaos_type, "namespace": namespace, "chaos_id": chaos_id},
+        )
         return ChaosResult(success=True, chaos_id=chaos_id, message=f"{chaos_type} injected into {namespace}")
 
     # --- 공통 헬퍼 ---
@@ -420,34 +454,49 @@ class ChaosMeshInjector(BaseChaosInjector):
 
     # --- 복구 ---
 
-    async def revert(self, chaos_id: str) -> bool:
+    async def revert(self, chaos_id: str, namespace: str) -> bool:
         loop = asyncio.get_event_loop()
         try:
             return await loop.run_in_executor(
-                None, lambda: self._revert_sync(chaos_id)
+                None, lambda: self._revert_sync(chaos_id, namespace)
             )
         except Exception:
             return False
 
-    def _revert_sync(self, chaos_id: str) -> bool:
-        info = self._active_chaos.get(chaos_id)
-        if not info:
+    def _revert_sync(self, chaos_id: str, namespace: str) -> bool:
+        """chaos_id 와 namespace 만으로 복구한다.
+
+        프로세스 메모리의 주입 이력은 보조 정보로만 쓴다. 서버가 재시작되면
+        사라지므로, 그 경우에도 chaos_id 에서 chaos_type 을 복원해 되돌린다.
+        """
+        info = self._active_chaos.get(chaos_id) or {}
+        chaos_type = info.get("type") or self.chaos_type_from_id(chaos_id)
+        if not chaos_type:
+            logger.warning("cannot resolve chaos type", extra={"chaos_id": chaos_id})
             return False
 
-        chaos_type = info["type"]
-        namespace = info["namespace"]
+        handlers = self._CHAOS_HANDLERS.get(chaos_type)
+        if handlers is None:
+            logger.warning(
+                "unknown chaos type on revert",
+                extra={"chaos_id": chaos_id, "chaos_type": chaos_type},
+            )
+            return False
 
         try:
-            handlers = self._CHAOS_HANDLERS.get(chaos_type)
-            if handlers is not None:
-                _, revert_handler = handlers
-                revert_handler(self, chaos_id, namespace)
-
-            del self._active_chaos[chaos_id]
-            print(f"[Chaos Mesh] Reverted: {chaos_id}")
+            _, revert_handler = handlers
+            revert_handler(self, chaos_id, namespace)
+            self._active_chaos.pop(chaos_id, None)
+            logger.info(
+                "chaos reverted",
+                extra={"chaos_id": chaos_id, "namespace": namespace, "chaos_type": chaos_type},
+            )
             return True
-        except Exception as e:
-            print(f"[Chaos Mesh] Revert failed: {chaos_id} - {e}")
+        except Exception:
+            logger.exception(
+                "chaos revert failed",
+                extra={"chaos_id": chaos_id, "namespace": namespace},
+            )
             return False
 
     # --- 복구 핸들러 ---

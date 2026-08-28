@@ -16,7 +16,7 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 | ~~`CommandExecutor`가 host에서 `shell=True` 실행~~ | ~~host RCE~~ | **BE-05 완료** |
 | ~~WebSocket이 session 소유권을 검증하지 않음~~ | ~~타 사용자 세션 오용~~ | **BE-06 완료** |
 | environment가 session 생성·명령 실행까지 미연결 | Docker 탭에서 K8s 명령 실행 | BE-03·BE-07 |
-| active chaos ID가 프로세스 메모리 dict에만 존재 | 서버 재시작 시 장애 정리 불가 | BE-02·BE-08 |
+| ~~active chaos ID가 프로세스 메모리 dict에만 존재~~ | ~~서버 재시작 시 정리 불가~~ | **BE-08 완료** |
 
 ### 테스트 기준선 (BE-01 완료 기준)
 
@@ -70,7 +70,8 @@ app/
 │   ├── command_executor.py       # 샌드박스 Pod exec 실행 (Sandbox | Mock)
 │   ├── websocket_handler.py      # WebSocket 연결·동시성·CommandLog
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
-│   ├── chaos_injector.py         # 장애 주입 (Mock | ChaosMesh), chaos_type → (주입,복구) _CHAOS_HANDLERS 레지스트리
+│   ├── chaos_injector.py         # 장애 주입 (Mock | ChaosMesh), _CHAOS_HANDLERS 레지스트리
+│                                 #   revert(chaos_id, namespace) — 재시작 후에도 복구 가능
 │   ├── chaos_plan.py             # ChaosPlan, ChaosPlanCompiler (allowlist 안전장치)
 │   ├── scenario_service.py       # AI 시나리오 생성/시작/완료 오케스트레이터
 │   ├── validation_service.py     # 해결 검증 (Mock | K8s API | Prometheus), chaos_type → _CHECKS 레지스트리
@@ -80,7 +81,7 @@ app/
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
-│   ├── service_factory.py        # 환경변수 기반 서비스 팩토리 (create_*(environment) 시그니처, 백엔드별 팩토리 레지스트리)
+│   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
@@ -214,6 +215,33 @@ POST /api/scenarios/current/check
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
 
+### 환경별 구현체 선택 (service_factory.py, BE-08)
+
+레지스트리 키가 `(environment, configured_backend)`다. 같은 백엔드 이름이라도 환경마다
+구현체가 다르고, **등록되지 않은 조합은 kubernetes로 조용히 대체되지 않고 실패한다.**
+
+```python
+_INJECTOR_FACTORIES = {
+    (KUBERNETES, "mock"): lambda: MockChaosInjector(environment=KUBERNETES),
+    (KUBERNETES, "chaos_mesh"): ChaosMeshInjector,
+}
+```
+
+docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
+
+`MissionService` / `ScenarioService`는 **환경별 인스턴스를 두지 않는다.** 서비스는 상태를
+갖지 않고 `attempt.environment`로 그때그때 구현체를 조회한다(`injector_for(environment)`).
+
+### 장애 복구와 재시작 (BE-08)
+
+`revert(chaos_id, namespace)`가 namespace를 인자로 받는 이유는 **서버 재시작 후에도
+되돌릴 수 있어야 하기 때문**이다. 프로세스 메모리의 주입 이력은 보조 정보로만 쓴다.
+
+- `chaos_id` 형식은 `{chaos-type}-{uuid8}` (예: `compound-probe-cascade-a1b2c3d4`)
+- `BaseChaosInjector.chaos_type_from_id()`로 타입을 복원하므로 인메모리 dict가 비어도 동작
+- 정리는 `attempt.chaos_id`(DB)를 근거로 하고, 되돌린 뒤 `None`으로 비워 재정리에 안전하다
+- 주입 성공 후 DB commit이 실패하면 즉시 revert해 고아 장애를 남기지 않는다
+
 ### 검증 백엔드 (validation_service.py)
 | VALIDATION_BACKEND | 설명 |
 |---|---|
@@ -260,7 +288,7 @@ POST /api/scenarios/current/check
   - `environment`: 이 시도가 수행된 훈련 환경. mission/scenario를 join하지 않고도
     정리·복구·통계가 가능하도록 attempt에 직접 저장한다
   - `chaos_id`, `sandbox_id`: 주입된 장애와 샌드박스 식별자. 서버 재시작 후에도
-    DB만으로 정리할 수 있어야 한다
+    DB만으로 정리할 수 있어야 한다 (BE-08에서 실제로 이 값을 쓰도록 전환)
   - DB 제약: `attempt_type` 허용값 CHECK, `attempt_type`↔FK 조합 일치 CHECK,
     사용자당 `in_progress` 1개 partial unique index
 - `TerminalSession` - 터미널 세션 (`environment` 포함)

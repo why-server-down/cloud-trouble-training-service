@@ -3,6 +3,7 @@ ScenarioService - AI 시나리오 생성/시작/완료 오케스트레이터.
 기존 MissionService와 분리: /api/scenarios/* 전용.
 """
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
@@ -44,15 +45,14 @@ class ScenarioService:
 
     def __init__(
         self,
-        chaos_injector: BaseChaosInjector,
+        injector_for: Callable[[str], BaseChaosInjector],
         scoring_service: ScoringService,
         validation_rule_service: ValidationRuleService,
     ):
-        self._chaos = chaos_injector
+        self._injector_for = injector_for
         self._scoring = scoring_service
         self._vrs = validation_rule_service
         self._compiler = ChaosPlanCompiler()
-        self._active_chaos_ids: dict[uuid.UUID, str] = {}  # attempt_id -> chaos_id
 
     async def check_unlock_status(self, db: AsyncSession, user_id: uuid.UUID) -> dict:
         """AI 모드 잠금 해제 상태 반환."""
@@ -141,7 +141,8 @@ class ScenarioService:
         if scenario:
             scenario.status = "failed"
             if scenario.chaos_id:
-                await self._chaos.revert(scenario.chaos_id)
+                injector = self._injector_for(scenario.environment)
+                await injector.revert(scenario.chaos_id, f"user-{attempt.user_id}")
                 scenario.chaos_id = None
 
         await db.commit()
@@ -238,25 +239,32 @@ class ScenarioService:
 
         # 장애 주입 (fault_type → chaos_type 매핑 후 기존 inject() 사용)
         chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(plan.fault_type, "pod_failure")
-        chaos_result = await self._chaos.inject(chaos_type, namespace)
+        injector = self._injector_for(scenario.environment)
+        chaos_result = await injector.inject(chaos_type, namespace)
         if not chaos_result.success:
             raise RuntimeError(f"장애 주입 실패: {chaos_result.message}")
 
         scenario.status = "running"
         scenario.chaos_id = chaos_result.chaos_id
 
-        # MissionAttempt 생성
+        # chaos_id 를 attempt 에도 저장한다. 프로세스 메모리에만 두면 서버 재시작 후
+        # 주입된 장애를 되돌릴 수 없다.
         attempt = MissionAttempt(
             user_id=user.id,
             attempt_type="ai_scenario",
             scenario_id=scenario.id,
+            environment=scenario.environment,
+            chaos_id=chaos_result.chaos_id,
         )
         db.add(attempt)
-        await db.commit()
-        await db.refresh(attempt)
-        await db.refresh(scenario)
-
-        self._active_chaos_ids[attempt.id] = chaos_result.chaos_id
+        try:
+            await db.commit()
+            await db.refresh(attempt)
+            await db.refresh(scenario)
+        except Exception:
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise
 
         return {"scenario": scenario, "attempt": attempt}
 
@@ -285,7 +293,7 @@ class ScenarioService:
             attempt.end_time = now
             attempt.final_score = self._scoring.MIN_SCORE
             scenario.status = "failed"
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
 
         return {
@@ -362,7 +370,7 @@ class ScenarioService:
                 attempt.hints_used, scenario.hint_penalty,
             )
             scenario.status = "completed"
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
             return {
@@ -395,7 +403,7 @@ class ScenarioService:
         if scenario:
             scenario.status = "failed"
 
-        await self._cleanup_chaos(attempt.id)
+        await self._cleanup_chaos(attempt)
         await db.commit()
         return {"message": "AI 시나리오를 포기했습니다"}
 
@@ -420,7 +428,10 @@ class ScenarioService:
         self._vrs.mark_resolved(attempt.scenario_id, namespace)
         return {"message": "[Mock] AI 시나리오 해결 상태로 설정했습니다. /api/scenarios/current/check로 확인하세요"}
 
-    async def _cleanup_chaos(self, attempt_id: uuid.UUID):
-        chaos_id = self._active_chaos_ids.pop(attempt_id, None)
-        if chaos_id:
-            await self._chaos.revert(chaos_id)
+    async def _cleanup_chaos(self, attempt: MissionAttempt) -> None:
+        """DB 에 저장된 chaos_id 로 되돌린다. 재시작 후에도 동작해야 한다."""
+        if not attempt.chaos_id:
+            return
+        injector = self._injector_for(attempt.environment)
+        await injector.revert(attempt.chaos_id, f"user-{attempt.user_id}")
+        attempt.chaos_id = None

@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
@@ -11,17 +12,27 @@ from app.services.scoring_service import ScoringService
 from app.services.validation_service import BaseValidationService
 
 
+def namespace_for(user_id: uuid.UUID) -> str:
+    return f"user-{user_id}"
+
+
 class MissionService:
+    """미션 오케스트레이터.
+
+    환경별 인스턴스를 따로 두지 않는다. 서비스는 상태를 갖지 않고, attempt 의
+    environment 로 그때그때 injector/validator 를 조회한다.
+    """
+
     def __init__(
         self,
-        chaos_injector: BaseChaosInjector,
-        validation_service: BaseValidationService,
+        *,
+        injector_for: Callable[[str], BaseChaosInjector],
+        validation_for: Callable[[str], BaseValidationService],
         scoring_service: ScoringService,
     ):
-        self._chaos = chaos_injector
-        self._validation = validation_service
+        self._injector_for = injector_for
+        self._validation_for = validation_for
         self._scoring = scoring_service
-        self._active_chaos_ids: dict[uuid.UUID, str] = {}
 
     async def list_missions(self, db: AsyncSession, user: User) -> list[dict]:
         result = await db.execute(select(Mission).order_by(Mission.level))
@@ -102,10 +113,11 @@ class MissionService:
         if scenario:
             scenario.status = "failed"
             if scenario.chaos_id:
-                await self._chaos.revert(scenario.chaos_id)
+                injector = self._injector_for(scenario.environment)
+                await injector.revert(scenario.chaos_id, namespace_for(attempt.user_id))
                 scenario.chaos_id = None
         else:
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
 
         await db.commit()
         await db.refresh(attempt)
@@ -142,19 +154,31 @@ class MissionService:
             if not prev_completed.scalar_one_or_none():
                 raise ValueError("이전 레벨을 먼저 완료해야 합니다")
 
-        # 장애 주입
-        namespace = f"user-{user.id}"
-        chaos_result = await self._chaos.inject(mission.chaos_type, namespace)
+        # 미션이 속한 환경의 주입기를 고른다. 미구현 환경이면 여기서 실패한다.
+        injector = self._injector_for(mission.environment)
+
+        namespace = namespace_for(user.id)
+        chaos_result = await injector.inject(mission.chaos_type, namespace)
         if not chaos_result.success:
             raise RuntimeError(f"장애 주입 실패: {chaos_result.message}")
 
-        # 시도 기록 생성
-        attempt = MissionAttempt(user_id=user.id, mission_id=mission.id)
+        # chaos_id 를 DB 에 저장한다. 프로세스 메모리에만 두면 서버가 재시작됐을 때
+        # 주입된 장애를 되돌릴 방법이 없다.
+        attempt = MissionAttempt(
+            user_id=user.id,
+            mission_id=mission.id,
+            environment=mission.environment,
+            chaos_id=chaos_result.chaos_id,
+        )
         db.add(attempt)
-        await db.commit()
-        await db.refresh(attempt)
-
-        self._active_chaos_ids[attempt.id] = chaos_result.chaos_id
+        try:
+            await db.commit()
+            await db.refresh(attempt)
+        except Exception:
+            # 기록에 실패하면 주입된 장애가 고아가 되므로 즉시 되돌린다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise
         return attempt
 
     async def get_status(self, db: AsyncSession, attempt_id: uuid.UUID) -> dict:
@@ -185,7 +209,7 @@ class MissionService:
             attempt.status = "failed"
             attempt.end_time = now
             attempt.final_score = self._scoring.MIN_SCORE
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
 
@@ -210,7 +234,7 @@ class MissionService:
         mission = mission_result.scalar_one_or_none()
 
         namespace = f"user-{attempt.user_id}"
-        validation = await self._validation.check_resolution(mission.chaos_type, namespace)
+        validation = await self._validation_for(attempt.environment).check_resolution(mission.chaos_type, namespace)
 
         if validation.is_resolved:
             now = datetime.now(timezone.utc)
@@ -221,7 +245,7 @@ class MissionService:
                 attempt.hints_used, mission.hint_penalty,
             )
             MISSION_COMPLETIONS.labels(str(mission.level)).inc()
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
             return {"attempt": attempt, "message": f"미션 완료! 점수: {attempt.final_score}점"}
@@ -236,7 +260,7 @@ class MissionService:
         attempt.status = "abandoned"
         attempt.end_time = datetime.now(timezone.utc)
         attempt.final_score = 0
-        await self._cleanup_chaos(attempt.id)
+        await self._cleanup_chaos(attempt)
         await db.commit()
         await db.refresh(attempt)
         return attempt
@@ -254,7 +278,13 @@ class MissionService:
         await db.refresh(attempt)
         return attempt
 
-    async def _cleanup_chaos(self, attempt_id: uuid.UUID):
-        chaos_id = self._active_chaos_ids.pop(attempt_id, None)
-        if chaos_id:
-            await self._chaos.revert(chaos_id)
+    async def _cleanup_chaos(self, attempt: MissionAttempt) -> None:
+        """DB 에 저장된 chaos_id 로 되돌린다.
+
+        서버가 재시작돼 프로세스 메모리가 비어 있어도 동작해야 한다.
+        """
+        if not attempt.chaos_id:
+            return
+        injector = self._injector_for(attempt.environment)
+        await injector.revert(attempt.chaos_id, namespace_for(attempt.user_id))
+        attempt.chaos_id = None
