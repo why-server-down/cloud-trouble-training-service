@@ -13,8 +13,8 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 
 | 결손 | 위험 | 해소 |
 |---|---|---|
-| `CommandExecutor`가 host에서 `shell=True` 실행 | validator 우회 시 host RCE | BE-05 |
-| WebSocket이 session 소유권을 검증하지 않음 | 타 사용자 세션 오용·로그 오염 | BE-06 |
+| ~~`CommandExecutor`가 host에서 `shell=True` 실행~~ | ~~host RCE~~ | **BE-05 완료** |
+| ~~WebSocket이 session 소유권을 검증하지 않음~~ | ~~타 사용자 세션 오용~~ | **BE-06 완료** |
 | environment가 session 생성·명령 실행까지 미연결 | Docker 탭에서 K8s 명령 실행 | BE-03·BE-07 |
 | active chaos ID가 프로세스 메모리 dict에만 존재 | 서버 재시작 시 장애 정리 불가 | BE-02·BE-08 |
 
@@ -66,9 +66,9 @@ app/
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py      # kubectl 명령어 검증 (create는 secret/configmap만, 이름 필수)
-│   ├── command_executor.py       # kubectl 비동기 실행
-│   ├── websocket_handler.py      # WebSocket 연결
+│   ├── command_validator.py      # argv allowlist 검증 (셸 메타문자 거절, namespace 강제)
+│   ├── command_executor.py       # 샌드박스 Pod exec 실행 (Sandbox | Mock)
+│   ├── websocket_handler.py      # WebSocket 연결·동시성·CommandLog
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
 │   ├── chaos_injector.py         # 장애 주입 (Mock | ChaosMesh), chaos_type → (주입,복구) _CHAOS_HANDLERS 레지스트리
 │   ├── chaos_plan.py             # ChaosPlan, ChaosPlanCompiler (allowlist 안전장치)
@@ -107,6 +107,18 @@ app/
 ### 터미널
 - `POST /api/terminal/sessions` - 터미널 세션 생성 + K8s 네임스페이스/nginx Pod 자동 생성 🔒
 - `WS /ws/terminal/{session_id}?token=JWT` - 웹 터미널
+  - 연결 시 서버가 결정하는 값: `user_id`←JWT, `session`←`id + user_id + is_active`,
+    `namespace`·`environment`←session, `sandbox`←`SandboxService.reference_for(...)`
+  - **클라이언트가 보낸 namespace/pod는 어느 단계에서도 쓰지 않는다.**
+  - close code (전달을 위해 거절 시에도 `accept()` 후 `close()`)
+
+  | code | 의미 |
+  |---|---|
+  | 4000 | 같은 세션에 새 연결이 들어와 이전 연결 종료 |
+  | 4001 | 토큰 없음·무효 |
+  | 4003 | 세션 소유자 불일치 또는 비활성 |
+  | 4004 | 세션·샌드박스 없음 (세션 id 형식 오류 포함) |
+  | 4010 | 환경 미가용 |
 
 ### 고정 미션 (4개 레벨 튜토리얼)
 > AI 시나리오 attempt가 진행 중일 때 이 API들은 404를 반환한다 (혼용 방지)
@@ -142,6 +154,22 @@ app/
   - AI 시나리오와 정적 미션 모두 지원 (attempt_type 자동 분기)
 
 ## 미션 시스템 아키텍처
+
+### 터미널 명령 실행 경로 (BE-05)
+
+```
+사용자 입력
+  → CommandValidator: 셸 메타문자 거절 → shlex.split → argv allowlist → namespace 강제
+  → SandboxRef (서버가 DB 세션에서 생성)
+  → SandboxCommandExecutor: connect_get_namespaced_pod_exec 로 Pod 안에서 argv 실행
+```
+
+- **호스트 셸을 쓰지 않는다.** `shell=True` / `create_subprocess_shell` /
+  `subprocess.run` 은 `tests/test_terminal_security.py`가 AST로 검사해 0건을 강제한다.
+- 셸 메타문자(`|`, `>`, `<`, `&&`, `;`, 백틱, `$(`, 개행)는 파싱 이전에 거절한다.
+  argv로 넘기면 리터럴이 되지만, 사용자가 기대한 동작과 달라지므로 조용히 삼키지 않는다.
+- 한 세션의 동시 실행은 1개(`asyncio.Lock`). 실행 중 추가 명령은 오류로 알린다.
+- 명령 원문과 출력 본문은 info 로그에 남기지 않는다(session_id·exit_code·소요시간만).
 
 ### 고정 미션 (튜토리얼)
 - 환경변수 `CHAOS_BACKEND=mock|chaos_mesh`, `VALIDATION_BACKEND=mock|k8s|prometheus`로 전환
@@ -210,7 +238,7 @@ POST /api/scenarios/current/check
 > - ~~mission list API가 DB의 `mission.environment`를 응답에 싣지 않는다.~~ (BE-03 완료)
 > - ~~`GET /api/environments`(환경 가용성) 미구현.~~ (BE-03 완료)
 > - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다. → BE-07
-> - WebSocket이 session의 environment를 로드하지 않는다. → BE-06
+> - ~~WebSocket이 session의 environment를 로드하지 않는다.~~ (BE-06 완료)
 > - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다. → BE-08
 > - mission 목록·잠금이 environment로 필터되지 않는다. → BE-09
 >
@@ -285,6 +313,13 @@ POST /api/scenarios/current/check
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
 AUTO_CREATE_SCHEMA=true      # 로컬 개발/테스트 편의용. 배포 환경에서는 false
+
+# 터미널 실행 (BE-05)
+TERMINAL_BACKEND=sandbox          # sandbox | mock
+COMMAND_TIMEOUT_SECONDS=5         # 기본 명령 timeout
+COMMAND_TIMEOUT_MAX_SECONDS=30    # 환경별 override 상한
+COMMAND_OUTPUT_LIMIT_BYTES=65536  # 사용자에게 보내는 출력 상한 (64KiB)
+COMMAND_LOG_LIMIT_BYTES=5120      # CommandLog 저장 상한 (5KiB)
 
 AI_BACKEND=mock              # mock | openai | gemini
 

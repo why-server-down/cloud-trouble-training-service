@@ -15,7 +15,13 @@ from app.services.sandbox_service import (
     SandboxNotReadyError,
     get_sandbox_service,
 )
-from app.services.websocket_handler import WebSocketHandler
+from app.services.websocket_handler import (
+    CLOSE_ENVIRONMENT_UNAVAILABLE,
+    CLOSE_OWNER_MISMATCH,
+    CLOSE_SESSION_NOT_FOUND,
+    CLOSE_TOKEN_INVALID,
+    WebSocketHandler,
+)
 
 router = APIRouter(tags=["terminal"])
 
@@ -131,38 +137,84 @@ async def terminal_websocket(
     websocket: WebSocket,
     session_id: str,
 ):
-    # WebSocket에서는 Depends를 못쓰므로 직접 토큰 검증
+    """터미널 WebSocket.
+
+    실행에 필요한 값은 전부 서버가 정한다.
+      user_id     <- JWT
+      session     <- id + user_id + is_active
+      namespace   <- session.namespace
+      environment <- session.environment
+      sandbox     <- SandboxService.reference_for(...)
+
+    클라이언트가 보낸 namespace/pod 는 어느 단계에서도 쓰지 않는다.
+    close code 를 클라이언트에 전달하려면 accept 이후에 close 해야 하므로,
+    거절하는 경우에도 먼저 accept 한다.
+    """
+    await websocket.accept()
+
     token = websocket.query_params.get("token")
     if not token:
-        await websocket.close(code=4001, reason="Missing token")
+        await websocket.close(code=CLOSE_TOKEN_INVALID, reason="Missing token")
         return
 
     payload = decode_access_token(token)
     if not payload:
-        await websocket.close(code=4001, reason="Invalid token")
+        await websocket.close(code=CLOSE_TOKEN_INVALID, reason="Invalid token")
         return
 
-    user_id = payload.get("sub")
-    if not user_id:
-        await websocket.close(code=4001, reason="Invalid token payload")
+    raw_user_id = payload.get("sub")
+    if not raw_user_id:
+        await websocket.close(code=CLOSE_TOKEN_INVALID, reason="Invalid token payload")
         return
 
-    namespace = f"user-{user_id}"
+    try:
+        user_id = UUID(str(raw_user_id))
+        session_uuid = UUID(session_id)
+    except ValueError:
+        await websocket.close(code=CLOSE_SESSION_NOT_FOUND, reason="Session not found")
+        return
 
     async for db in get_db():
-        # 세션 활동 시간 업데이트
+        # 소유권 판정을 위해 먼저 id 로만 조회한다.
+        # 없으면 4004, 있으나 내 것이 아니거나 비활성이면 4003 으로 구분한다.
         result = await db.execute(
-            select(TerminalSession).where(TerminalSession.id == session_id)
+            select(TerminalSession).where(TerminalSession.id == session_uuid)
         )
         session = result.scalar_one_or_none()
-        if session:
-            session.last_activity = datetime.now(timezone.utc)
-            await db.commit()
+
+        if session is None:
+            await websocket.close(code=CLOSE_SESSION_NOT_FOUND, reason="Session not found")
+            return
+
+        if session.user_id != user_id or not session.is_active:
+            await websocket.close(
+                code=CLOSE_OWNER_MISMATCH, reason="Session is not available for this user"
+            )
+            return
+
+        try:
+            environment = assert_implemented(session.environment)
+        except ValueError:
+            await websocket.close(
+                code=CLOSE_ENVIRONMENT_UNAVAILABLE, reason="Environment is not available"
+            )
+            return
+
+        sandbox_service = get_sandbox_service()
+        try:
+            sandbox = sandbox_service.reference_for(
+                user_id=session.user_id,
+                namespace=session.namespace,
+                environment=environment,
+            )
+        except Exception:
+            await websocket.close(code=CLOSE_SESSION_NOT_FOUND, reason="Sandbox not found")
+            return
 
         await ws_handler.handle_connection(
             websocket=websocket,
-            user_id=user_id,
-            session_id=session_id,
-            namespace=namespace,
+            session=session,
+            sandbox=sandbox,
             db=db,
         )
+        return
