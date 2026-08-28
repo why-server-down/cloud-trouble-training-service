@@ -15,7 +15,13 @@ from app.api.missions import router as missions_router
 from app.api.scenarios import router as scenarios_router
 from app.api.terminal import router as terminal_router
 from app.core.config import settings
-from app.core.database import Base, async_session, engine
+from app.core.database import (
+    Base,
+    async_session,
+    engine,
+    schema_needs_migration,
+    stamp_head_if_schema_current,
+)
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
 from app.services.seed_data import seed_missions
 from app.services.qdrant_init import auto_ingest_if_empty
@@ -33,6 +39,23 @@ async def lifespan(app: FastAPI):
     if settings.AUTO_CREATE_SCHEMA:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # create_all 이 최신 스키마를 만든 경우에만 head 로 표시한다.
+            # 이력을 남기지 않으면 이후 `alembic upgrade head` 가 이미 있는 컬럼을
+            # 다시 추가하려다 실패한다.
+            await conn.run_sync(stamp_head_if_schema_current)
+
+    # 옛 스키마 위에서 조용히 깨지는 것을 막는다.
+    # create_all 은 기존 테이블을 ALTER 하지 않으므로 Alembic 이전에 만들어진 DB 는
+    # 여기서 걸러 명확한 안내와 함께 기동을 중단한다.
+    async with engine.begin() as conn:
+        outdated = await conn.run_sync(schema_needs_migration)
+    if outdated:
+        raise RuntimeError(
+            "데이터베이스 스키마가 최신이 아닙니다. "
+            "`cd backend && alembic upgrade head` 를 실행한 뒤 다시 시작하세요. "
+            "(기존 로컬 DB 도 그대로 적용되며 데이터는 보존됩니다)"
+        )
+
     async with async_session() as db:
         await seed_missions(db)
     await auto_ingest_if_empty()
