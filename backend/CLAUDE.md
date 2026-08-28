@@ -378,14 +378,40 @@ alembic current                               # 현재 리비전 확인
 > `in_progress`를 `abandoned`로 정리)은 어떤 행이 원래 진행 중이었는지 기록하지
 > 않으므로 되돌리지 않는다.
 
+### 기존 로컬 DB를 쓰던 경우 (팀원 공통 안내)
+
+Alembic 도입(BE-02) 전에 만들어진 로컬 `k8s_survival` DB는 `mission_attempts.environment`
+컬럼과 `alembic_version` 테이블이 없다. **`create_all`은 기존 테이블을 ALTER하지 않으므로
+앱을 띄우는 것만으로는 고쳐지지 않는다.**
+
+```bash
+cd backend && source venv/bin/activate
+alembic upgrade head
+```
+
+**이 한 줄이면 된다. `alembic stamp`는 필요 없고, 볼륨을 버릴 필요도 없다.**
+`0001`이 옛 DB를 감지해 baseline으로 보정한 뒤 `0002`를 적용하며, 기존 데이터는 보존된다.
+
+스키마가 낡은 상태로 앱을 띄우면 attempt 조회가 조용히 깨지는 대신
+**startup에서 위 명령을 안내하며 기동을 중단**한다.
+
 ### 새 로컬 DB 준비
 ```bash
 docker compose up -d postgres
 cd backend && source venv/bin/activate && alembic upgrade head
 ```
+
 `AUTO_CREATE_SCHEMA=true`(기본값)이면 앱 startup에서도 `create_all`로 빈 스키마를
-만들지만, 이는 로컬 편의 장치일 뿐이다. 배포 환경에서는 `false`로 두고 배포
-단계에서 `alembic upgrade head`를 실행한다.
+만든다. 이때 **스키마가 실제로 head 상태일 때만 `alembic_version`을 head로 표시**한다.
+- 빈 DB → `create_all`이 최신 스키마 생성 → stamp → 이후 `upgrade head`는 no-op
+- 옛 DB → `create_all`은 기존 테이블을 건드리지 않으므로 stamp하지 않는다.
+  여기서 stamp하면 거짓이 되어 보정이 영영 적용되지 않는다.
+
+이 장치가 없으면 이력 없이 최신 스키마만 있는 DB에서 `upgrade head`가
+`DuplicateColumnError`로 실패한다. `0002`도 같은 이유로 idempotent하게 작성돼 있다.
+
+배포 환경에서는 `AUTO_CREATE_SCHEMA=false`로 두고 배포 단계에서
+`alembic upgrade head`를 실행한다.
 
 ## 의존 서비스
 - PostgreSQL: localhost:5432 (k8s_survival DB)
