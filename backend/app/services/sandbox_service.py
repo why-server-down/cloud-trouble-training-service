@@ -102,6 +102,23 @@ class SandboxService:
     def _resource_name(sandbox_id: str) -> str:
         return f"sandbox-{sandbox_id}"
 
+    def reference_for(
+        self,
+        *,
+        user_id: UUID | str,
+        namespace: str,
+        environment: EnvironmentId,
+    ) -> SandboxRef:
+        """DB 세션 값으로 서버가 신뢰할 수 있는 샌드박스 참조를 복원한다."""
+        sandbox_id = self.stable_identifier(user_id, environment)
+        return SandboxRef(
+            id=sandbox_id,
+            namespace=namespace,
+            pod_name=self._resource_name(sandbox_id),
+            container_name=self.TOOLBOX_CONTAINER,
+            environment=environment,
+        )
+
     def _ensure_sync(
         self, namespace: str, sandbox_id: str, environment: EnvironmentId
     ) -> SandboxRef:

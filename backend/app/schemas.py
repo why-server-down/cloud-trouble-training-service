@@ -38,7 +38,7 @@ class UserProfileResponse(BaseModel):
 
 # Terminal
 class SessionCreate(BaseModel):
-    pass
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
 
 
 class SessionResponse(BaseModel):
