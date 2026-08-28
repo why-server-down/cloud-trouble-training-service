@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    # Terminal 실행 (BE-05)
+    # 사용자 명령은 호스트 셸이 아니라 사용자 네임스페이스의 샌드박스 Pod 안에서 실행된다.
+    TERMINAL_BACKEND: str = "sandbox"  # "sandbox" | "mock"
+    COMMAND_TIMEOUT_SECONDS: int = 5
+    COMMAND_TIMEOUT_MAX_SECONDS: int = 30  # 환경별 override 상한
+    COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
+    COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
+
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
