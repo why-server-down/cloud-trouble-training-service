@@ -159,8 +159,8 @@ cd backend && python -m pytest -q; cd ..
 # (2) API 계약에 environment 필드가 반영됐는가?  → 결과가 나와야 한다
 git grep -n "environment" origin/dev -- backend/app/schemas.py
 
-# (3) Alembic이 도입됐는가?  → 디렉터리가 있어야 한다
-git ls-tree origin/dev --name-only backend/alembic
+# (3) Alembic이 도입됐는가?  → 리비전 파일이 나와야 한다
+git ls-tree origin/dev --name-only backend/alembic/versions/
 
 # (4) PR Checks가 dev에 required로 걸려 있는가?  → 404가 아니어야 한다
 gh api repos/why-server-down/cloud-trouble-training-service/branches/dev/protection \
@@ -178,7 +178,8 @@ gh api repos/why-server-down/cloud-trouble-training-service/branches/dev/protect
 git grep -n "shell=True" origin/dev -- backend/app
 
 # 샌드박스 서비스가 들어왔는가?  → 파일이 있어야 한다
-git ls-tree origin/dev --name-only backend/app/services | grep -i sandbox
+# (경로 끝 슬래시가 없으면 디렉터리 이름만 나와서 항상 실패로 보인다)
+git ls-tree origin/dev --name-only backend/app/services/ | grep -i sandbox
 ```
 
 ### 5-5. Wave 2 게이트 — Wave 3을 시작하려면
