@@ -913,12 +913,24 @@ competency = round(0.5*score + 0.3*speed + 0.2*hint)
 - validation duration/result.
 - active sessions/attempts by environment.
 - cleanup failures.
+- **AI 호출 duration/result/token by provider·용도(scenario|tutor|validation).**
+  AI 담당 문서 §8이 요구하는 "AI metrics endpoint/registry"가 이 항목이다.
+  registry는 기존 `/metrics`를 공유하고 AI 담당은 계측 지점만 호출한다.
+
+추가 rate limit:
+
+- **`POST /api/chat/`에 사용자당 rate limit.** AI 담당 문서 §8이 백엔드에 요구한 항목이며
+  백엔드 계획서에는 배정돼 있지 않았다(2026-08-28 확인).
+- 한도 초과는 429와 재시도 가능 시각을 함께 응답한다. 프론트가 화면에 표시할 수 있어야 한다.
+- LLM 호출 비용과 직결되므로 AI_BACKEND가 mock이 아닐 때 반드시 적용한다.
 
 인수 조건:
 
 - 운영 모드에서 wildcard CORS가 아니다.
 - metrics label에 user ID, namespace, command, scenario title이 없다.
 - health와 readiness를 구분하고 PostgreSQL/K8s/Qdrant 의존 상태를 적절히 노출한다.
+- 한도를 넘긴 chat 요청이 429로 거절되고 정상 요청은 영향받지 않는다.
+- AI 호출 메트릭 label에 프롬프트·응답 본문이 들어가지 않는다.
 
 ### BE-24 테스트 확대
 
@@ -943,6 +955,32 @@ competency = round(0.5*score + 0.3*speed + 0.2*hint)
 - API: FastAPI dependency override + test DB.
 - integration: Docker Desktop Kubernetes에서 marker `integration`.
 - 실제 privileged/DinD test는 기본 unit suite와 분리한다.
+
+### BE-29 TutorMessage 보존 정책
+
+수정 파일:
+
+- `backend/app/models.py` (기존 `TODO(phase7)` 주석 해소)
+- 신규 정리 작업 또는 startup reconciliation
+- migration
+- tests
+
+배경: AI 담당 문서 §8이 "TutorMessage retention job"을 백엔드에 요구하지만
+백엔드 계획서에 배정돼 있지 않았다(2026-08-28 확인). `models.py`에는
+`TODO(phase7): created_at 기준 30일 경과 레코드 자동 삭제 배치 추가 예정` 주석만 있다.
+
+구현 지시:
+
+- 보존 기간을 설정값으로 두고(기본 30일) 경과 레코드를 주기적으로 삭제한다.
+- 삭제 주기는 BE-22의 cleanup/reconciliation 경로에 얹고 별도 스케줄러를 새로 만들지 않는다.
+- 진행 중인 attempt의 대화는 기간이 지나도 삭제하지 않는다.
+- 삭제 건수를 메트릭 또는 로그로 남기되 메시지 본문은 남기지 않는다.
+
+인수 조건:
+
+- 보존 기간이 지난 메시지가 삭제되고 진행 중 attempt의 메시지는 남는다.
+- 반복 실행해도 안전하다.
+- 삭제가 실패해도 요청 처리 경로에 영향을 주지 않는다.
 
 ---
 
@@ -1026,13 +1064,17 @@ BE-00 결정
                   -> BE-19 context
                   -> BE-20 AI scenario
                   -> BE-21 analytics
-                      -> BE-22~24 hardening
+                      -> BE-22~24, BE-29 hardening
                           -> BE-25~28 release
 ```
 
 ---
 
 ## 8. 팀 간 인계점
+
+> **계약을 바꾼 PR은 머지 직후 담당자에게 직접 알린다.** PR 본문에 적는 것만으로는
+> 전달되지 않는다. 아래 항목이 바뀌면 해당 담당자에게 알린 뒤 다음 작업으로 넘어간다.
+> `schemas.py` / WebSocket close code / 환경 가용성 status 값 / 명령 정책 / 응답 필드 추가·삭제.
 
 ### 프론트엔드에 제공할 것
 
@@ -1051,6 +1093,20 @@ BE-00 결정
 - environment별 mechanical validation rule 계약.
 - scenario output에서 허용할 chaos plan step.
 - latency/token metrics 저장 경계.
+
+### 백엔드 계획서에 배정되지 않았던 요구 (2026-08-28 정리)
+
+AI·프론트 계획서가 백엔드에 요구하지만 이 문서의 작업 ID에 없던 항목이다.
+발견 시점에 아래처럼 배정했다. 같은 누락이 또 나오면 여기에 추가한다.
+
+| 요구 출처 | 항목 | 배정 |
+|---|---|---|
+| 프론트 API-01 | `GET /api/environments` 환경 가용성 | BE-03에서 구현 완료 |
+| AI §8 | chat rate limit | BE-23 |
+| AI §8 | AI metrics endpoint/registry | BE-23 |
+| AI §8 | TutorMessage retention job | **BE-29 신설** |
+| 프론트 API-08 | 환경별 Grafana UID 조회 API | 조건부. 초기에는 프론트 config를 쓰고, 운영에서 UID가 자주 바뀌면 `GET /api/environments` 응답에 `observability` 객체를 추가한다 |
+| 프론트 5.1 | `EnvironmentStatus`의 `degraded` / `disabled` | 백엔드는 현재 `available` / `preparing`만 내보낸다. 프론트는 화면을 먼저 갖췄으므로, 이 값을 실제로 쓰려면 백엔드가 판정 기준(무엇을 degraded로 볼 것인가)을 먼저 정해야 한다. BE-23의 health/readiness 작업과 함께 결정한다 |
 
 ### AI 담당자에게 요구할 것
 
@@ -1072,7 +1128,7 @@ BE-00 결정
 | 5 | `feature/docker-env` | BE-11~14 |
 | 6 | `feature/linux-env` | BE-16~18 |
 | 7 | `feature/cross-layer-contracts` | BE-19~21 |
-| 8 | `feature/backend-hardening` | BE-22~24 |
+| 8 | `feature/backend-hardening` | BE-22~24, BE-29 |
 | 9 | `feature/aws-migration` | BE-25 |
 | 10 | `feature/backend-release` | BE-26~28 |
 
