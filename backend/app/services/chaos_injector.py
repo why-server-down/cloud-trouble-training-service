@@ -15,6 +15,8 @@ class ChaosResult:
     success: bool
     chaos_id: str
     message: str
+    # 주입 전 상태 등 진단용 부가 정보
+    metadata: dict | None = None
 
 
 class BaseChaosInjector(ABC):

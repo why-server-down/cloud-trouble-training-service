@@ -114,15 +114,23 @@ class SandboxService:
         namespace: str,
         environment: EnvironmentId,
     ) -> SandboxRef:
-        """DB 세션 값으로 서버가 신뢰할 수 있는 샌드박스 참조를 복원한다."""
+        """DB 세션 값으로 서버가 신뢰할 수 있는 샌드박스 참조를 복원한다.
+
+        컨테이너 이름은 환경마다 다르다. 여기서 고정값을 쓰면 Docker 샌드박스에
+        exec 할 때 "container toolbox is not valid for pod ..." 로 실패한다.
+        """
         sandbox_id = self.stable_identifier(user_id, environment)
         return SandboxRef(
             id=sandbox_id,
             namespace=namespace,
             pod_name=self._resource_name(sandbox_id),
-            container_name=self.TOOLBOX_CONTAINER,
+            container_name=self.container_name_for(environment),
             environment=environment,
         )
+
+    @classmethod
+    def container_name_for(cls, environment: str) -> str:
+        return cls._CONTAINER_NAMES.get(environment, cls.TOOLBOX_CONTAINER)
 
     def _ensure_sync(
         self, namespace: str, sandbox_id: str, environment: EnvironmentId
@@ -149,7 +157,7 @@ class SandboxService:
             environment=environment,
         )
 
-    def _provision_kubernetes(self, namespace: str, name: str, labels: dict) -> str:
+    def _provision_kubernetes(self, namespace: str, name: str, labels: dict) -> str:  # noqa: D401
         self._ensure_service_account(namespace, name, labels)
         self._ensure_role(namespace, name, labels)
         self._ensure_role_binding(namespace, name, labels)
@@ -161,6 +169,15 @@ class SandboxService:
         # 토큰도 마운트하지 않아 클러스터 접근 경로 자체를 없앤다.
         self._ensure_dind_pod(namespace, name, labels)
         return self.DIND_CONTAINER
+
+    def exec_in_sandbox(self, sandbox: "SandboxRef", argv: list[str]) -> str:
+        """샌드박스 안에서 argv 를 실행하고 출력을 돌려준다.
+
+        실행 대상은 서버가 만든 SandboxRef 로만 지정된다.
+        """
+        return self._exec_in_sandbox(
+            sandbox.namespace, sandbox.pod_name, sandbox.container_name, argv
+        )
 
     def _exec_in_sandbox(self, namespace: str, pod: str, container: str, argv: list[str]) -> str:
         from kubernetes.stream import stream
@@ -497,4 +514,9 @@ def get_sandbox_service() -> SandboxService:
 SandboxService._PROVISIONERS = {
     KUBERNETES: SandboxService._provision_kubernetes,
     DOCKER: SandboxService._provision_docker,
+}
+
+SandboxService._CONTAINER_NAMES = {
+    KUBERNETES: SandboxService.TOOLBOX_CONTAINER,
+    DOCKER: SandboxService.DIND_CONTAINER,
 }
