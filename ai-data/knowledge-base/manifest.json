@@ -1,0 +1,141 @@
+{
+  "schema_version": "1.0",
+  "documents": {
+    "01-kubernetes-docs/debugging-guide.md": {
+      "source_id": "kubernetes-debugging-guide",
+      "title": "Kubernetes 디버깅 가이드",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "01-kubernetes-docs/pod-states.md": {
+      "source_id": "kubernetes-pod-states",
+      "title": "Kubernetes Pod 상태와 생명주기",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "02-komodor/incident-playbooks.md": {
+      "source_id": "komodor-incident-playbooks",
+      "title": "Kubernetes 장애 대응 플레이북",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.85,
+      "version": "2026-08-29"
+    },
+    "02-komodor/log-patterns.md": {
+      "source_id": "komodor-log-patterns",
+      "title": "Kubernetes 로그 패턴",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.85,
+      "version": "2026-08-29"
+    },
+    "03-kodekloud/architecture.md": {
+      "source_id": "kodekloud-kubernetes-architecture",
+      "title": "Kubernetes 아키텍처",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.8,
+      "version": "2026-08-29"
+    },
+    "04-cncf/resilience-patterns.md": {
+      "source_id": "cncf-resilience-patterns",
+      "title": "Cloud Native 복원력 패턴",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.95,
+      "version": "2026-08-29"
+    },
+    "05-chaos-mesh/pod-chaos.md": {
+      "source_id": "chaos-mesh-pod-chaos",
+      "title": "Chaos Mesh PodChaos",
+      "environments": ["kubernetes"],
+      "fault_types": ["pod_failure", "crash_loop", "oom_killed", "liveness_probe_failure", "liveness_probe", "init_container_failure", "configmap_misconfig"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "06-prometheus/promql-queries.md": {
+      "source_id": "prometheus-kubernetes-promql",
+      "title": "Kubernetes 장애 분석 PromQL",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "README.md": {
+      "source_id": "afterfail-knowledge-index",
+      "title": "AfterFail 지식베이스 안내",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.7,
+      "version": "2026-08-29"
+    },
+    "commands/kubectl-basics.md": {
+      "source_id": "kubectl-basic-commands",
+      "title": "kubectl 기본 명령어",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.95,
+      "version": "2026-08-29"
+    },
+    "k8s_troubleshooting_guide.md": {
+      "source_id": "afterfail-kubernetes-troubleshooting",
+      "title": "Kubernetes 트러블슈팅 종합 가이드",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.8,
+      "version": "2026-08-29"
+    },
+    "survival_camp_playbook.md": {
+      "source_id": "afterfail-survival-camp-playbook",
+      "title": "AfterFail 미션 플레이북",
+      "environments": ["kubernetes"],
+      "fault_types": ["general"],
+      "authority": 0.8,
+      "version": "2026-08-29"
+    },
+    "troubleshooting/crashloopbackoff.md": {
+      "source_id": "kubernetes-crashloopbackoff",
+      "title": "CrashLoopBackOff 트러블슈팅",
+      "environments": ["kubernetes"],
+      "fault_types": ["crash_loop", "pod_failure", "init_container_failure", "probe_failure", "liveness_probe_failure", "liveness_probe", "compound_probe_cascade", "configmap_misconfig", "secret_ref_missing", "network_latency"],
+      "authority": 0.9,
+      "version": "2026-08-29"
+    },
+    "troubleshooting/imagepullbackoff.md": {
+      "source_id": "kubernetes-imagepullbackoff",
+      "title": "ImagePullBackOff 트러블슈팅",
+      "environments": ["kubernetes"],
+      "fault_types": ["image_pull_error", "wrong_image_registry", "pod_failure"],
+      "authority": 0.9,
+      "version": "2026-08-29"
+    },
+    "troubleshooting/oomkilled.md": {
+      "source_id": "kubernetes-oomkilled",
+      "title": "OOMKilled 트러블슈팅",
+      "environments": ["kubernetes"],
+      "fault_types": ["oom_killed", "memory_stress", "cpu_throttle"],
+      "authority": 0.9,
+      "version": "2026-08-29"
+    },
+    "troubleshooting/pending-pods.md": {
+      "source_id": "kubernetes-pending-pods",
+      "title": "Pending Pod 트러블슈팅",
+      "environments": ["kubernetes"],
+      "fault_types": ["node_selector_mismatch", "pvc_unbound"],
+      "authority": 0.9,
+      "version": "2026-08-29"
+    },
+    "troubleshooting/service-misconfig.md": {
+      "source_id": "kubernetes-service-misconfiguration",
+      "title": "Service 설정 오류 트러블슈팅",
+      "environments": ["kubernetes"],
+      "fault_types": ["service_misconfig", "service_selector_mismatch", "compound_crash_service"],
+      "authority": 0.9,
+      "version": "2026-08-29"
+    }
+  }
+}
