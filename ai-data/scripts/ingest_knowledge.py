@@ -6,6 +6,7 @@ Loads documents from knowledge-base directory and ingests them into Qdrant
 
 import os
 import sys
+import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -56,6 +57,13 @@ from ingest import (  # noqa: F401  (load_all_documents re-export for backwards 
 
 def main():
     """Main ingestion process"""
+    parser = argparse.ArgumentParser(description="AfterFail knowledge 동기화 admin command")
+    parser.add_argument(
+        "--promote-alias",
+        metavar="ALIAS",
+        help="ingestion 검증 성공 후 현재 versioned collection으로 alias 전환",
+    )
+    args = parser.parse_args()
     print_header("Knowledge Base Ingestion")
     
     # Display configuration
@@ -113,15 +121,6 @@ def main():
             print(f"  Vector dimension: {stats['vector_dimension']}")
             print(f"  Distance metric: {stats['distance_metric']}")
             
-            if stats['document_count'] > 0:
-                response = input("\n  Collection already has documents. Clear and reload? (y/N): ")
-                if response.lower() == 'y':
-                    print("  Clearing collection...")
-                    rag.clear_collection()
-                    print_success("Collection cleared")
-                else:
-                    print_warning("Skipping ingestion (collection not cleared)")
-                    sys.exit(0)
         except Exception as e:
             print_warning(f"Could not get collection stats: {e}")
         
@@ -190,9 +189,12 @@ def main():
             print(f"  Embedding model: text-embedding-ada-002")
         print(f"  Estimated API calls: {len(chunks)}")
         
-        count = rag.ingest_documents(chunks)
-        
-        print_success(f"Successfully ingested {count} chunks")
+        report = rag.sync_documents(chunks)
+        print_success(
+            "동기화 완료: "
+            f"added={report.added}, updated={report.updated}, "
+            f"deleted={report.deleted}, unchanged={report.unchanged}"
+        )
         
         # Step 6: Verify ingestion
         print_step(6, "Verifying ingestion")
@@ -201,10 +203,17 @@ def main():
         print(f"  Collection: {stats['collection_name']}")
         print(f"  Total documents: {stats['document_count']}")
         
-        if stats['document_count'] != count:
-            print_warning(f"Document count mismatch: expected {count}, got {stats['document_count']}")
+        if stats['document_count'] != len(chunks):
+            print_warning(
+                f"Document count mismatch: expected {len(chunks)}, "
+                f"got {stats['document_count']}"
+            )
         else:
             print_success("Document count verified")
+
+        if args.promote_alias:
+            rag.promote_alias(args.promote_alias)
+            print_success(f"Alias promoted: {args.promote_alias} -> {rag.collection_name}")
         
         # Step 7: Test search
         print_step(7, "Testing search functionality")
@@ -237,7 +246,7 @@ def main():
         print("\nSummary:")
         print(f"  ✓ Documents loaded: {load_report.document_count}")
         print(f"  ✓ Chunks created: {load_report.chunk_count}")
-        print(f"  ✓ Chunks ingested: {count}")
+        print(f"  ✓ Chunks synchronized: {report.total}")
         print(f"  ✓ Collection: {stats['collection_name']}")
         print(f"  ✓ Total documents in DB: {stats['document_count']}")
         
