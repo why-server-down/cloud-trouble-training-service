@@ -36,7 +36,7 @@
       "kind": "manifest_coverage",
       "manifest": "../knowledge-base/manifest.json",
       "knowledge_base": "../knowledge-base",
-      "expected_documents": 23
+      "expected_documents": 30
     },
     {
       "id": "docker-question-coverage",
@@ -50,6 +50,14 @@
         "container_oom",
         "container_cpu_throttle"
       ]
+    },
+    {
+      "id": "linux-question-coverage",
+      "kind": "question_dataset_coverage",
+      "dataset": "linux_retrieval_questions.json",
+      "environment": "linux",
+      "minimum_questions": 20,
+      "required_fault_types": ["linux_oom", "disk_io_stress", "zombie_process", "orphan_process", "service_failure"]
     }
   ]
 }

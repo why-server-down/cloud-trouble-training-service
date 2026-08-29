@@ -56,9 +56,9 @@ def test_existing_kubernetes_documents_all_have_valid_metadata():
         if document.metadata["environments"] == ["kubernetes"]
     ]
 
-    assert len(documents) == 23
+    assert len(documents) == 30
     assert len(kubernetes_documents) == 17
-    assert len({document.metadata["source_id"] for document in documents}) == 23
+    assert len({document.metadata["source_id"] for document in documents}) == 30
     for document in documents:
         assert document.metadata["title"]
         assert document.metadata["fault_types"]
@@ -138,7 +138,7 @@ def test_chunks_have_index_hash_and_source_report():
     chunks = attach_chunk_metadata(splitter.split_documents(documents))
     report = build_load_report(documents, chunks)
 
-    assert report.document_count == 23
+    assert report.document_count == 30
     assert report.chunk_count == len(chunks)
     assert set(report.chunks_by_source) == {
         document.metadata["source"] for document in documents
