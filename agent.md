@@ -208,18 +208,27 @@ user-{id} 네임스페이스 (격리 경계)
 
 ## 캡스톤 1 선행 작업 (AI 구현 전 해결 필요)
 
-### 미션 4 (network_latency) 재설계 필요
+### 미션 4 (network_latency) — 해결됨 (BE-10, 2026-08-29)
 
-현재 미션 4의 해결 방식에 근본적인 문제가 있다.
+**과거 문제**: `NetworkChaos` 2초 지연 + Liveness Probe 추가를 정답으로 두었는데,
+Probe를 추가해도 지연은 사라지지 않아 "문제 해결"이 체감되지 않았다.
 
-- **현재 장애**: Chaos Mesh `NetworkChaos`로 2초 지연 주입
-- **현재 정답**: Liveness Probe 추가 (`kubectl patch deployment/nginx`)
-- **문제점**: Liveness Probe를 추가해도 NetworkChaos가 유지되는 한 지연은 사라지지 않는다. 사용자 입장에서 체감 가능한 "문제 해결"이 일어나지 않는다.
+**중간 변경**: 장애 방식을 readinessProbe 실패 주입(`/healthz-notexist`)으로 바꿨다.
 
-재설계 방향 후보:
-1. NetworkChaos를 제거하는 것 자체를 정답으로 바꿈 (`kubectl delete networkchaos`) 단, 사용자에게 chaos namespace 접근 권한이 있어야 함
-2. 네트워크 지연 대신 DNS misconfig 또는 잘못된 service port로 교체
-3. 현재 `CHAOS_BACKEND=mock` 환경에서 미션 4를 포기 미션으로 처리하고 새 장애로 교체
+**BE-10 실클러스터 회귀에서 드러난 결함**: 방식을 바꾼 뒤에도 미션이 동작하지 않았다.
+RollingUpdate 기본값(`maxSurge 25%`)에서는 새 Pod가 Ready가 되지 못하면 **기존 Ready
+Pod가 그대로 남는다.** 엔드포인트가 유지되어 서비스는 정상 동작하고, 검증기도
+"해결됨"으로 판정한다. 즉 **장애 자체가 발생하지 않았다.**
+
+```
+nginx-58d45b8fcf-zmqj5   1/1 Running   ← 기존 Pod, Ready 유지
+nginx-7794d56cc9-cgdnp   0/1 Running   ← 새 Pod, probe 실패
+endpoints: 10.244.0.26                  ← 서비스는 계속 정상
+```
+
+**해결**: 주입 시 롤아웃 전략을 `maxUnavailable=1 / maxSurge=0`으로 함께 조정해
+기존 Pod가 먼저 내려가게 했다. 복구(readinessProbe 제거) 시 전략도 기본값으로 되돌린다.
+실클러스터에서 주입 2초 만에 장애가 감지되고 복구 2초 만에 검증을 통과한다.
 
 ### cAdvisor 구축 필요
 

@@ -183,7 +183,7 @@ app/
 | `pod_failure` | nginx 이미지를 `nginx:wrongtag`로 패치 → ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
 | `memory_stress` | nginx 메모리 limit을 6Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
 | `service_misconfig` | webapp Deployment + 잘못된 selector의 Service 생성 | `kubectl patch svc webapp-svc -p '{"spec":{"selector":{"app":"webapp"}}}'` |
-| `network_latency` | nginx readinessProbe에 존재하지 않는 경로 주입 | `kubectl patch deployment nginx -p '...'`으로 readinessProbe 제거 |
+| `network_latency` | nginx readinessProbe에 존재하지 않는 경로 주입 + 롤아웃 전략을 `maxSurge=0`으로 조정 | `kubectl patch deployment nginx -p '...'`으로 readinessProbe 제거 |
 | `wrong_image_registry` | private registry 이미지로 패치 → unauthorized ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
 | `secret_ref_missing` | 존재하지 않는 Secret envFrom 참조 → CreateContainerConfigError | Secret 생성 또는 envFrom 제거 |
 | `pvc_unbound` | 존재하지 않는 storageClass PVC 생성 + 마운트 → Pod Pending | PVC 삭제 및 deployment에서 volume/volumeMount 제거 |
@@ -241,6 +241,32 @@ docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
 - `BaseChaosInjector.chaos_type_from_id()`로 타입을 복원하므로 인메모리 dict가 비어도 동작
 - 정리는 `attempt.chaos_id`(DB)를 근거로 하고, 되돌린 뒤 `None`으로 비워 재정리에 안전하다
 - 주입 성공 후 DB commit이 실패하면 즉시 revert해 고아 장애를 남기지 않는다
+
+### 실클러스터 회귀 (BE-10, 2026-08-29)
+
+Docker Desktop Kubernetes(v1.34.3) + Chaos Mesh로 고정 미션 4개를 end-to-end 검증했다.
+각 미션마다 **주입 → 장애 감지 → toolbox Pod에서 복구 명령 → 검증 통과 → revert** 전 사이클.
+
+| 미션 | chaos_type | 결과 |
+|---|---|---|
+| 1. 사라진 웹페이지 | `pod_failure` | 통과 |
+| 2. 터져버린 쇼핑몰 | `memory_stress` | 통과 |
+| 3. 끊어진 연결고리 | `service_misconfig` | 통과 |
+| 4. 좀비 서버의 습격 | `network_latency` | 통과 (아래 결함 수정 후) |
+
+**격리 실증**: validator를 우회해 `kubectl get pods -n kube-system`을 직접 실행해도
+toolbox ServiceAccount의 RBAC이 `Forbidden`으로 거절한다. validator와 RBAC 이중 방어가
+실제로 동작한다.
+
+이 회귀에서 발견해 고친 결함 3가지는 모두 **실클러스터에서만 드러나는 것**이었다.
+단위 테스트로는 잡히지 않으므로 환경이 바뀌면 다시 확인해야 한다.
+
+1. toolbox 이미지 `bitnami/kubectl:1.29`가 Docker Hub에 존재하지 않아 샌드박스가
+   `ImagePullBackOff`로 뜨지 못했다 → `SANDBOX_TOOLBOX_IMAGE` 설정으로 분리하고
+   `alpine/k8s:1.34.1`(shell 포함, 클러스터와 마이너 일치)로 교체
+2. Chaos Mesh 네임스페이스가 `chaos-testing`으로 하드코딩돼 있었으나 실제 설치 위치는
+   `chaos-mesh`였다 → `CHAOS_MESH_NAMESPACE` 설정으로 분리
+3. 미션 4가 장애를 만들지 못했다 → 위 표 참고
 
 ### 검증 백엔드 (validation_service.py)
 | VALIDATION_BACKEND | 설명 |
@@ -341,6 +367,11 @@ docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
 AUTO_CREATE_SCHEMA=true      # 로컬 개발/테스트 편의용. 배포 환경에서는 false
+
+# 샌드박스 / Chaos Mesh
+SANDBOX_TOOLBOX_IMAGE=alpine/k8s:1.34.1   # shell 포함 필수(distroless 불가), 클러스터와 마이너 일치
+SANDBOX_READINESS_TIMEOUT_SECONDS=90
+CHAOS_MESH_NAMESPACE=chaos-mesh           # Chaos Mesh 설치 위치
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock
