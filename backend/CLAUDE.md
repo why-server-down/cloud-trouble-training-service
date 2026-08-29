@@ -82,7 +82,7 @@ app/
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
-│   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
+│   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
     ├── __init__.py
@@ -124,7 +124,9 @@ app/
 ### 고정 미션 (4개 레벨 튜토리얼)
 > AI 시나리오 attempt가 진행 중일 때 이 API들은 404를 반환한다 (혼용 방지)
 
-- `GET /api/missions/` - 미션 목록 (잠금 상태 포함)
+- `GET /api/missions/?environment=kubernetes` - 미션 목록 (잠금 상태 포함)
+  - **잠금은 같은 환경 안에서만 계산된다.** Kubernetes level 4 완료가 Docker level 2를
+    열지 않는다. `environment`는 호환을 위해 기본값이 있지만 프론트는 명시적으로 보낸다.
 - `POST /api/missions/start` - 미션 시작
 - `GET /api/missions/status` - 진행 중 미션 상태
 - `POST /api/missions/check` - 해결 여부 확인
@@ -215,6 +217,15 @@ POST /api/scenarios/current/check
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
 
+### 미션 시드 (seed_data.py, BE-09)
+
+`(environment, level)`을 stable key로 **upsert**한다. 이전에는 미션이 하나라도 있으면
+전체를 건너뛰어서, Kubernetes 미션이 있는 DB에 Docker/Linux 미션을 추가할 방법이 없었다.
+
+- 재실행해도 중복이 생기지 않는다
+- 기존 행은 내용만 갱신한다. **id가 바뀌면 진행 중인 attempt의 FK가 끊긴다**
+- 새 환경 시드만 선택적으로 추가된다
+
 ### 환경별 구현체 선택 (service_factory.py, BE-08)
 
 레지스트리 키가 `(environment, configured_backend)`다. 같은 백엔드 이름이라도 환경마다
@@ -294,7 +305,7 @@ toolbox ServiceAccount의 RBAC이 `Forbidden`으로 거절한다. validator와 R
 > - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다. → BE-07
 > - ~~WebSocket이 session의 environment를 로드하지 않는다.~~ (BE-06 완료)
 > - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다. → BE-08
-> - mission 목록·잠금이 environment로 필터되지 않는다. → BE-09
+> - ~~mission 목록·잠금이 environment로 필터되지 않는다.~~ (BE-09 완료)
 >
 > **API 계약 검증:** `environment`는 `EnvironmentId`(Literal) 타입이라 허용 외 값은
 > Pydantic이 422로 거절한다. `EnvironmentId`와 `SUPPORTED_ENVIRONMENTS`가 갈라지지
@@ -464,6 +475,7 @@ alembic current                               # 현재 리비전 확인
 |---|---|
 | `0001` | baseline 스키마. 빈 DB면 전체 생성, Alembic 이전에 만들어진 기존 DB면 예전 `ensure_schema_compatibility()`가 하던 idempotent 보정을 수행해 같은 상태로 수렴시킨다 (`alembic stamp` 불필요) |
 | `0002` | `mission_attempts`에 `environment`·`chaos_id`·`sandbox_id` 추가 + backfill, environment/attempt_type/FK조합 CHECK, 사용자당 `in_progress` partial unique index |
+| `0003` | `missions`에 `(environment, level)` unique 제약. 시드의 stable key를 DB로 못 박는다. 중복 행이 있으면 정리 안내와 함께 실패한다 |
 
 > `0001`은 테이블이 **전부 있거나 전부 없는** DB를 가정한다. 일부 테이블만 있는
 > DB는 대상이 아니므로 재생성한다.
