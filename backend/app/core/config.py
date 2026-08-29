@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # DinD 안에서 훈련 대상이 되는 컨테이너
     SANDBOX_TRAINING_IMAGE: str = "nginx:alpine"
     SANDBOX_TRAINING_CONTAINER: str = "training-app"
+    SANDBOX_TRAINING_NETWORK: str = "training-net"
+    SANDBOX_TRAINING_VOLUME: str = "training-data"
 
     # Chaos Mesh 가 설치된 네임스페이스.
     # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
