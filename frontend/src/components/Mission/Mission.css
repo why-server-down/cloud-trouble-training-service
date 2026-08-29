@@ -135,6 +135,16 @@
   font-size: 0.65rem;
 }
 
+/* 미션이 어느 환경 것인지 글자로 밝힌다. 색은 보조일 뿐이다 (FE-06). */
+.mission-environment-badge {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .mission-active-label {
   display: block;
   margin-top: 0.65rem;

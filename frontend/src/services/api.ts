@@ -293,19 +293,45 @@ export const logoutUser = async (token: string): Promise<void> => {
   }
 }
 
-export const listMissions = async (token: string): Promise<MissionResponse[]> => {
-  const response = await fetch(`${API_BASE_URL}/api/missions/`, {
+/**
+ * 환경별 미션 목록. 백엔드는 `environment` 기본값을 두지만 프론트는 항상 명시한다
+ * (`backend/app/api/missions.py`) — 기본값에 기대면 탭을 바꿔도 같은 목록이 온다.
+ *
+ * `signal` 은 환경을 빠르게 전환했을 때 이전 요청을 끊기 위한 것이다. 끊지 않으면
+ * 늦게 도착한 이전 환경 응답이 현재 화면을 덮는다.
+ */
+export const listMissions = async (
+  token: string,
+  environment: EnvironmentId,
+  signal?: AbortSignal,
+): Promise<MissionResponse[]> => {
+  const query = new URLSearchParams({ environment })
+  const response = await fetch(`${API_BASE_URL}/api/missions/?${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    signal,
   })
 
   if (!response.ok) {
     throw new Error(await getErrorDetail(response, '미션 목록 조회에 실패했습니다'))
   }
 
-  const missions = await response.json() as MissionResponse[]
-  return missions.map((mission) => withEnvironment(mission, '미션 목록'))
+  const missions = (await response.json() as MissionResponse[]).map((mission) =>
+    withEnvironment(mission, '미션 목록'),
+  )
+
+  // 다른 환경 미션이 섞여 오면 조용히 걸러내지 않는다. 걸러내면 목록이 비어 보이는
+  // 이유가 "준비 중"인지 "계약이 깨졌는지" 구분되지 않는다.
+  const mismatched = missions.find((mission) => mission.environment !== environment)
+  if (mismatched) {
+    throw new ApiError(
+      `미션 목록 응답에 요청한 환경(${environment})이 아닌 ${mismatched.environment} 미션이 섞여 있습니다`,
+      502,
+    )
+  }
+
+  return missions
 }
 
 export const startMission = async (token: string, missionId: string): Promise<MissionAttemptResponse> => {

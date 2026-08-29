@@ -111,10 +111,29 @@ describe('startRandomScenario', () => {
 })
 
 describe('listMissions', () => {
+  it('선택한 environment 를 query 로 보낸다', async () => {
+    const fetchMock = stubFetchOnce([missionPayload('docker')])
+
+    await listMissions(TOKEN, 'docker')
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [string]
+    expect(url).toContain('/api/missions/?environment=docker')
+  })
+
+  it('AbortSignal 을 그대로 fetch 에 넘긴다', async () => {
+    const fetchMock = stubFetchOnce([missionPayload('kubernetes')])
+    const controller = new AbortController()
+
+    await listMissions(TOKEN, 'kubernetes', controller.signal)
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.signal).toBe(controller.signal)
+  })
+
   it('미션마다 environment 를 검증해 그대로 통과시킨다', async () => {
     stubFetchOnce([missionPayload('kubernetes')])
 
-    const missions = await listMissions(TOKEN)
+    const missions = await listMissions(TOKEN, 'kubernetes')
 
     expect(missions[0].environment).toBe('kubernetes')
   })
@@ -122,7 +141,7 @@ describe('listMissions', () => {
   it('environment 필드가 없는 구버전 응답은 kubernetes 로 폴백한다', async () => {
     stubFetchOnce([missionPayload()])
 
-    const missions = await listMissions(TOKEN)
+    const missions = await listMissions(TOKEN, 'kubernetes')
 
     expect(missions[0].environment).toBe('kubernetes')
   })
@@ -130,7 +149,14 @@ describe('listMissions', () => {
   it('한 건이라도 잘못된 environment 면 오류로 올린다', async () => {
     stubFetchOnce([missionPayload('kubernetes'), missionPayload('k8s')])
 
-    await expect(listMissions(TOKEN)).rejects.toThrowError(/k8s/)
+    await expect(listMissions(TOKEN, 'kubernetes')).rejects.toThrowError(/k8s/)
+  })
+
+  it('요청한 환경이 아닌 미션이 섞여 오면 걸러내지 않고 계약 오류로 올린다', async () => {
+    stubFetchOnce([missionPayload('docker'), missionPayload('kubernetes')])
+
+    await expect(listMissions(TOKEN, 'docker')).rejects.toBeInstanceOf(ApiError)
+    await expect(listMissions(TOKEN, 'docker')).rejects.toThrowError(/kubernetes/)
   })
 })
 

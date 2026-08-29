@@ -1,4 +1,5 @@
 import React from 'react'
+import { getEnvironmentMeta } from '../../config/environments'
 import { MissionResponse } from '../../types/training'
 
 interface MissionCardProps {
@@ -42,6 +43,8 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
     </span>
     <span className="mission-description">{copy.description}</span>
     <span className="mission-info">
+      {/* 색이 아니라 글자로 환경을 밝힌다 — 색만으로 구분하면 읽지 못하는 사용자가 생긴다. */}
+      <span className="mission-environment-badge">{getEnvironmentMeta(mission.environment).label}</span>
       <span>제한 시간 {Math.floor(mission.time_limit / 60)}분</span>
       <span>기본 {mission.base_score}점</span>
       <span>힌트 -{mission.hint_penalty}점</span>
