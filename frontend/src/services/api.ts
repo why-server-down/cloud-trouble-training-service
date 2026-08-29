@@ -226,12 +226,21 @@ export const register = async (username: string, password: string): Promise<Regi
   return response.json()
 }
 
-export const createTerminalSession = async (token: string): Promise<SessionResponse> => {
+/**
+ * 훈련 환경별 터미널 세션을 만든다.
+ *
+ * 백엔드는 같은 (user, environment) 조합에 대해 활성 세션을 재사용하므로
+ * 이 호출 자체는 멱등이다. 그래도 중복 호출은 샌드박스 readiness 대기를
+ * 그만큼 반복하게 하므로, 호출부(`useEnvironmentSessions`)에서 막는다.
+ */
+export const createTerminalSession = async (
+  token: string,
+  environment: EnvironmentId,
+): Promise<SessionResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/terminal/sessions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ environment }),
   })
 
   if (!response.ok) {
@@ -239,6 +248,22 @@ export const createTerminalSession = async (token: string): Promise<SessionRespo
   }
 
   return withEnvironment(await response.json() as SessionResponse, '터미널 세션')
+}
+
+/**
+ * 터미널 세션을 종료한다. 로그아웃 정리용이라 실패해도 화면 흐름을 막지 않는다 —
+ * 호출부가 결과를 무시할 수 있도록 예외 대신 성공 여부를 돌려준다.
+ */
+export const deleteTerminalSession = async (token: string, sessionId: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/terminal/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 export const getProfile = async (token: string): Promise<UserProfileResponse> => {

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
+  createTerminalSession,
+  deleteTerminalSession,
   getEnvironments,
   getMissionStatus,
   listMissions,
@@ -183,5 +185,67 @@ describe('getEnvironments', () => {
     stubFetchOnce({ items: null })
 
     await expect(getEnvironments(TOKEN)).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('createTerminalSession', () => {
+  const sessionPayload = (environment: unknown) => ({
+    id: 'session-1',
+    namespace: 'user-abc',
+    environment,
+    created_at: '2026-08-29T00:00:00Z',
+    is_active: true,
+  })
+
+  it('요청 body 에 environment 를 담아 보낸다', async () => {
+    const fetchMock = stubFetchOnce(sessionPayload('docker'))
+
+    const session = await createTerminalSession(TOKEN, 'docker')
+
+    expect(requestBodyOf(fetchMock)).toEqual({ environment: 'docker' })
+    expect(session.environment).toBe('docker')
+  })
+
+  it('environment 가 없는 구버전 응답은 kubernetes 로 폴백한다', async () => {
+    stubFetchOnce({ id: 'session-1', namespace: 'user-abc', created_at: 'x', is_active: true })
+
+    expect((await createTerminalSession(TOKEN, 'kubernetes')).environment).toBe('kubernetes')
+  })
+
+  it('응답 environment 가 계약 밖 값이면 API 오류로 올린다', async () => {
+    stubFetchOnce(sessionPayload('windows'))
+
+    await expect(createTerminalSession(TOKEN, 'kubernetes')).rejects.toBeInstanceOf(ApiError)
+  })
+
+  it('실패 응답은 오류로 올린다', async () => {
+    stubFetchOnce({ detail: '샌드박스를 준비하지 못했습니다' }, { ok: false, status: 503 })
+
+    await expect(createTerminalSession(TOKEN, 'kubernetes')).rejects.toThrow(
+      '샌드박스를 준비하지 못했습니다',
+    )
+  })
+})
+
+describe('deleteTerminalSession', () => {
+  it('DELETE 로 세션 id 경로를 호출한다', async () => {
+    const fetchMock = stubFetchOnce(null, { status: 204 })
+
+    expect(await deleteTerminalSession(TOKEN, 'session-1')).toBe(true)
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toContain('/api/terminal/sessions/session-1')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it('서버가 실패해도 예외를 던지지 않는다', async () => {
+    stubFetchOnce({ detail: '없음' }, { ok: false, status: 404 })
+
+    expect(await deleteTerminalSession(TOKEN, 'session-1')).toBe(false)
+  })
+
+  it('네트워크 오류도 삼킨다 — 로그아웃 흐름을 막지 않는다', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+
+    expect(await deleteTerminalSession(TOKEN, 'session-1')).toBe(false)
   })
 })
