@@ -10,6 +10,7 @@ from uuid import UUID
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
+from app.core.config import settings
 from app.core.environments import EnvironmentId, KUBERNETES
 from app.services.k8s_setup import K8sSetupService, get_k8s_setup_service
 
@@ -36,9 +37,7 @@ class SandboxNotReadyError(RuntimeError):
 
 
 class SandboxService:
-    TOOLBOX_IMAGE = "bitnami/kubectl:1.29"
     TOOLBOX_CONTAINER = "toolbox"
-    READINESS_TIMEOUT_SECONDS = 30.0
     READINESS_POLL_SECONDS = 1.0
 
     def __init__(
@@ -54,6 +53,11 @@ class SandboxService:
                 config.load_incluster_config()
             except Exception:
                 config.load_kube_config()
+        # 이미지·타임아웃은 설정에서 읽는다. 이미지를 하드코딩하면 태그가 사라졌을 때
+        # 샌드박스가 뜨지 않고, 배포 환경에서는 immutable tag/digest 로 고정해야 한다.
+        # 인스턴스 속성이라 테스트에서 덮어쓸 수 있다.
+        self.TOOLBOX_IMAGE = settings.SANDBOX_TOOLBOX_IMAGE
+        self.READINESS_TIMEOUT_SECONDS = settings.SANDBOX_READINESS_TIMEOUT_SECONDS
         self._core_api = core_api or client.CoreV1Api()
         self._rbac_api = rbac_api or client.RbacAuthorizationV1Api()
         self._networking_api = networking_api or client.NetworkingV1Api()

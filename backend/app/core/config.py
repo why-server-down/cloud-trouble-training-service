@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
     COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
 
+    # 샌드박스 (BE-04)
+    # 이미지는 shell 을 포함해야 한다. toolbox Pod 가 /bin/sh 로 유지되기 때문이며,
+    # distroless 계열(registry.k8s.io/kubectl 등)은 쓸 수 없다.
+    # 클러스터와 kubectl 마이너 버전을 맞춘다.
+    SANDBOX_TOOLBOX_IMAGE: str = "alpine/k8s:1.34.1"
+    SANDBOX_READINESS_TIMEOUT_SECONDS: float = 90.0
+
+    # Chaos Mesh 가 설치된 네임스페이스.
+    # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
+    # 클러스터마다 다를 수 있어 설정으로 둔다.
+    CHAOS_MESH_NAMESPACE: str = "chaos-mesh"
+
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"

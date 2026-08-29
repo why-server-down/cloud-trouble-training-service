@@ -179,3 +179,82 @@ class TestServiceIsStateless:
         scenario = service_factory.create_scenario_service()
         assert not hasattr(mission, "_active_chaos_ids")
         assert not hasattr(scenario, "_active_chaos_ids")
+
+
+class TestNetworkLatencyRolloutStrategy:
+    """미션 4가 실제로 장애를 만들도록 롤아웃 전략을 함께 조정한다 (BE-10).
+
+    RollingUpdate 기본값에서는 새 Pod 가 Ready 가 되지 못해도 기존 Ready Pod 가
+    남아 엔드포인트가 유지된다. 그러면 서비스가 정상 동작해 사용자가 아무 장애도
+    겪지 않는다. 실클러스터 회귀에서 확인된 결함이다.
+    """
+
+    def _injector(self):
+        from app.services.chaos_injector import ChaosMeshInjector
+
+        injector = ChaosMeshInjector.__new__(ChaosMeshInjector)
+        calls = []
+
+        class _FakeAppsApi:
+            def patch_namespaced_deployment(self, name, namespace, body):
+                calls.append(body)
+
+        injector._apps_api = _FakeAppsApi()
+        return injector, calls
+
+    def test_inject_makes_existing_pod_step_down(self):
+        injector, calls = self._injector()
+        injector._apply_network_chaos("network-latency-1", "user-1")
+
+        strategies = [
+            c["spec"]["strategy"]["rollingUpdate"] for c in calls if "strategy" in c.get("spec", {})
+        ]
+        assert strategies, "롤아웃 전략을 조정해야 기존 Ready Pod 가 남지 않는다"
+        assert strategies[0] == {"maxUnavailable": 1, "maxSurge": 0}
+
+    def test_inject_sets_failing_readiness_probe(self):
+        injector, calls = self._injector()
+        injector._apply_network_chaos("network-latency-1", "user-1")
+
+        probes = [
+            c["spec"]["template"]["spec"]["containers"][0].get("readinessProbe")
+            for c in calls
+            if "template" in c.get("spec", {})
+        ]
+        assert probes and probes[0]["httpGet"]["path"] == "/healthz-notexist"
+
+    def test_revert_restores_default_strategy(self):
+        injector, calls = self._injector()
+        injector._revert_network_latency("network-latency-1", "user-1")
+
+        strategies = [
+            c["spec"]["strategy"]["rollingUpdate"] for c in calls if "strategy" in c.get("spec", {})
+        ]
+        assert strategies == [{"maxUnavailable": "25%", "maxSurge": "25%"}]
+
+        probes = [
+            c["spec"]["template"]["spec"]["containers"][0].get("readinessProbe", "missing")
+            for c in calls
+            if "template" in c.get("spec", {})
+        ]
+        assert probes == [None], "복구는 readinessProbe 를 제거해야 한다"
+
+
+class TestSandboxImageIsConfigurable:
+    def test_toolbox_image_comes_from_settings(self):
+        """이미지를 하드코딩하면 태그가 사라졌을 때 샌드박스가 뜨지 않는다."""
+        from app.core.config import settings
+        from app.services.sandbox_service import SandboxService
+
+        service = SandboxService(
+            core_api=object(), rbac_api=object(), networking_api=object(), k8s_setup=object()
+        )
+        assert service.TOOLBOX_IMAGE == settings.SANDBOX_TOOLBOX_IMAGE
+        assert service.READINESS_TIMEOUT_SECONDS == settings.SANDBOX_READINESS_TIMEOUT_SECONDS
+
+    def test_chaos_mesh_namespace_comes_from_settings(self):
+        from app.core.config import settings
+        from app.services.chaos_injector import ChaosMeshInjector
+
+        injector = ChaosMeshInjector.__new__(ChaosMeshInjector)
+        assert injector.CHAOS_NAMESPACE == settings.CHAOS_MESH_NAMESPACE

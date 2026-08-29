@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from app.core import environments
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,10 @@ class ChaosMeshInjector(BaseChaosInjector):
 
     CHAOS_GROUP = "chaos-mesh.org"
     CHAOS_VERSION = "v1alpha1"
-    CHAOS_NAMESPACE = "chaos-testing"
+
+    @property
+    def CHAOS_NAMESPACE(self) -> str:
+        return settings.CHAOS_MESH_NAMESPACE
 
     def __init__(self):
         from kubernetes import client, config
@@ -142,7 +146,20 @@ class ChaosMeshInjector(BaseChaosInjector):
         apply_handler, _ = handlers
 
         chaos_id = f"{chaos_type.replace('_', '-')}-{uuid.uuid4().hex[:8]}"
-        apply_handler(self, chaos_id, namespace)
+        try:
+            apply_handler(self, chaos_id, namespace)
+        except Exception:
+            # 주입은 여러 단계를 밟는다. 중간에 실패하면 앞 단계가 그대로 남아
+            # "아무도 시작하지 않았는데 깨져 있는" 환경이 된다. 되돌리고 올린다.
+            _, revert_handler = handlers
+            try:
+                revert_handler(self, chaos_id, namespace)
+            except Exception:
+                logger.exception(
+                    "partial chaos rollback failed",
+                    extra={"chaos_id": chaos_id, "namespace": namespace},
+                )
+            raise
 
         self._active_chaos[chaos_id] = {"type": chaos_type, "namespace": namespace}
         logger.info(
@@ -229,6 +246,13 @@ class ChaosMeshInjector(BaseChaosInjector):
     def _apply_network_chaos(self, _chaos_id: str, namespace: str):
         # Readiness Probe 실패 주입: 존재하지 않는 경로 체크 → Pod Ready 0/1 → 서비스 엔드포인트 제외
         # 사용자 Fix: kubectl patch deployment nginx 로 readinessProbe 제거 또는 경로 수정
+        #
+        # 전략을 먼저 바꾸는 이유: RollingUpdate 기본값(maxSurge 25%)에서는 새 Pod 가
+        # Ready 가 되지 못하면 기존 Ready Pod 가 그대로 남는다. 그러면 엔드포인트가
+        # 유지되어 서비스가 정상 동작하고, 사용자는 아무 장애도 겪지 않는다.
+        # maxSurge=0 / maxUnavailable=1 로 두어야 기존 Pod 가 먼저 내려가고
+        # NotReady 인 새 Pod 만 남아 실제로 서비스가 끊긴다.
+        self._set_rollout_strategy(namespace, max_unavailable=1, max_surge=0)
         self._patch_nginx_container(
             namespace,
             readinessProbe={
@@ -239,6 +263,23 @@ class ChaosMeshInjector(BaseChaosInjector):
                 "initialDelaySeconds": 5,
                 "periodSeconds": 10,
                 "failureThreshold": 3,
+            },
+        )
+
+    def _set_rollout_strategy(self, namespace: str, *, max_unavailable, max_surge) -> None:
+        self._apps_api.patch_namespaced_deployment(
+            name="nginx",
+            namespace=namespace,
+            body={
+                "spec": {
+                    "strategy": {
+                        "type": "RollingUpdate",
+                        "rollingUpdate": {
+                            "maxUnavailable": max_unavailable,
+                            "maxSurge": max_surge,
+                        },
+                    }
+                }
             },
         )
 
@@ -517,8 +558,9 @@ class ChaosMeshInjector(BaseChaosInjector):
         )
 
     def _revert_network_latency(self, _chaos_id: str, namespace: str):
-        # readiness probe 제거하여 복구
+        # readiness probe 제거하여 복구하고, 주입 시 바꾼 롤아웃 전략도 기본값으로 되돌린다.
         self._patch_nginx_container(namespace, readinessProbe=None)
+        self._set_rollout_strategy(namespace, max_unavailable="25%", max_surge="25%")
 
     def _revert_service_misconfig(self, _chaos_id: str, namespace: str):
         self._apps_api.delete_namespaced_deployment(name="webapp", namespace=namespace)
