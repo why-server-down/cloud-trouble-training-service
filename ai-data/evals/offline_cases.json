@@ -36,7 +36,20 @@
       "kind": "manifest_coverage",
       "manifest": "../knowledge-base/manifest.json",
       "knowledge_base": "../knowledge-base",
-      "expected_documents": 17
+      "expected_documents": 23
+    },
+    {
+      "id": "docker-question-coverage",
+      "kind": "question_dataset_coverage",
+      "dataset": "docker_retrieval_questions.json",
+      "environment": "docker",
+      "minimum_questions": 20,
+      "required_fault_types": [
+        "container_network_disconnect",
+        "volume_mount_error",
+        "container_oom",
+        "container_cpu_throttle"
+      ]
     }
   ]
 }

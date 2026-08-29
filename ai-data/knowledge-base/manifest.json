@@ -65,6 +65,54 @@
       "authority": 1.0,
       "version": "2026-08-29"
     },
+    "07-docker/container-lifecycle.md": {
+      "source_id": "docker-container-lifecycle",
+      "title": "Docker 컨테이너 생명주기와 종료 상태",
+      "environments": ["docker"],
+      "fault_types": ["container_oom", "container_cpu_throttle"],
+      "authority": 0.95,
+      "version": "2026-08-29"
+    },
+    "07-docker/diagnostic-commands.md": {
+      "source_id": "docker-diagnostic-commands",
+      "title": "Docker 조사 명령",
+      "environments": ["docker"],
+      "fault_types": ["general"],
+      "authority": 0.95,
+      "version": "2026-08-29"
+    },
+    "07-docker/network-troubleshooting.md": {
+      "source_id": "docker-network-troubleshooting",
+      "title": "Docker bridge network 트러블슈팅",
+      "environments": ["docker"],
+      "fault_types": ["container_network_disconnect"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "07-docker/storage-troubleshooting.md": {
+      "source_id": "docker-storage-troubleshooting",
+      "title": "Docker volume과 bind mount 트러블슈팅",
+      "environments": ["docker"],
+      "fault_types": ["volume_mount_error"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "07-docker/resource-troubleshooting.md": {
+      "source_id": "docker-resource-troubleshooting",
+      "title": "Docker memory OOM과 CPU throttle 트러블슈팅",
+      "environments": ["docker"],
+      "fault_types": ["container_oom", "container_cpu_throttle"],
+      "authority": 1.0,
+      "version": "2026-08-29"
+    },
+    "07-docker/safe-recovery-playbook.md": {
+      "source_id": "docker-safe-recovery-playbook",
+      "title": "AfterFail Docker 안전 복구 플레이북",
+      "environments": ["docker"],
+      "fault_types": ["container_network_disconnect", "volume_mount_error", "container_oom", "container_cpu_throttle"],
+      "authority": 0.95,
+      "version": "2026-08-29"
+    },
     "README.md": {
       "source_id": "afterfail-knowledge-index",
       "title": "AfterFail 지식베이스 안내",
