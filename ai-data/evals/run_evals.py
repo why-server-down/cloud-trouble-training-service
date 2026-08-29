@@ -20,7 +20,7 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]+", text.casefold()))
 
 
-def _evaluate_case(case: dict[str, Any]) -> tuple[bool, Any]:
+def _evaluate_case(case: dict[str, Any], base_dir: Path) -> tuple[bool, Any]:
     kind = case["kind"]
     if kind == "json_parse":
         actual = json.loads(case["input"])
@@ -48,6 +48,52 @@ def _evaluate_case(case: dict[str, Any]) -> tuple[bool, Any]:
         ]
         return actual == case["expected_ids"], actual
 
+    if kind == "manifest_coverage":
+        manifest_path = (base_dir / case["manifest"]).resolve()
+        knowledge_base = (base_dir / case["knowledge_base"]).resolve()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))["documents"]
+        markdown = {
+            path.relative_to(knowledge_base).as_posix()
+            for path in knowledge_base.rglob("*.md")
+        }
+        required = {
+            "source_id", "title", "environments", "fault_types", "authority", "version"
+        }
+        complete = all(required <= set(metadata) for metadata in manifest.values())
+        actual = {
+            "documents": len(markdown),
+            "mapped": len(manifest),
+            "complete": complete,
+        }
+        expected = case["expected_documents"]
+        passed = markdown == set(manifest) and len(markdown) == expected and complete
+        return passed, actual
+
+    if kind == "question_dataset_coverage":
+        payload = json.loads((base_dir / case["dataset"]).read_text(encoding="utf-8"))
+        questions = payload.get("questions", [])
+        ids = [question.get("id") for question in questions]
+        fault_types = {question.get("fault_type") for question in questions}
+        complete = all(
+            question.get("query") and question.get("expected_source_id")
+            for question in questions
+        )
+        actual = {
+            "environment": payload.get("environment"),
+            "questions": len(questions),
+            "fault_types": sorted(fault_types),
+            "unique_ids": len(ids) == len(set(ids)),
+            "complete": complete,
+        }
+        passed = (
+            actual["environment"] == case["environment"]
+            and actual["questions"] >= case["minimum_questions"]
+            and set(case["required_fault_types"]) <= fault_types
+            and actual["unique_ids"]
+            and complete
+        )
+        return passed, actual
+
     raise ValueError(f"지원하지 않는 eval kind입니다: {kind}")
 
 
@@ -56,7 +102,7 @@ def run(dataset: Path) -> dict[str, Any]:
     results = []
     for case in payload.get("cases", []):
         try:
-            passed, actual = _evaluate_case(case)
+            passed, actual = _evaluate_case(case, dataset.parent)
             results.append(
                 {"id": case["id"], "kind": case["kind"], "passed": passed, "actual": actual}
             )

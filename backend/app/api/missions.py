@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.environments import DEFAULT_ENVIRONMENT, EnvironmentId
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -18,12 +19,17 @@ router = APIRouter(prefix="/api/missions", tags=["missions"])
 
 @router.get("/", response_model=list[MissionResponse])
 async def list_missions(
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """미션 목록 조회 (잠금 상태 포함)"""
+    """미션 목록 조회 (잠금 상태 포함).
+
+    environment 는 호환을 위해 기본값을 두지만, 프론트는 명시적으로 보낸다.
+    잠금은 같은 환경 안에서만 계산된다.
+    """
     service = get_mission_service()
-    missions = await service.list_missions(db, current_user)
+    missions = await service.list_missions(db, current_user, environment)
     return [
         MissionResponse(
             id=m["mission"].id,

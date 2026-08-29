@@ -19,6 +19,30 @@ class Settings(BaseSettings):
     COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
     COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
 
+    # 샌드박스 (BE-04)
+    # 이미지는 shell 을 포함해야 한다. toolbox Pod 가 /bin/sh 로 유지되기 때문이며,
+    # distroless 계열(registry.k8s.io/kubectl 등)은 쓸 수 없다.
+    # 클러스터와 kubectl 마이너 버전을 맞춘다.
+    SANDBOX_TOOLBOX_IMAGE: str = "alpine/k8s:1.34.1"
+    SANDBOX_READINESS_TIMEOUT_SECONDS: float = 90.0
+    # Docker 환경 샌드박스(DinD). rootless 가 클러스터에서 기동하지 않아 privileged 를 쓰며,
+    # 대신 자원 상한과 네트워크 정책으로 범위를 좁힌다. 자세한 사유는 sandbox_service 참고.
+    SANDBOX_DIND_IMAGE: str = "docker:27-dind"
+    SANDBOX_DIND_CPU_LIMIT: str = "1"
+    SANDBOX_DIND_MEMORY_LIMIT: str = "1Gi"
+    SANDBOX_DIND_STORAGE_LIMIT: str = "2Gi"
+    # DinD 안에서 훈련 대상이 되는 컨테이너
+    SANDBOX_TRAINING_IMAGE: str = "nginx:alpine"
+    SANDBOX_TRAINING_CONTAINER: str = "training-app"
+    SANDBOX_TRAINING_NETWORK: str = "training-net"
+    SANDBOX_TRAINING_VOLUME: str = "training-data"
+    SANDBOX_TRAINING_CPUS: str = "1"   # 훈련 컨테이너 정상 상태의 CPU 상한
+
+    # Chaos Mesh 가 설치된 네임스페이스.
+    # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
+    # 클러스터마다 다를 수 있어 설정으로 둔다.
+    CHAOS_MESH_NAMESPACE: str = "chaos-mesh"
+
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"

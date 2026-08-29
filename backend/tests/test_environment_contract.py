@@ -107,7 +107,11 @@ class TestMissionEnvironmentPassthrough:
         """DB 의 docker 미션이 응답에서 kubernetes 로 바뀌지 않는다."""
 
         class _FakeMissionService:
-            async def list_missions(self, db, user):
+            def __init__(self):
+                self.requested_environment = None
+
+            async def list_missions(self, db, user, environment="kubernetes"):
+                self.requested_environment = environment
                 return [{"mission": _FakeMission("docker"), "is_unlocked": True}]
 
         # get_mission_service 는 Depends 가 아니라 라우터에서 직접 호출되므로

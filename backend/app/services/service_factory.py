@@ -9,6 +9,7 @@ from collections.abc import Callable
 from app.core import environments
 from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
+from app.services.docker_chaos_injector import DockerChaosInjector
 from app.services.mission_service import MissionService
 from app.services.scenario_service import ScenarioService
 from app.services.scoring_service import ScoringService
@@ -21,11 +22,16 @@ from app.services.validation_service import (
 )
 
 K8S = environments.KUBERNETES
+DOCKER = environments.DOCKER
 
 # (environment, CHAOS_BACKEND) → injector 팩토리
+# CHAOS_BACKEND 는 "mock 이냐 실제냐"를 고르는 값이다. Docker 환경은 Chaos Mesh 를
+# 쓰지 않고 DinD 안에서 docker CLI 로 주입하지만, 실제 주입이라는 점에서 같은 키를 쓴다.
 _INJECTOR_FACTORIES: dict[tuple[str, str], Callable[[], BaseChaosInjector]] = {
     (K8S, "mock"): lambda: MockChaosInjector(environment=K8S),
     (K8S, "chaos_mesh"): ChaosMeshInjector,
+    (DOCKER, "mock"): lambda: MockChaosInjector(environment=DOCKER),
+    (DOCKER, "chaos_mesh"): DockerChaosInjector,
 }
 
 # (environment, VALIDATION_BACKEND) → 검증 서비스 팩토리

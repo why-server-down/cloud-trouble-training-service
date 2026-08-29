@@ -66,7 +66,7 @@ app/
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py      # argv allowlist 검증 (셸 메타문자 거절, namespace 강제)
+│   ├── command_validator.py      # 환경별 명령 정책 (KubectlPolicy | DockerPolicy)
 │   ├── command_executor.py       # 샌드박스 Pod exec 실행 (Sandbox | Mock)
 │   ├── websocket_handler.py      # WebSocket 연결·동시성·CommandLog
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
@@ -81,8 +81,10 @@ app/
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
+│   ├── sandbox_service.py        # 환경별 샌드박스 (kubernetes=toolbox, docker=DinD)
+│   ├── docker_chaos_injector.py  # Docker 환경 장애 주입 (DinD 안 docker CLI)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
-│   ├── seed_data.py              # 미션 초기 데이터 (4개 레벨)
+│   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
 └── ai/
     ├── __init__.py
@@ -124,7 +126,9 @@ app/
 ### 고정 미션 (4개 레벨 튜토리얼)
 > AI 시나리오 attempt가 진행 중일 때 이 API들은 404를 반환한다 (혼용 방지)
 
-- `GET /api/missions/` - 미션 목록 (잠금 상태 포함)
+- `GET /api/missions/?environment=kubernetes` - 미션 목록 (잠금 상태 포함)
+  - **잠금은 같은 환경 안에서만 계산된다.** Kubernetes level 4 완료가 Docker level 2를
+    열지 않는다. `environment`는 호환을 위해 기본값이 있지만 프론트는 명시적으로 보낸다.
 - `POST /api/missions/start` - 미션 시작
 - `GET /api/missions/status` - 진행 중 미션 상태
 - `POST /api/missions/check` - 해결 여부 확인
@@ -183,7 +187,7 @@ app/
 | `pod_failure` | nginx 이미지를 `nginx:wrongtag`로 패치 → ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
 | `memory_stress` | nginx 메모리 limit을 6Mi로 낮춤 + StressChaos 64MB 압박 → OOMKilled | `kubectl patch deployment/nginx`으로 memory limit 상향 |
 | `service_misconfig` | webapp Deployment + 잘못된 selector의 Service 생성 | `kubectl patch svc webapp-svc -p '{"spec":{"selector":{"app":"webapp"}}}'` |
-| `network_latency` | nginx readinessProbe에 존재하지 않는 경로 주입 | `kubectl patch deployment nginx -p '...'`으로 readinessProbe 제거 |
+| `network_latency` | nginx readinessProbe에 존재하지 않는 경로 주입 + 롤아웃 전략을 `maxSurge=0`으로 조정 | `kubectl patch deployment nginx -p '...'`으로 readinessProbe 제거 |
 | `wrong_image_registry` | private registry 이미지로 패치 → unauthorized ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
 | `secret_ref_missing` | 존재하지 않는 Secret envFrom 참조 → CreateContainerConfigError | Secret 생성 또는 envFrom 제거 |
 | `pvc_unbound` | 존재하지 않는 storageClass PVC 생성 + 마운트 → Pod Pending | PVC 삭제 및 deployment에서 volume/volumeMount 제거 |
@@ -215,6 +219,98 @@ POST /api/scenarios/current/check
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
 
+### Docker 장애 (docker_chaos_injector.py, BE-13)
+
+Chaos Mesh는 Kubernetes 전용이라 이 환경에는 쓸 수 없다. DinD 샌드박스 안에서
+docker 명령으로 장애를 만든다.
+
+| chaos_type | 장애 | 사용자 복구 |
+|---|---|---|
+| `docker_network_disconnect` | 훈련 컨테이너를 training-net에서 분리 | `docker network connect training-net training-app` |
+| `docker_container_stopped` | 컨테이너 중지 | `docker start training-app` |
+| `docker_cpu_throttle` | CPU 상한을 0.05로 축소 | `docker update --cpus 1 training-app` |
+
+**등록 기준: 사용자가 BE-12 명령 정책 안에서 실제로 복구할 수 있는 장애만 넣는다.**
+테스트가 각 복구 명령을 실제 validator에 통과시켜 이 계약을 고정한다.
+
+#### 계획서의 volume/mount error를 제외한 이유 (실측)
+
+- `docker update`에 볼륨·마운트 옵션이 없어 실행 중 변경이 불가능하다
+- 사용 중인 볼륨은 삭제가 거부된다 (`volume is in use`)
+- 컨테이너를 멈춰도 참조가 남아 삭제되지 않는다
+
+유일한 경로가 `docker rm` 후 볼륨 없이 `docker run`인데, 복구하려면 사용자가
+`docker run`을 칠 수 있어야 한다. 그 명령은 임의 이미지 실행 위험 때문에 BE-12에서
+차단했다. 대신 컨테이너 중지 장애를 넣었다.
+
+#### 메모리 대신 CPU를 쓰는 이유 (실측)
+
+docker는 메모리 상한을 올릴 때 `memory+swap >= memory`를 요구한다. 사용자가
+`--memory`만 쳐서는 `memory+swap limit should be >= memory limit`으로 복구가 실패하고,
+항상 `--memory-swap`을 짝으로 요구하는 것은 훈련 난이도가 아니라 함정이다.
+CPU는 낮추기/올리기 왕복이 그대로 동작한다.
+
+### Docker 명령 정책 (BE-12)
+
+샌드박스가 privileged DinD 이므로 **사용자가 칠 수 있는 명령을 좁히는 것이 실질적인
+방어선**이다. privileged 커널 권한은 데몬이 쓰는 것이고, 사용자는 제한된 명령만 보낸다.
+
+| 구분 | 허용 |
+|---|---|
+| 조회 | `ps` `images` `inspect` `logs` `stats` `port` `top` `diff`, `network/volume/container ls·inspect` |
+| 복구 | `start` `restart` `stop` `unpause` `update`, `network connect/disconnect`, `volume create` |
+| 확인 필요 | `rm` `kill` (confirmation 계약) |
+| 차단 | `run` `exec` `build` `commit` `push/pull` `cp` `system` `swarm` `compose` `login` `context` 등 |
+
+**전역 옵션 차단**: `-H` / `--host` / `--context` / `--config` / `--tlsverify` 는 어느 위치에
+있어도 거절한다. 데몬을 다른 곳으로 돌리면 격리가 무의미해진다.
+
+**`update` 는 자원 조정만**: `--memory` `--cpus` `--pids-limit` 등만 허용하고 특권 상승
+옵션은 막는다.
+
+**대상 제한**: 모든 target 이름은 훈련이 허용한 리소스 집합 안에 있어야 한다.
+시나리오가 집합을 넘기지 않으면 기본값(`SANDBOX_TRAINING_CONTAINER` / `_NETWORK` / `_VOLUME`)만
+허용한다. 플래그의 **값**(`--memory 256m` 의 `256m`)을 대상으로 오인하지 않도록
+`VALUE_FLAGS` 로 걸러낸다.
+
+### Docker 샌드박스와 privileged 결정 (BE-11)
+
+**rootless DinD는 이 클러스터에서 기동하지 않는다.** 세 가지 방식을 실제로 시도했다.
+
+| 시도 | 결과 |
+|---|---|
+| 기본 (rootlesskit builtin) | `ip tuntap add name tap0` 실패 |
+| `DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns` | 이미지에 바이너리 없음 |
+| `NET_ADMIN` + `SYS_ADMIN` capability 추가 | sysfs mount 거부, TAP 실패 |
+
+같은 클러스터에서 **privileged DinD는 정상 기동**한다(docker 27.5.1). 그래서 계획서 방침대로
+privileged를 쓰되 격리를 다음으로 좁혔다.
+
+- 사용자 네임스페이스 안에서만 생성되고 기본 deny NetworkPolicy가 적용된다
+- **호스트 `docker.sock`을 마운트하지 않는다.** 데몬을 컨테이너 안에서 새로 띄운다
+- **ServiceAccount 토큰을 마운트하지 않아** Kubernetes API에 접근할 수 없다
+  (Docker 환경은 K8s API를 쓰지 않으므로 Role/RoleBinding도 붙이지 않는다)
+- CPU/메모리/**ephemeral-storage** 상한 (디스크를 채우는 훈련이 노드를 위협하면 안 된다)
+- 데몬은 유닉스 소켓만 쓴다 (`DOCKER_TLS_CERTDIR=""`)
+
+실측 격리: 샌드박스에서 `docker ps`가 **호스트의 컨테이너 9개를 전혀 보지 못하고**
+자기 안의 것만 보여준다. `/var/run/secrets/kubernetes.io/`도 존재하지 않는다.
+
+훈련 대상 컨테이너는 `ensure_training_workload()`가 멱등 생성한다. Kubernetes 환경의
+nginx Deployment에 해당하는 역할이며, 이미 있으면 다시 만들지 않고 멈춰 있으면 다시 띄운다.
+
+> **아직 `IMPLEMENTED_ENVIRONMENTS`에 docker를 넣지 않았다.** 샌드박스는 뜨지만
+> injector/validator가 없어서(BE-13/BE-14) 미션을 시작할 수 없다. 활성화는 BE-14에서 한다.
+
+### 미션 시드 (seed_data.py, BE-09)
+
+`(environment, level)`을 stable key로 **upsert**한다. 이전에는 미션이 하나라도 있으면
+전체를 건너뛰어서, Kubernetes 미션이 있는 DB에 Docker/Linux 미션을 추가할 방법이 없었다.
+
+- 재실행해도 중복이 생기지 않는다
+- 기존 행은 내용만 갱신한다. **id가 바뀌면 진행 중인 attempt의 FK가 끊긴다**
+- 새 환경 시드만 선택적으로 추가된다
+
 ### 환경별 구현체 선택 (service_factory.py, BE-08)
 
 레지스트리 키가 `(environment, configured_backend)`다. 같은 백엔드 이름이라도 환경마다
@@ -242,6 +338,32 @@ docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
 - 정리는 `attempt.chaos_id`(DB)를 근거로 하고, 되돌린 뒤 `None`으로 비워 재정리에 안전하다
 - 주입 성공 후 DB commit이 실패하면 즉시 revert해 고아 장애를 남기지 않는다
 
+### 실클러스터 회귀 (BE-10, 2026-08-29)
+
+Docker Desktop Kubernetes(v1.34.3) + Chaos Mesh로 고정 미션 4개를 end-to-end 검증했다.
+각 미션마다 **주입 → 장애 감지 → toolbox Pod에서 복구 명령 → 검증 통과 → revert** 전 사이클.
+
+| 미션 | chaos_type | 결과 |
+|---|---|---|
+| 1. 사라진 웹페이지 | `pod_failure` | 통과 |
+| 2. 터져버린 쇼핑몰 | `memory_stress` | 통과 |
+| 3. 끊어진 연결고리 | `service_misconfig` | 통과 |
+| 4. 좀비 서버의 습격 | `network_latency` | 통과 (아래 결함 수정 후) |
+
+**격리 실증**: validator를 우회해 `kubectl get pods -n kube-system`을 직접 실행해도
+toolbox ServiceAccount의 RBAC이 `Forbidden`으로 거절한다. validator와 RBAC 이중 방어가
+실제로 동작한다.
+
+이 회귀에서 발견해 고친 결함 3가지는 모두 **실클러스터에서만 드러나는 것**이었다.
+단위 테스트로는 잡히지 않으므로 환경이 바뀌면 다시 확인해야 한다.
+
+1. toolbox 이미지 `bitnami/kubectl:1.29`가 Docker Hub에 존재하지 않아 샌드박스가
+   `ImagePullBackOff`로 뜨지 못했다 → `SANDBOX_TOOLBOX_IMAGE` 설정으로 분리하고
+   `alpine/k8s:1.34.1`(shell 포함, 클러스터와 마이너 일치)로 교체
+2. Chaos Mesh 네임스페이스가 `chaos-testing`으로 하드코딩돼 있었으나 실제 설치 위치는
+   `chaos-mesh`였다 → `CHAOS_MESH_NAMESPACE` 설정으로 분리
+3. 미션 4가 장애를 만들지 못했다 → 위 표 참고
+
 ### 검증 백엔드 (validation_service.py)
 | VALIDATION_BACKEND | 설명 |
 |---|---|
@@ -268,7 +390,7 @@ docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
 > - `POST /api/terminal/sessions`가 body 없이 kubernetes setup만 수행한다. → BE-07
 > - ~~WebSocket이 session의 environment를 로드하지 않는다.~~ (BE-06 완료)
 > - factory가 `environment` 인자를 받지만 registry key는 backend 이름만 쓴다. → BE-08
-> - mission 목록·잠금이 environment로 필터되지 않는다. → BE-09
+> - ~~mission 목록·잠금이 environment로 필터되지 않는다.~~ (BE-09 완료)
 >
 > **API 계약 검증:** `environment`는 `EnvironmentId`(Literal) 타입이라 허용 외 값은
 > Pydantic이 422로 거절한다. `EnvironmentId`와 `SUPPORTED_ENVIRONMENTS`가 갈라지지
@@ -341,6 +463,22 @@ docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 된다.
 ```
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival
 AUTO_CREATE_SCHEMA=true      # 로컬 개발/테스트 편의용. 배포 환경에서는 false
+
+# 샌드박스 / Chaos Mesh
+SANDBOX_TOOLBOX_IMAGE=alpine/k8s:1.34.1   # shell 포함 필수(distroless 불가), 클러스터와 마이너 일치
+SANDBOX_READINESS_TIMEOUT_SECONDS=90
+CHAOS_MESH_NAMESPACE=chaos-mesh           # Chaos Mesh 설치 위치
+
+# Docker 환경 샌드박스 (DinD)
+SANDBOX_DIND_IMAGE=docker:27-dind
+SANDBOX_DIND_CPU_LIMIT=1
+SANDBOX_DIND_MEMORY_LIMIT=1Gi
+SANDBOX_DIND_STORAGE_LIMIT=2Gi
+SANDBOX_TRAINING_IMAGE=nginx:alpine       # DinD 안 훈련 대상 컨테이너
+SANDBOX_TRAINING_CONTAINER=training-app
+SANDBOX_TRAINING_NETWORK=training-net
+SANDBOX_TRAINING_VOLUME=training-data
+SANDBOX_TRAINING_CPUS=1                   # 훈련 컨테이너 정상 상태의 CPU 상한
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock
@@ -433,6 +571,7 @@ alembic current                               # 현재 리비전 확인
 |---|---|
 | `0001` | baseline 스키마. 빈 DB면 전체 생성, Alembic 이전에 만들어진 기존 DB면 예전 `ensure_schema_compatibility()`가 하던 idempotent 보정을 수행해 같은 상태로 수렴시킨다 (`alembic stamp` 불필요) |
 | `0002` | `mission_attempts`에 `environment`·`chaos_id`·`sandbox_id` 추가 + backfill, environment/attempt_type/FK조합 CHECK, 사용자당 `in_progress` partial unique index |
+| `0003` | `missions`에 `(environment, level)` unique 제약. 시드의 stable key를 DB로 못 박는다. 중복 행이 있으면 정리 안내와 함께 실패한다 |
 
 > `0001`은 테이블이 **전부 있거나 전부 없는** DB를 가정한다. 일부 테이블만 있는
 > DB는 대상이 아니므로 재생성한다.

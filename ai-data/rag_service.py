@@ -23,6 +23,11 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     MatchAny,
+    PointIdsList,
+    CreateAlias,
+    CreateAliasOperation,
+    DeleteAlias,
+    DeleteAliasOperation,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -66,6 +71,20 @@ class RetrievedDocument:
     metadata: Dict
 
 
+@dataclass(frozen=True)
+class IngestionReport:
+    """멱등 동기화 결과."""
+
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+    unchanged: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.added + self.updated + self.unchanged
+
+
 class RAGServiceError(Exception):
     """Base exception for RAG service errors"""
     pass
@@ -103,7 +122,7 @@ class RAGService:
 
     def __init__(
         self,
-        collection_name: str = "k8s_docs",
+        collection_name: str = "afterfail_knowledge_v2",
         qdrant_url: Optional[str] = None,
         qdrant_api_key: Optional[str] = None,
         use_memory: bool = False,
@@ -174,7 +193,7 @@ class RAGService:
     def _ensure_collection_exists(self):
         """
         Ensure collection exists with proper configuration.
-        차원이 현재 임베딩 모델과 다르면 컬렉션을 삭제하고 재생성한다.
+        차원이 다르면 기존 컬렉션을 보존하고 새 versioned collection을 만든다.
         """
         try:
             collections = self.client.get_collections().collections
@@ -186,8 +205,12 @@ class RAGService:
                 info = self.client.get_collection(self.collection_name)
                 existing_dim = info.config.params.vectors.size
                 if existing_dim != target_dim:
-                    print(f"Dimension mismatch ({existing_dim} → {target_dim}), recreating collection.")
-                    self.client.delete_collection(self.collection_name)
+                    suffix = hashlib.sha256(
+                        f"{self.collection_name}:{target_dim}".encode("utf-8")
+                    ).hexdigest()[:8]
+                    self.collection_name = f"{self.collection_name}_dim{target_dim}_{suffix}"
+                    if self.collection_name in collection_names:
+                        return
                 else:
                     print(f"Collection already exists: {self.collection_name} (dim={existing_dim})")
                     return
@@ -298,6 +321,110 @@ class RAGService:
             raise RAGServiceError(f"Failed to chunk documents: {str(e)}")
 
     
+    @staticmethod
+    def _point_id(document: Document, fallback_index: int) -> str:
+        metadata = document.metadata
+        source_id = str(metadata.get("source_id") or metadata.get("source") or "unknown")
+        chunk_index = metadata.get("chunk_index", fallback_index)
+        content_hash = str(
+            metadata.get("content_hash")
+            or hashlib.sha256(document.page_content.encode("utf-8")).hexdigest()
+        )
+        identity = f"{source_id}:{chunk_index}:{content_hash}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+
+    def _existing_points(self) -> dict[str, dict]:
+        points: dict[str, dict] = {}
+        offset = None
+        while True:
+            batch, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in batch:
+                points[str(point.id)] = dict(point.payload or {})
+            if offset is None:
+                return points
+
+    def needs_sync(self, documents: List[Document]) -> bool:
+        """manifest/content hash 기반 desired point와 현재 collection 차이를 확인한다."""
+        desired = {
+            self._point_id(document, index): document
+            for index, document in enumerate(documents)
+        }
+        desired_sources = {
+            str(doc.metadata.get("source_id") or doc.metadata.get("source") or "unknown")
+            for doc in documents
+        }
+        existing = self._existing_points()
+        managed_ids = {
+            point_id
+            for point_id, payload in existing.items()
+            if str(payload.get("source_id") or payload.get("source") or "unknown")
+            in desired_sources
+        }
+        return set(desired) != managed_ids
+
+    def sync_documents(self, documents: List[Document]) -> IngestionReport:
+        """현재 source의 chunk를 안정 ID로 동기화하고 stale point를 제거한다."""
+        if not documents:
+            return IngestionReport()
+
+        desired = {
+            self._point_id(document, index): document
+            for index, document in enumerate(documents)
+        }
+        existing = self._existing_points()
+        desired_sources = {
+            str(doc.metadata.get("source_id") or doc.metadata.get("source") or "unknown")
+            for doc in documents
+        }
+        managed_existing = {
+            point_id: payload
+            for point_id, payload in existing.items()
+            if str(payload.get("source_id") or payload.get("source") or "unknown")
+            in desired_sources
+        }
+        unchanged_ids = set(desired) & set(managed_existing)
+        stale_ids = set(managed_existing) - set(desired)
+        new_ids = set(desired) - set(managed_existing)
+        existing_sources = {
+            str(payload.get("source_id") or payload.get("source") or "unknown")
+            for payload in managed_existing.values()
+        }
+        updated_ids = {
+            point_id
+            for point_id in new_ids
+            if str(
+                desired[point_id].metadata.get("source_id")
+                or desired[point_id].metadata.get("source")
+                or "unknown"
+            ) in existing_sources
+        }
+
+        if new_ids:
+            ordered_new_ids = sorted(new_ids)
+            self._upsert_documents(
+                [desired[point_id] for point_id in ordered_new_ids],
+                point_ids=ordered_new_ids,
+            )
+        if stale_ids:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=sorted(stale_ids)),
+                wait=True,
+            )
+
+        return IngestionReport(
+            added=len(new_ids - updated_ids),
+            updated=len(updated_ids),
+            deleted=len(stale_ids),
+            unchanged=len(unchanged_ids),
+        )
+
     def ingest_documents(self, documents: List[Document]) -> int:
         """
         Generate embeddings and store in Qdrant
@@ -311,8 +438,16 @@ class RAGService:
         Raises:
             DocumentIngestionError: If ingestion fails
         """
+        return self.sync_documents(documents).total
+
+    def _upsert_documents(
+        self,
+        documents: List[Document],
+        point_ids: Optional[List[str]] = None,
+    ) -> None:
+        """새롭거나 변경된 chunk만 embedding하고 upsert한다."""
         if not documents:
-            return 0
+            return
         
         try:
             texts = [doc.page_content for doc in documents]
@@ -343,7 +478,7 @@ class RAGService:
             # Prepare points for Qdrant
             points = []
             for i, (text, embedding, metadata) in enumerate(zip(texts, all_embeddings, metadatas)):
-                point_id = str(uuid.uuid4())
+                point_id = point_ids[i] if point_ids else self._point_id(documents[i], i)
 
                 payload = {
                     "content": text,
@@ -371,12 +506,31 @@ class RAGService:
                 points=points
             )
 
-            return len(documents)
-            
         except DocumentIngestionError:
             raise
         except Exception as e:
             raise DocumentIngestionError(f"Failed to ingest documents: {str(e)}")
+
+    def promote_alias(self, alias_name: str) -> None:
+        """검증 완료 후에만 alias를 현재 collection으로 원자적으로 전환한다."""
+        if self.get_collection_stats()["document_count"] <= 0:
+            raise DocumentIngestionError("빈 collection은 운영 alias로 전환할 수 없습니다")
+
+        aliases = {alias.alias_name for alias in self.client.get_aliases().aliases}
+        operations = []
+        if alias_name in aliases:
+            operations.append(
+                DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias_name))
+            )
+        operations.append(
+            CreateAliasOperation(
+                create_alias=CreateAlias(
+                    collection_name=self.collection_name,
+                    alias_name=alias_name,
+                )
+            )
+        )
+        self.client.update_collection_aliases(change_aliases_operations=operations)
     
     def search_knowledge(
         self,
