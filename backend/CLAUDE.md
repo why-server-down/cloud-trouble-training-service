@@ -66,7 +66,7 @@ app/
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py      # argv allowlist 검증 (셸 메타문자 거절, namespace 강제)
+│   ├── command_validator.py      # 환경별 명령 정책 (KubectlPolicy | DockerPolicy)
 │   ├── command_executor.py       # 샌드박스 Pod exec 실행 (Sandbox | Mock)
 │   ├── websocket_handler.py      # WebSocket 연결·동시성·CommandLog
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
@@ -217,6 +217,29 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Docker 명령 정책 (BE-12)
+
+샌드박스가 privileged DinD 이므로 **사용자가 칠 수 있는 명령을 좁히는 것이 실질적인
+방어선**이다. privileged 커널 권한은 데몬이 쓰는 것이고, 사용자는 제한된 명령만 보낸다.
+
+| 구분 | 허용 |
+|---|---|
+| 조회 | `ps` `images` `inspect` `logs` `stats` `port` `top` `diff`, `network/volume/container ls·inspect` |
+| 복구 | `start` `restart` `stop` `unpause` `update`, `network connect/disconnect`, `volume create` |
+| 확인 필요 | `rm` `kill` (confirmation 계약) |
+| 차단 | `run` `exec` `build` `commit` `push/pull` `cp` `system` `swarm` `compose` `login` `context` 등 |
+
+**전역 옵션 차단**: `-H` / `--host` / `--context` / `--config` / `--tlsverify` 는 어느 위치에
+있어도 거절한다. 데몬을 다른 곳으로 돌리면 격리가 무의미해진다.
+
+**`update` 는 자원 조정만**: `--memory` `--cpus` `--pids-limit` 등만 허용하고 특권 상승
+옵션은 막는다.
+
+**대상 제한**: 모든 target 이름은 훈련이 허용한 리소스 집합 안에 있어야 한다.
+시나리오가 집합을 넘기지 않으면 기본값(`SANDBOX_TRAINING_CONTAINER` / `_NETWORK` / `_VOLUME`)만
+허용한다. 플래그의 **값**(`--memory 256m` 의 `256m`)을 대상으로 오인하지 않도록
+`VALUE_FLAGS` 로 걸러낸다.
 
 ### Docker 샌드박스와 privileged 결정 (BE-11)
 
@@ -421,6 +444,8 @@ SANDBOX_DIND_MEMORY_LIMIT=1Gi
 SANDBOX_DIND_STORAGE_LIMIT=2Gi
 SANDBOX_TRAINING_IMAGE=nginx:alpine       # DinD 안 훈련 대상 컨테이너
 SANDBOX_TRAINING_CONTAINER=training-app
+SANDBOX_TRAINING_NETWORK=training-net
+SANDBOX_TRAINING_VOLUME=training-data
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock
