@@ -17,12 +17,12 @@ import {
 } from './types/training'
 import {
   AUTH_EXPIRED_EVENT,
-  createTerminalSession,
   getEnvironments,
   getProfile,
   logoutUser,
   UserProfileResponse,
 } from './services/api'
+import { useEnvironmentSessions } from './hooks/useEnvironmentSessions'
 import './App.css'
 
 type WorkspaceTab = 'missions' | 'terminal'
@@ -127,8 +127,6 @@ const getGrafanaDataProbeUrl = (namespace: string | null) => {
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [namespace, setNamespace] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('missions')
   const [environments, setEnvironments] = useState<EnvironmentItem[] | null>(null)
@@ -136,6 +134,14 @@ function App() {
   const [activeEnvironment, setActiveEnvironment] = useState<EnvironmentId | null>(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
+  /**
+   * 프로필 조회가 끝났는가(성공·실패 무관). 저장된 환경은 사용자별 키에 있어
+   * 프로필이 와야 읽을 수 있다. 실패해도 true 로 둔다 — 영원히 터미널을
+   * 못 여는 편이 더 나쁘다.
+   */
+  const [isAccountScopeResolved, setIsAccountScopeResolved] = useState(false)
+  /** `activeEnvironment` 를 마지막으로 계산할 때 쓴 계정 범위. */
+  const [environmentScope, setEnvironmentScope] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [activeAttempt, setActiveAttempt] = useState<ActiveAttemptSummary | null>(null)
   const [isGrafanaFrameReady, setIsGrafanaFrameReady] = useState(false)
@@ -143,17 +149,39 @@ function App() {
   const [activeTour, setActiveTour] = useState<'intro' | 'mission' | null>(null)
   const [hasSeenIntroTour, setHasSeenIntroTour] = useState(() => localStorage.getItem(INTRO_TOUR_STORAGE_KEY) === 'done')
   const [hasSeenMissionTour, setHasSeenMissionTour] = useState(() => localStorage.getItem(MISSION_TOUR_STORAGE_KEY) === 'done')
-  const accountStorageScope = profile?.id || namespace
-  const grafanaUrl = getGrafanaUrl(namespace)
+  const { sessionOf, stateOf, ensure, retry, closeAll } = useEnvironmentSessions(token)
+
   const hasActiveAttempt = activeAttempt !== null
+  /**
+   * 세션을 만들 환경. 활성 attempt 가 있으면 그 환경이 곧 실행 환경이므로
+   * `activeEnvironment` state 가 서버 값을 따라잡기를 기다리지 않는다 —
+   * 기다리면 그 한 렌더 동안 엉뚱한 환경의 샌드박스를 하나 더 만든다.
+   */
+  const sessionEnvironment = activeAttempt?.environment ?? activeEnvironment
+  const activeSession = sessionOf(sessionEnvironment)
+  const activeSessionState = stateOf(sessionEnvironment)
+  /** namespace 는 세션 응답에서만 온다. 세션을 지연 생성하므로 그 전에는 알 수 없다. */
+  const namespace = activeSession?.namespace ?? null
+  const accountStorageScope = profile?.id ?? null
+  const grafanaUrl = getGrafanaUrl(namespace)
   const isGrafanaLoading = hasActiveAttempt && (!isGrafanaFrameReady || !isGrafanaDataReady)
   const activeEnvironmentItem = environments?.find((item) => item.id === activeEnvironment) ?? null
   const isActiveEnvironmentDegraded = activeEnvironmentItem?.status === 'degraded'
+  /**
+   * 터미널 workspace 가 실제로 필요한 시점.
+   * 로그인했다는 이유만으로는 세션을 만들지 않는다 (FE-04).
+   */
+  /**
+   * 저장된 환경이 `activeEnvironment` 에 실제로 반영됐는가.
+   * 프로필 도착만 보면 안 된다 — 프로필이 들어온 그 렌더에서는 복원 effect 가
+   * 아직 돌지 않아 `activeEnvironment` 가 기본값이고, 그 값으로 세션을 만들면
+   * 복원될 환경과 기본 환경 두 개가 생긴다.
+   */
+  const isEnvironmentSettled = isAccountScopeResolved && environmentScope === accountStorageScope
+  const needsWorkspace = hasActiveAttempt || (activeTab === 'terminal' && isEnvironmentSettled)
 
   const clearAuthState = useCallback(() => {
     setToken(null)
-    setSessionId(null)
-    setNamespace(null)
     setProfile(null)
     setActiveAttempt(null)
     setEnvironments(null)
@@ -161,38 +189,26 @@ function App() {
     setActiveEnvironment(null)
     setActiveTab('missions')
     setIsProfileOpen(false)
+    setIsAccountScopeResolved(false)
+    setEnvironmentScope(null)
     localStorage.removeItem('token')
     localStorage.removeItem('sessionId')
     localStorage.removeItem('namespace')
   }, [])
 
+  /**
+   * 토큰 복원. 예전에는 여기서 터미널 세션을 만들어 보고 실패하면 로그아웃시켰지만,
+   * 세션 생성은 이제 환경이 정해지고 터미널이 필요해진 뒤의 일이다.
+   * 샌드박스가 잠깐 준비되지 않았다고 로그인 자체를 잃으면 안 된다.
+   */
   useEffect(() => {
     const savedToken = localStorage.getItem('token')
-    const savedNamespace = localStorage.getItem('namespace')
-
-    const restoreSession = async () => {
-      if (!savedToken) {
-        setIsLoading(false)
-        return
-      }
-
-      try {
-        const session = await createTerminalSession(savedToken)
-        setToken(savedToken)
-        setSessionId(session.id)
-        setNamespace(session.namespace || savedNamespace)
-        localStorage.setItem('sessionId', session.id)
-        localStorage.setItem('namespace', session.namespace)
-      } catch (error) {
-        console.error('터미널 세션 복원 실패:', error)
-        clearAuthState()
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    void restoreSession()
-  }, [clearAuthState])
+    if (savedToken) setToken(savedToken)
+    // 환경별 세션으로 바뀌어 단일 키 저장은 의미가 없다. 예전 값이 남아 있으면 지운다.
+    localStorage.removeItem('sessionId')
+    localStorage.removeItem('namespace')
+    setIsLoading(false)
+  }, [])
 
   useEffect(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, clearAuthState)
@@ -209,6 +225,7 @@ function App() {
       console.error('프로필 조회 실패:', error)
     } finally {
       setIsProfileLoading(false)
+      setIsAccountScopeResolved(true)
     }
   }, [token])
 
@@ -245,27 +262,32 @@ function App() {
   useEffect(() => {
     if (!environments) return
 
-    if (activeAttempt) {
-      setActiveEnvironment(activeAttempt.environment)
-      return
+    const resolved = (): EnvironmentId | null => {
+      if (activeAttempt) return activeAttempt.environment
+
+      const selectable = environments.filter((item) => isSelectableStatus(item.status)).map((item) => item.id)
+      const saved = accountStorageScope
+        ? localStorage.getItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope))
+        : null
+
+      if (saved && isEnvironmentId(saved) && selectable.includes(saved)) return saved
+      return selectable.includes(DEFAULT_ENVIRONMENT) ? DEFAULT_ENVIRONMENT : selectable[0] ?? null
     }
 
-    const selectable = environments.filter((item) => isSelectableStatus(item.status)).map((item) => item.id)
-    const saved = accountStorageScope
-      ? localStorage.getItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope))
-      : null
-
-    if (saved && isEnvironmentId(saved) && selectable.includes(saved)) {
-      setActiveEnvironment(saved)
-      return
-    }
-    setActiveEnvironment(selectable.includes(DEFAULT_ENVIRONMENT) ? DEFAULT_ENVIRONMENT : selectable[0] ?? null)
+    setActiveEnvironment(resolved())
+    setEnvironmentScope(accountStorageScope)
   }, [accountStorageScope, activeAttempt, environments])
 
   useEffect(() => {
     if (!activeEnvironment || !accountStorageScope) return
     localStorage.setItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope), activeEnvironment)
   }, [accountStorageScope, activeEnvironment])
+
+  /** 선택된 환경의 터미널이 필요해진 순간에만 세션을 만든다. 이미 있으면 훅이 막는다. */
+  useEffect(() => {
+    if (!sessionEnvironment || !needsWorkspace) return
+    ensure(sessionEnvironment)
+  }, [ensure, needsWorkspace, sessionEnvironment])
 
   useEffect(() => {
     if (!accountStorageScope) return
@@ -279,18 +301,18 @@ function App() {
   }, [activeTab])
 
   useEffect(() => {
-    if (!token || !sessionId || hasSeenIntroTour || isProfileOpen || activeTour) return
+    if (!token || hasSeenIntroTour || isProfileOpen || activeTour) return
     setActiveTab('missions')
     const timer = window.setTimeout(() => setActiveTour('intro'), 450)
     return () => window.clearTimeout(timer)
-  }, [activeTour, hasSeenIntroTour, isProfileOpen, sessionId, token])
+  }, [activeTour, hasSeenIntroTour, isProfileOpen, token])
 
   useEffect(() => {
-    if (!token || !sessionId || !hasActiveAttempt || hasSeenMissionTour || activeTour) return
+    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour) return
     setActiveTab(window.innerWidth <= 768 ? 'missions' : 'terminal')
     const timer = window.setTimeout(() => setActiveTour('mission'), 650)
     return () => window.clearTimeout(timer)
-  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, sessionId, token])
+  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, token])
 
   useEffect(() => {
     setIsGrafanaFrameReady(false)
@@ -333,22 +355,20 @@ function App() {
     }
   }, [grafanaUrl, hasActiveAttempt, isGrafanaFrameReady, namespace])
 
-  const handleLoginSuccess = (newToken: string, newSessionId: string, newNamespace?: string) => {
+  const handleLoginSuccess = (newToken: string) => {
     setToken(newToken)
-    setSessionId(newSessionId)
-    setNamespace(newNamespace || null)
     localStorage.setItem('token', newToken)
-    localStorage.setItem('sessionId', newSessionId)
-    if (newNamespace) localStorage.setItem('namespace', newNamespace)
   }
 
-  const handleLogout = async () => {
-    if (token) {
-      try {
-        await logoutUser(token)
-      } catch (error) {
-        console.error('로그아웃 요청 실패:', error)
-      }
+  /**
+   * 로그아웃. 샌드박스 정리와 로그아웃 요청은 best-effort 로 던져 두고
+   * 화면은 즉시 로그인으로 되돌린다 — 정리 실패가 로그아웃을 막으면 안 된다.
+   */
+  const handleLogout = () => {
+    const expiringToken = token
+    void closeAll()
+    if (expiringToken) {
+      void logoutUser(expiringToken).catch((error) => console.error('로그아웃 요청 실패:', error))
     }
     clearAuthState()
   }
@@ -386,7 +406,7 @@ function App() {
   }, [])
 
   if (isLoading) return <div className="app-loading">불러오는 중...</div>
-  if (!token || !sessionId) return <Login onLoginSuccess={handleLoginSuccess} />
+  if (!token) return <Login onLoginSuccess={handleLoginSuccess} />
 
   return (
     <div className="app">
@@ -467,9 +487,38 @@ function App() {
                   <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} onActiveAttemptChange={handleActiveAttemptChange} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
-                      {hasActiveAttempt ? (
+                      {activeAttempt ? (
                         <div className="terminal-tour-target" data-tour="terminal">
-                          <Terminal sessionId={sessionId} token={token} namespace={namespace || undefined} />
+                          {activeSession ? (
+                            /*
+                             * key 로 세션마다 새 Terminal 을 만든다. 환경을 바꾸면
+                             * 이전 WebSocket·입력 queue 를 물려받은 인스턴스가 남지 않는다.
+                             */
+                            <Terminal
+                              key={activeSession.id}
+                              sessionId={activeSession.id}
+                              token={token}
+                              namespace={activeSession.namespace}
+                            />
+                          ) : activeSessionState.status === 'error' ? (
+                            <section className="env-notice env-notice-error" role="alert">
+                              <span className="env-notice-title">터미널 세션을 준비하지 못했습니다</span>
+                              <p>{activeSessionState.message}</p>
+                              <button
+                                className="env-notice-action"
+                                type="button"
+                                onClick={() => retry(activeAttempt.environment)}
+                              >
+                                다시 시도
+                              </button>
+                            </section>
+                          ) : (
+                            <section className="env-notice" role="status" aria-live="polite">
+                              <span className="env-notice-title">
+                                {getEnvironmentMeta(activeAttempt.environment).label} 터미널 세션을 준비하는 중...
+                              </span>
+                            </section>
+                          )}
                         </div>
                       ) : (
                         <section className="tutorial-panel" data-tour="field-guide">

@@ -1,9 +1,13 @@
 import React, { useState } from 'react'
-import { createTerminalSession, login, register } from '../../services/api'
+import { login, register } from '../../services/api'
 import './Login.css'
 
 interface LoginProps {
-  onLoginSuccess: (token: string, sessionId: string, namespace?: string) => void
+  /**
+   * 터미널 세션은 여기서 만들지 않는다 (FE-04). 환경이 정해지고 터미널이
+   * 필요해진 뒤에 만들므로, 로그인은 토큰만 넘긴다.
+   */
+  onLoginSuccess: (token: string) => void
 }
 
 const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
@@ -35,8 +39,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       }
 
       const loginResponse = await login(username, password)
-      const session = await createTerminalSession(loginResponse.access_token)
-      onLoginSuccess(loginResponse.access_token, session.id, session.namespace)
+      onLoginSuccess(loginResponse.access_token)
     } catch (err) {
       setError(err instanceof Error ? err.message : isRegisterMode ? '회원가입에 실패했습니다.' : '로그인에 실패했습니다.')
     } finally {
