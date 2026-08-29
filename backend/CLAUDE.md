@@ -81,6 +81,7 @@ app/
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
+│   ├── sandbox_service.py        # 환경별 샌드박스 (kubernetes=toolbox, docker=DinD)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
@@ -216,6 +217,35 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Docker 샌드박스와 privileged 결정 (BE-11)
+
+**rootless DinD는 이 클러스터에서 기동하지 않는다.** 세 가지 방식을 실제로 시도했다.
+
+| 시도 | 결과 |
+|---|---|
+| 기본 (rootlesskit builtin) | `ip tuntap add name tap0` 실패 |
+| `DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns` | 이미지에 바이너리 없음 |
+| `NET_ADMIN` + `SYS_ADMIN` capability 추가 | sysfs mount 거부, TAP 실패 |
+
+같은 클러스터에서 **privileged DinD는 정상 기동**한다(docker 27.5.1). 그래서 계획서 방침대로
+privileged를 쓰되 격리를 다음으로 좁혔다.
+
+- 사용자 네임스페이스 안에서만 생성되고 기본 deny NetworkPolicy가 적용된다
+- **호스트 `docker.sock`을 마운트하지 않는다.** 데몬을 컨테이너 안에서 새로 띄운다
+- **ServiceAccount 토큰을 마운트하지 않아** Kubernetes API에 접근할 수 없다
+  (Docker 환경은 K8s API를 쓰지 않으므로 Role/RoleBinding도 붙이지 않는다)
+- CPU/메모리/**ephemeral-storage** 상한 (디스크를 채우는 훈련이 노드를 위협하면 안 된다)
+- 데몬은 유닉스 소켓만 쓴다 (`DOCKER_TLS_CERTDIR=""`)
+
+실측 격리: 샌드박스에서 `docker ps`가 **호스트의 컨테이너 9개를 전혀 보지 못하고**
+자기 안의 것만 보여준다. `/var/run/secrets/kubernetes.io/`도 존재하지 않는다.
+
+훈련 대상 컨테이너는 `ensure_training_workload()`가 멱등 생성한다. Kubernetes 환경의
+nginx Deployment에 해당하는 역할이며, 이미 있으면 다시 만들지 않고 멈춰 있으면 다시 띄운다.
+
+> **아직 `IMPLEMENTED_ENVIRONMENTS`에 docker를 넣지 않았다.** 샌드박스는 뜨지만
+> injector/validator가 없어서(BE-13/BE-14) 미션을 시작할 수 없다. 활성화는 BE-14에서 한다.
 
 ### 미션 시드 (seed_data.py, BE-09)
 
@@ -383,6 +413,14 @@ AUTO_CREATE_SCHEMA=true      # 로컬 개발/테스트 편의용. 배포 환경�
 SANDBOX_TOOLBOX_IMAGE=alpine/k8s:1.34.1   # shell 포함 필수(distroless 불가), 클러스터와 마이너 일치
 SANDBOX_READINESS_TIMEOUT_SECONDS=90
 CHAOS_MESH_NAMESPACE=chaos-mesh           # Chaos Mesh 설치 위치
+
+# Docker 환경 샌드박스 (DinD)
+SANDBOX_DIND_IMAGE=docker:27-dind
+SANDBOX_DIND_CPU_LIMIT=1
+SANDBOX_DIND_MEMORY_LIMIT=1Gi
+SANDBOX_DIND_STORAGE_LIMIT=2Gi
+SANDBOX_TRAINING_IMAGE=nginx:alpine       # DinD 안 훈련 대상 컨테이너
+SANDBOX_TRAINING_CONTAINER=training-app
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock

@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     # 클러스터와 kubectl 마이너 버전을 맞춘다.
     SANDBOX_TOOLBOX_IMAGE: str = "alpine/k8s:1.34.1"
     SANDBOX_READINESS_TIMEOUT_SECONDS: float = 90.0
+    # Docker 환경 샌드박스(DinD). rootless 가 클러스터에서 기동하지 않아 privileged 를 쓰며,
+    # 대신 자원 상한과 네트워크 정책으로 범위를 좁힌다. 자세한 사유는 sandbox_service 참고.
+    SANDBOX_DIND_IMAGE: str = "docker:27-dind"
+    SANDBOX_DIND_CPU_LIMIT: str = "1"
+    SANDBOX_DIND_MEMORY_LIMIT: str = "1Gi"
+    SANDBOX_DIND_STORAGE_LIMIT: str = "2Gi"
+    # DinD 안에서 훈련 대상이 되는 컨테이너
+    SANDBOX_TRAINING_IMAGE: str = "nginx:alpine"
+    SANDBOX_TRAINING_CONTAINER: str = "training-app"
 
     # Chaos Mesh 가 설치된 네임스페이스.
     # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
