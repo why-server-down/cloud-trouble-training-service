@@ -496,6 +496,7 @@ function App() {
                              */
                             <Terminal
                               key={activeSession.id}
+                              environment={activeAttempt.environment}
                               sessionId={activeSession.id}
                               token={token}
                               namespace={activeSession.namespace}
