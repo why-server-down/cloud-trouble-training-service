@@ -4,6 +4,7 @@ import Toast, { ToastMessage } from '../Feedback/Toast'
 import {
   abandonMission,
   abandonScenario,
+  ApiError,
   checkMission,
   checkScenario,
   getMissionStatus,
@@ -19,6 +20,7 @@ import {
   startRandomScenario,
   UnlockStatusResponse,
 } from '../../services/api'
+import { getEnvironmentMeta } from '../../config/environments'
 import { ActiveAttemptSummary, AttemptType, EnvironmentId } from '../../types/training'
 import MissionCard from './MissionCard'
 import MissionStatus from './MissionStatus'
@@ -62,6 +64,8 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
   const [statusRefreshKey, setStatusRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 목록이 비었을 때 "준비 중"과 "조회 실패"를 구분하기 위한 상태 (FE-06). */
+  const [missionsStatus, setMissionsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [toast, setToast] = useState<ToastMessage | null>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
 
@@ -96,11 +100,13 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
     showToast('info', '시연용으로 AI 문제 모드를 열었습니다.')
   }, [showToast, storageScope])
 
-  const fetchMissions = useCallback(async () => {
+  const fetchMissions = useCallback(async (signal?: AbortSignal) => {
     try {
       setError(null)
-      const missionList = await listMissions(token)
+      const missionList = await listMissions(token, environment, signal)
+      if (signal?.aborted) return
       setMissions(missionList)
+      setMissionsStatus('ready')
 
       // localStorage 의 attempt type 은 **조회 순서를 정하는 힌트일 뿐**이다.
       // 값이 없거나 낡아도 두 종류를 모두 확인해 서버 상태를 그대로 따른다 (FE-05).
@@ -172,22 +178,32 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
         setUnlockStatus(null)
       }
     } catch (err) {
+      // 환경을 바꿔 이전 요청을 끊은 것은 실패가 아니다.
+      if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) return
+
       console.error('미션 목록 조회 실패:', err)
-      setError('미션 목록을 불러오지 못했습니다.')
+      setMissionsStatus('error')
+      // 계약이 어긋난 경우(다른 환경 미션 혼입 등)는 원인을 그대로 보여준다.
+      setError(err instanceof ApiError ? err.message : '미션 목록을 불러오지 못했습니다.')
     }
-  }, [forgetActiveAttempt, onActiveAttemptChange, rememberActiveAttempt, storageScope, token])
+  }, [environment, forgetActiveAttempt, onActiveAttemptChange, rememberActiveAttempt, storageScope, token])
 
   useEffect(() => {
     setDemoAiUnlocked(localStorage.getItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope)) === 'true')
+    setMissions([])
+    setMissionsStatus('loading')
+    setError(null)
     setActiveMissionId(null)
     setActiveScenario(null)
     setHintsUsed(0)
     setScenarioHintsUsed(0)
     onActiveAttemptChange(null)
-  }, [onActiveAttemptChange, storageScope])
+  }, [environment, onActiveAttemptChange, storageScope])
 
   useEffect(() => {
-    void fetchMissions()
+    const controller = new AbortController()
+    void fetchMissions(controller.signal)
+    return () => controller.abort()
   }, [fetchMissions])
 
   useEffect(() => {
@@ -493,8 +509,16 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
             <span className="mission-active-label">LIVE AI INCIDENT</span>
           </div>
         )}
-        {displayedMissions.length === 0 && !isActiveScenario ? (
-          <div className="empty-state">미션을 불러오는 중...</div>
+        {/*
+          * 목록이 비는 이유는 세 가지고 문구가 달라야 한다 (FE-06).
+          * 조회 실패는 위 mission-error 배너가 이유까지 말하므로 여기서 반복하지 않는다.
+          */}
+        {displayedMissions.length === 0 && !isActiveScenario && missionsStatus !== 'error' ? (
+          <div className="empty-state">
+            {missionsStatus === 'loading'
+              ? '미션을 불러오는 중...'
+              : `${getEnvironmentMeta(environment).label} 미션은 아직 준비 중입니다.`}
+          </div>
         ) : (
           displayedMissions.map((mission) => (
             <MissionCard
@@ -596,7 +620,8 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
             <div className="ai-lock-notice">
               <span className="ai-lock-icon">🔒</span>
               <span>
-                기본 미션을 모두 완료하면 활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
+                AI 문제 모드는 계정 단위로 열립니다. 기본 미션을 모두 완료하면 모든 환경에서
+                활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
               </span>
             </div>
           )}
