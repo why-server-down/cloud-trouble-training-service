@@ -69,6 +69,31 @@ def _evaluate_case(case: dict[str, Any], base_dir: Path) -> tuple[bool, Any]:
         passed = markdown == set(manifest) and len(markdown) == expected and complete
         return passed, actual
 
+    if kind == "question_dataset_coverage":
+        payload = json.loads((base_dir / case["dataset"]).read_text(encoding="utf-8"))
+        questions = payload.get("questions", [])
+        ids = [question.get("id") for question in questions]
+        fault_types = {question.get("fault_type") for question in questions}
+        complete = all(
+            question.get("query") and question.get("expected_source_id")
+            for question in questions
+        )
+        actual = {
+            "environment": payload.get("environment"),
+            "questions": len(questions),
+            "fault_types": sorted(fault_types),
+            "unique_ids": len(ids) == len(set(ids)),
+            "complete": complete,
+        }
+        passed = (
+            actual["environment"] == case["environment"]
+            and actual["questions"] >= case["minimum_questions"]
+            and set(case["required_fault_types"]) <= fault_types
+            and actual["unique_ids"]
+            and complete
+        )
+        return passed, actual
+
     raise ValueError(f"지원하지 않는 eval kind입니다: {kind}")
 
 

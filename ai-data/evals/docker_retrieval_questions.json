@@ -1,0 +1,29 @@
+{
+  "version": "2026-08-29",
+  "environment": "docker",
+  "questions": [
+    {"id": "docker-net-01", "fault_type": "container_network_disconnect", "query": "실행 중인 training-app이 training-net에서 빠졌는지 어떻게 확인하나요?", "expected_source_id": "docker-network-troubleshooting"},
+    {"id": "docker-net-02", "fault_type": "container_network_disconnect", "query": "컨테이너 이름 DNS 실패와 connection refused를 어떻게 구분하나요?", "expected_source_id": "docker-network-troubleshooting"},
+    {"id": "docker-net-03", "fault_type": "container_network_disconnect", "query": "bridge network의 endpoint 목록에서 무엇을 봐야 하나요?", "expected_source_id": "docker-network-troubleshooting"},
+    {"id": "docker-net-04", "fault_type": "container_network_disconnect", "query": "training-net 연결을 안전하게 복구하고 검증하는 순서는 무엇인가요?", "expected_source_id": "docker-safe-recovery-playbook"},
+    {"id": "docker-net-05", "fault_type": "container_network_disconnect", "query": "포트 문제처럼 보이지만 network membership이 누락된 경우 어떤 증거가 있나요?", "expected_source_id": "docker-network-troubleshooting"},
+
+    {"id": "docker-volume-01", "fault_type": "volume_mount_error", "query": "training-data volume이 존재하지만 앱에서 파일이 안 보이는 이유는 무엇인가요?", "expected_source_id": "docker-storage-troubleshooting"},
+    {"id": "docker-volume-02", "fault_type": "volume_mount_error", "query": "Docker volume 존재와 container mount attachment는 어떻게 다른가요?", "expected_source_id": "docker-storage-troubleshooting"},
+    {"id": "docker-volume-03", "fault_type": "volume_mount_error", "query": "bind mount permission denied를 어떤 inspect 필드로 조사하나요?", "expected_source_id": "docker-storage-troubleshooting"},
+    {"id": "docker-volume-04", "fault_type": "volume_mount_error", "query": "실행 중인 컨테이너의 mount를 docker update로 고칠 수 있나요?", "expected_source_id": "docker-storage-troubleshooting"},
+    {"id": "docker-volume-05", "fault_type": "volume_mount_error", "query": "현재 샌드박스 정책에서 mount 오류를 직접 복구할 수 없을 때 어떻게 처리하나요?", "expected_source_id": "docker-safe-recovery-playbook"},
+
+    {"id": "docker-oom-01", "fault_type": "container_oom", "query": "exit code 137만 보고 OOMKilled라고 확정해도 되나요?", "expected_source_id": "docker-container-lifecycle"},
+    {"id": "docker-oom-02", "fault_type": "container_oom", "query": "OOMKilled와 memory limit을 함께 확인하는 Docker 명령은 무엇인가요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-oom-03", "fault_type": "container_oom", "query": "memory와 memory-swap 값을 함께 변경할 때 어떤 관계를 지켜야 하나요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-oom-04", "fault_type": "container_oom", "query": "컨테이너 메모리 복구 뒤 OOM 반복이 멈췄는지 어떻게 검증하나요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-oom-05", "fault_type": "container_oom", "query": "OOM killer를 끄는 것이 왜 안전한 복구 방법이 아닌가요?", "expected_source_id": "docker-resource-troubleshooting"},
+
+    {"id": "docker-cpu-01", "fault_type": "container_cpu_throttle", "query": "컨테이너는 running인데 응답만 느릴 때 CPU 제한을 어떻게 조사하나요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-cpu-02", "fault_type": "container_cpu_throttle", "query": "docker stats의 순간 CPU 값 하나만으로 throttle을 확정하면 안 되는 이유는 무엇인가요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-cpu-03", "fault_type": "container_cpu_throttle", "query": "AfterFail training-app의 CPU 상한을 정상 값으로 복원하는 명령은 무엇인가요?", "expected_source_id": "docker-safe-recovery-playbook"},
+    {"id": "docker-cpu-04", "fault_type": "container_cpu_throttle", "query": "CPU 장애 복구 시 memory 설정까지 같이 바꾸면 안 되는 이유는 무엇인가요?", "expected_source_id": "docker-resource-troubleshooting"},
+    {"id": "docker-cpu-05", "fault_type": "container_cpu_throttle", "query": "CPU quota 정상화 뒤 서비스 회복을 어떤 관찰로 확인하나요?", "expected_source_id": "docker-resource-troubleshooting"}
+  ]
+}
