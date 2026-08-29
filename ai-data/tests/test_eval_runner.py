@@ -15,7 +15,7 @@ def test_offline_eval_dataset_passes():
 
     assert summary["success"] is True
     assert summary["failed"] == 0
-    assert summary["total"] == 3
+    assert summary["total"] == 4
 
 
 def test_runner_prints_json_and_returns_zero_without_network():

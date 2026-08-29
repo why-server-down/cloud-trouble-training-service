@@ -20,7 +20,7 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9_]+", text.casefold()))
 
 
-def _evaluate_case(case: dict[str, Any]) -> tuple[bool, Any]:
+def _evaluate_case(case: dict[str, Any], base_dir: Path) -> tuple[bool, Any]:
     kind = case["kind"]
     if kind == "json_parse":
         actual = json.loads(case["input"])
@@ -48,6 +48,27 @@ def _evaluate_case(case: dict[str, Any]) -> tuple[bool, Any]:
         ]
         return actual == case["expected_ids"], actual
 
+    if kind == "manifest_coverage":
+        manifest_path = (base_dir / case["manifest"]).resolve()
+        knowledge_base = (base_dir / case["knowledge_base"]).resolve()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))["documents"]
+        markdown = {
+            path.relative_to(knowledge_base).as_posix()
+            for path in knowledge_base.rglob("*.md")
+        }
+        required = {
+            "source_id", "title", "environments", "fault_types", "authority", "version"
+        }
+        complete = all(required <= set(metadata) for metadata in manifest.values())
+        actual = {
+            "documents": len(markdown),
+            "mapped": len(manifest),
+            "complete": complete,
+        }
+        expected = case["expected_documents"]
+        passed = markdown == set(manifest) and len(markdown) == expected and complete
+        return passed, actual
+
     raise ValueError(f"지원하지 않는 eval kind입니다: {kind}")
 
 
@@ -56,7 +77,7 @@ def run(dataset: Path) -> dict[str, Any]:
     results = []
     for case in payload.get("cases", []):
         try:
-            passed, actual = _evaluate_case(case)
+            passed, actual = _evaluate_case(case, dataset.parent)
             results.append(
                 {"id": case["id"], "kind": case["kind"], "passed": passed, "actual": actual}
             )

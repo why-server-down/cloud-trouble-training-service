@@ -30,6 +30,13 @@
         {"id": "kubernetes", "environments": ["kubernetes"]}
       ],
       "expected_ids": ["docker", "general"]
+    },
+    {
+      "id": "knowledge-manifest-coverage",
+      "kind": "manifest_coverage",
+      "manifest": "../knowledge-base/manifest.json",
+      "knowledge_base": "../knowledge-base",
+      "expected_documents": 17
     }
   ]
 }

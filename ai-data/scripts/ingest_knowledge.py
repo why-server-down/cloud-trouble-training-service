@@ -47,7 +47,11 @@ def print_warning(text):
     print(f"⚠ {text}")
 
 
-from ingest import load_all_documents  # noqa: F401  (re-export for backwards compat)
+from ingest import (  # noqa: F401  (load_all_documents re-export for backwards compat)
+    attach_chunk_metadata,
+    build_load_report,
+    load_all_documents,
+)
 
 
 def main():
@@ -155,8 +159,13 @@ def main():
         print(f"  Chunk size: {config.RAG_CHUNK_SIZE}")
         print(f"  Chunk overlap: {config.RAG_CHUNK_OVERLAP}")
         
-        chunks = rag.chunk_documents(docs)
+        chunks = attach_chunk_metadata(rag.chunk_documents(docs))
         print(f"  Created {len(chunks)} chunks")
+
+        load_report = build_load_report(docs, chunks)
+        print("\n  Chunks by source:")
+        for source, chunk_count in load_report.chunks_by_source.items():
+            print(f"    - {source}: {chunk_count}")
         
         # Show chunk statistics
         chunk_sizes = [len(chunk.page_content) for chunk in chunks]
@@ -226,8 +235,8 @@ def main():
         print_header("Ingestion Complete!")
         
         print("\nSummary:")
-        print(f"  ✓ Documents loaded: {len(docs)}")
-        print(f"  ✓ Chunks created: {len(chunks)}")
+        print(f"  ✓ Documents loaded: {load_report.document_count}")
+        print(f"  ✓ Chunks created: {load_report.chunk_count}")
         print(f"  ✓ Chunks ingested: {count}")
         print(f"  ✓ Collection: {stats['collection_name']}")
         print(f"  ✓ Total documents in DB: {stats['document_count']}")
