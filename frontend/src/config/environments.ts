@@ -25,6 +25,85 @@ export const ENVIRONMENT_META: Record<EnvironmentId, EnvironmentDisplayMeta> = {
   linux: { label: 'Linux', subtitle: '시스템 관리' },
 }
 
+/**
+ * 환경별 터미널 설정 (FE-07).
+ *
+ * `binary` 와 `completions` 의 원본은 백엔드 명령 정책
+ * (`backend/app/services/command_validator.py`) 이다. 프론트가 여기서 더 넓게
+ * 제안하면 사용자는 서버가 거절할 명령을 Tab 으로 완성하게 된다.
+ */
+export interface EnvironmentTerminalMeta {
+  /** 터미널 헤더 라벨. 어느 환경의 셸인지 한눈에 보이게 한다. */
+  headerLabel: string
+  /**
+   * 이 환경에서 실행할 수 있는 명령의 실행 파일.
+   * 백엔드 정책이 아직 없는 환경은 null 이다 — 없는 정책을 추측해 쓰지 않는다.
+   */
+  binary: string | null
+  /** Tab 자동완성 후보. */
+  completions: readonly string[]
+}
+
+export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta> = {
+  kubernetes: {
+    headerLabel: 'SHELL / KUBECTL',
+    binary: 'kubectl',
+    completions: [
+      'kubectl get pods',
+      'kubectl get services',
+      'kubectl get deployments',
+      'kubectl describe pod ',
+      'kubectl describe service ',
+      'kubectl logs ',
+      'kubectl delete pod ',
+      'kubectl apply -f ',
+      'kubectl version',
+      'kubectl help',
+      'kubectl get all',
+      'clear',
+    ],
+  },
+  docker: {
+    headerLabel: 'SHELL / DOCKER',
+    binary: 'docker',
+    // BE-12 DockerPolicy 의 READ_COMMANDS / READ_SUBCOMMANDS / RECOVERY_COMMANDS 범위 안에서만 고른다.
+    completions: [
+      'docker ps',
+      'docker ps -a',
+      'docker images',
+      'docker inspect ',
+      'docker logs ',
+      'docker stats --no-stream',
+      'docker top ',
+      'docker diff ',
+      'docker port ',
+      'docker network ls',
+      'docker network inspect ',
+      'docker volume ls',
+      'docker volume inspect ',
+      'docker container ls',
+      'docker container inspect ',
+      'docker start ',
+      'docker restart ',
+      'docker stop ',
+      'docker unpause ',
+      'docker update --memory ',
+      'docker version',
+      'docker info',
+      'clear',
+    ],
+  },
+  linux: {
+    headerLabel: 'SHELL / LINUX',
+    // BE-16~18 이 아직 없어 명령 정책이 정해지지 않았다. 정해지면 여기를 채운다.
+    binary: null,
+    completions: ['clear'],
+  },
+}
+
+export const getEnvironmentTerminal = (environment: EnvironmentId): EnvironmentTerminalMeta =>
+  ENVIRONMENT_TERMINAL[environment]
+
 /** 탭 노출 순서. 백엔드 SUPPORTED_ENVIRONMENTS 순서를 그대로 따른다. */
 export const ENVIRONMENT_ORDER: readonly EnvironmentId[] = ENVIRONMENT_IDS
 

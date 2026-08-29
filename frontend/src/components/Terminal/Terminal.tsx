@@ -3,32 +3,21 @@ import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
-import { getTerminalPrompt } from '../../utils/terminal'
+import { getEnvironmentTerminal } from '../../config/environments'
+import { EnvironmentId } from '../../types/training'
+import { getOfflineCommandNotice, getTerminalPrompt } from '../../utils/terminal'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
 interface TerminalProps {
+  /** 이 터미널이 붙은 훈련 환경. 프롬프트·자동완성·안내 문구가 여기서 갈린다. */
+  environment: EnvironmentId
   sessionId?: string
   token?: string
   namespace?: string
 }
 
-const kubectlCommands = [
-  'kubectl get pods',
-  'kubectl get services',
-  'kubectl get deployments',
-  'kubectl describe pod ',
-  'kubectl describe service ',
-  'kubectl logs ',
-  'kubectl delete pod ',
-  'kubectl apply -f ',
-  'kubectl version',
-  'kubectl help',
-  'kubectl get all',
-  'clear',
-]
-
-const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
+const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, namespace }) => {
   const terminalElementRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -42,9 +31,25 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   const [confirmCommand, setConfirmCommand] = useState<string | null>(null)
   const [terminalReady, setTerminalReady] = useState(false)
 
-  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
+  const terminalMeta = getEnvironmentTerminal(environment)
+  const getPrompt = useCallback(
+    () => getTerminalPrompt(environment, namespace),
+    [environment, namespace],
+  )
+
+  /**
+   * 환경이나 세션이 바뀌면 이전 입력을 물려주지 않는다. 큐에 남은 명령이
+   * 그대로 실행되면 사용자가 이전 환경에서 친 명령이 새 환경으로 나간다.
+   */
+  useEffect(() => {
+    commandQueueRef.current = []
+    currentLineRef.current = ''
+    isExecutingRef.current = false
+    historyIndexRef.current = commandHistoryRef.current.length
+  }, [environment, sessionId])
 
   const { isConnected, connectionStatus, error, sendCommand } = useTerminalWebSocket({
+    environment,
     sessionId: sessionId || '',
     token: token || '',
     terminal: terminalReady ? xtermRef.current : null,
@@ -116,7 +121,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
         if (isConnectedRef.current && sessionId && token) {
           sendCommand(command)
         } else {
-          terminal.writeln(command.startsWith('kubectl') ? '터미널 연결을 기다리는 중입니다.' : 'Error: Only kubectl commands are allowed')
+          terminal.writeln(getOfflineCommandNotice(environment, command))
           terminal.write(getPrompt())
           isExecutingRef.current = false
           setTimeout(processNextCommand, 0)
@@ -185,7 +190,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
         terminal.write(getPrompt())
         currentLineRef.current = ''
       } else if (code === 9) {
-        const matches = kubectlCommands.filter((command) => command.startsWith(currentLineRef.current))
+        const matches = terminalMeta.completions.filter((command) => command.startsWith(currentLineRef.current))
         if (matches.length === 1) {
           terminal.write(matches[0].slice(currentLineRef.current.length))
           currentLineRef.current = matches[0]
@@ -204,7 +209,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
       terminal.dispose()
       setTerminalReady(false)
     }
-  }, [getPrompt, sendCommand, sessionId, token])
+  }, [environment, getPrompt, sendCommand, sessionId, terminalMeta, token])
 
   useEffect(() => {
     if (error) xtermRef.current?.write(`\r\n\x1b[33m${error}\x1b[0m\r\n${getPrompt()}`)
@@ -224,7 +229,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, token, namespace }) => {
   return (
     <div className="terminal-container">
       <div className="terminal-status">
-        <span className="terminal-label">SHELL / KUBECTL</span>
+        <span className="terminal-label">{terminalMeta.headerLabel}</span>
         {connectionStatus === 'connected' && <span className="status-connected">연결됨</span>}
         {connectionStatus === 'connecting' && <span className="status-connecting">연결 중...</span>}
         {connectionStatus === 'disconnected' && <span className="status-disconnected">연결 끊김</span>}

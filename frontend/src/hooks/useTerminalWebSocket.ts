@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from 'xterm'
 import { AUTH_EXPIRED_EVENT } from '../services/api'
+import { EnvironmentId } from '../types/training'
 import { getTerminalPrompt } from '../utils/terminal'
 
 interface WebSocketMessage {
@@ -11,6 +12,8 @@ interface WebSocketMessage {
 }
 
 interface UseTerminalWebSocketProps {
+  /** 프롬프트에 쓰이고, 바뀌면 기존 연결을 닫고 다시 연결한다. */
+  environment: EnvironmentId
   sessionId: string
   token: string
   terminal: Terminal | null
@@ -44,7 +47,7 @@ const normalizeWsBaseUrl = (configuredUrl?: string) => {
   return configuredUrl.replace(/\/$/, '')
 }
 
-export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, onConfirmRequired, onCommandComplete }: UseTerminalWebSocketProps) => {
+export const useTerminalWebSocket = ({ environment, sessionId, token, terminal, namespace, onConfirmRequired, onCommandComplete }: UseTerminalWebSocketProps) => {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptsRef = useRef(0)
@@ -61,7 +64,21 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
     completeHandlerRef.current = onCommandComplete
   }, [onConfirmRequired, onCommandComplete])
 
-  const getPrompt = useCallback(() => getTerminalPrompt(namespace), [namespace])
+  const getPrompt = useCallback(
+    () => getTerminalPrompt(environment, namespace),
+    [environment, namespace],
+  )
+
+  /**
+   * 환경이나 세션이 바뀌면 재연결 상태를 새로 시작한다.
+   *
+   * 아래 연결 effect 안에서 초기화하면 안 된다 — 그 effect 는 reconnectKey 로도
+   * 다시 도는데, 그때마다 카운터가 0 이 되면 3회 상한이 사라져 무한 재연결이 된다.
+   */
+  useEffect(() => {
+    reconnectAttemptsRef.current = 0
+    initialMessageReceivedRef.current = false
+  }, [environment, sessionId])
 
   useEffect(() => {
     if (!sessionId || !token || !terminal) return
@@ -128,7 +145,7 @@ export const useTerminalWebSocket = ({ sessionId, token, terminal, namespace, on
       if (reconnectTimerRef.current !== null) window.clearTimeout(reconnectTimerRef.current)
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close()
     }
-  }, [getPrompt, reconnectKey, sessionId, terminal, token, wsBaseUrl])
+  }, [environment, getPrompt, reconnectKey, sessionId, terminal, token, wsBaseUrl])
 
   const sendCommand = useCallback((command: string, confirmed: boolean = false) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
