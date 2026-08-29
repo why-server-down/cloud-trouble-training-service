@@ -82,6 +82,7 @@ app/
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
 │   ├── sandbox_service.py        # 환경별 샌드박스 (kubernetes=toolbox, docker=DinD)
+│   ├── docker_chaos_injector.py  # Docker 환경 장애 주입 (DinD 안 docker CLI)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
@@ -217,6 +218,37 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Docker 장애 (docker_chaos_injector.py, BE-13)
+
+Chaos Mesh는 Kubernetes 전용이라 이 환경에는 쓸 수 없다. DinD 샌드박스 안에서
+docker 명령으로 장애를 만든다.
+
+| chaos_type | 장애 | 사용자 복구 |
+|---|---|---|
+| `docker_network_disconnect` | 훈련 컨테이너를 training-net에서 분리 | `docker network connect training-net training-app` |
+| `docker_container_stopped` | 컨테이너 중지 | `docker start training-app` |
+| `docker_cpu_throttle` | CPU 상한을 0.05로 축소 | `docker update --cpus 1 training-app` |
+
+**등록 기준: 사용자가 BE-12 명령 정책 안에서 실제로 복구할 수 있는 장애만 넣는다.**
+테스트가 각 복구 명령을 실제 validator에 통과시켜 이 계약을 고정한다.
+
+#### 계획서의 volume/mount error를 제외한 이유 (실측)
+
+- `docker update`에 볼륨·마운트 옵션이 없어 실행 중 변경이 불가능하다
+- 사용 중인 볼륨은 삭제가 거부된다 (`volume is in use`)
+- 컨테이너를 멈춰도 참조가 남아 삭제되지 않는다
+
+유일한 경로가 `docker rm` 후 볼륨 없이 `docker run`인데, 복구하려면 사용자가
+`docker run`을 칠 수 있어야 한다. 그 명령은 임의 이미지 실행 위험 때문에 BE-12에서
+차단했다. 대신 컨테이너 중지 장애를 넣었다.
+
+#### 메모리 대신 CPU를 쓰는 이유 (실측)
+
+docker는 메모리 상한을 올릴 때 `memory+swap >= memory`를 요구한다. 사용자가
+`--memory`만 쳐서는 `memory+swap limit should be >= memory limit`으로 복구가 실패하고,
+항상 `--memory-swap`을 짝으로 요구하는 것은 훈련 난이도가 아니라 함정이다.
+CPU는 낮추기/올리기 왕복이 그대로 동작한다.
 
 ### Docker 명령 정책 (BE-12)
 
@@ -446,6 +478,7 @@ SANDBOX_TRAINING_IMAGE=nginx:alpine       # DinD 안 훈련 대상 컨테이너
 SANDBOX_TRAINING_CONTAINER=training-app
 SANDBOX_TRAINING_NETWORK=training-net
 SANDBOX_TRAINING_VOLUME=training-data
+SANDBOX_TRAINING_CPUS=1                   # 훈련 컨테이너 정상 상태의 CPU 상한
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock

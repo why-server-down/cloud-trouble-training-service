@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     SANDBOX_TRAINING_CONTAINER: str = "training-app"
     SANDBOX_TRAINING_NETWORK: str = "training-net"
     SANDBOX_TRAINING_VOLUME: str = "training-data"
+    SANDBOX_TRAINING_CPUS: str = "1"   # 훈련 컨테이너 정상 상태의 CPU 상한
 
     # Chaos Mesh 가 설치된 네임스페이스.
     # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
