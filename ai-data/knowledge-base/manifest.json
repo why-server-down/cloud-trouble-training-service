@@ -113,6 +113,42 @@
       "authority": 0.95,
       "version": "2026-08-29"
     },
+    "08-linux/process-states.md": {
+      "source_id": "linux-process-states", "title": "Linux 프로세스 상태, 좀비와 고아 프로세스",
+      "environments": ["linux"], "fault_types": ["zombie_process", "orphan_process"],
+      "authority": 1.0, "version": "2026-08-29"
+    },
+    "08-linux/oom-cgroup.md": {
+      "source_id": "linux-oom-cgroup", "title": "Linux cgroup OOM 조사",
+      "environments": ["linux"], "fault_types": ["linux_oom"],
+      "authority": 1.0, "version": "2026-08-29"
+    },
+    "08-linux/disk-io.md": {
+      "source_id": "linux-disk-io", "title": "Linux 디스크 용량과 I/O 포화 조사",
+      "environments": ["linux"], "fault_types": ["disk_io_stress"],
+      "authority": 1.0, "version": "2026-08-29"
+    },
+    "08-linux/resource-observation.md": {
+      "source_id": "linux-resource-observation", "title": "Linux CPU, 메모리와 load 관찰",
+      "environments": ["linux"], "fault_types": ["linux_oom", "disk_io_stress"],
+      "authority": 1.0, "version": "2026-08-29"
+    },
+    "08-linux/service-logs.md": {
+      "source_id": "linux-service-logs", "title": "Linux 서비스 실패와 로그 조사",
+      "environments": ["linux"], "fault_types": ["service_failure"],
+      "authority": 0.95, "version": "2026-08-29"
+    },
+    "08-linux/network-sockets.md": {
+      "source_id": "linux-network-sockets", "title": "Linux 네트워크 socket 관찰",
+      "environments": ["linux"], "fault_types": ["service_failure"],
+      "authority": 0.95, "version": "2026-08-29"
+    },
+    "08-linux/safe-recovery-playbook.md": {
+      "source_id": "linux-safe-recovery-playbook", "title": "AfterFail Linux 안전 복구 플레이북",
+      "environments": ["linux"],
+      "fault_types": ["linux_oom", "disk_io_stress", "zombie_process", "orphan_process", "service_failure"],
+      "authority": 0.95, "version": "2026-08-29"
+    },
     "README.md": {
       "source_id": "afterfail-knowledge-index",
       "title": "AfterFail 지식베이스 안내",
