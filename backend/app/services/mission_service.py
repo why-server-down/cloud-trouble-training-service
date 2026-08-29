@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.core.metrics import MISSION_COMPLETIONS
+from app.core import environments
+from app.core.environments import DEFAULT_ENVIRONMENT
 from app.services.chaos_injector import BaseChaosInjector
 from app.services.scoring_service import ScoringService
 from app.services.validation_service import BaseValidationService
@@ -34,16 +36,31 @@ class MissionService:
         self._validation_for = validation_for
         self._scoring = scoring_service
 
-    async def list_missions(self, db: AsyncSession, user: User) -> list[dict]:
-        result = await db.execute(select(Mission).order_by(Mission.level))
+    async def list_missions(
+        self,
+        db: AsyncSession,
+        user: User,
+        environment: str = DEFAULT_ENVIRONMENT,
+    ) -> list[dict]:
+        """한 환경의 미션 목록과 잠금 상태.
+
+        잠금은 **같은 환경 안에서만** 계산한다. 환경을 섞으면 Kubernetes level 4 를
+        깬 사용자가 Docker level 2 를 건너뛰고 시작할 수 있다.
+        """
+        result = await db.execute(
+            select(Mission)
+            .where(Mission.environment == environment)
+            .order_by(Mission.level)
+        )
         missions = result.scalars().all()
 
-        # 유저가 완료한 미션의 레벨 목록
+        # 같은 환경에서 완료한 미션의 레벨 목록
         completed_result = await db.execute(
             select(Mission.level).join(MissionAttempt).where(
                 and_(
                     MissionAttempt.user_id == user.id,
                     MissionAttempt.status == "completed",
+                    Mission.environment == environment,
                 )
             )
         )
@@ -137,7 +154,10 @@ class MissionService:
         if not mission:
             raise ValueError("미션을 찾을 수 없습니다")
 
-        # 순차 잠금 해제 체크
+        # 미구현 환경의 미션은 시작할 수 없다.
+        environments.assert_implemented(mission.environment)
+
+        # 순차 잠금 해제 체크. 이전 레벨도 같은 환경 것만 인정한다.
         if mission.level > 1:
             prev_completed = await db.execute(
                 select(MissionAttempt.id)
@@ -147,6 +167,7 @@ class MissionService:
                         MissionAttempt.user_id == user.id,
                         MissionAttempt.status == "completed",
                         Mission.level == mission.level - 1,
+                        Mission.environment == mission.environment,
                     )
                 )
                 .limit(1)

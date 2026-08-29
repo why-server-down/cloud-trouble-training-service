@@ -12,6 +12,7 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -82,7 +83,12 @@ class CommandLog(Base):
 
 class Mission(Base):
     __tablename__ = "missions"
-    __table_args__ = (environment_check("missions"),)
+    __table_args__ = (
+        environment_check("missions"),
+        # 시드는 (environment, level) 을 stable key 로 upsert 한다.
+        # 같은 환경에 같은 레벨이 두 개면 잠금 계산과 시드가 모두 깨진다.
+        UniqueConstraint("environment", "level", name="uq_missions_environment_level"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
