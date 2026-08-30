@@ -722,6 +722,50 @@ execute(argv: list[str], sandbox: SandboxRef, timeout: int) -> CommandResult
 - host shell 사용 0건.
 - P0/P1 0개일 때만 Application/DB 또는 고급 Docker 장애를 검토한다.
 
+#### 판정 결과 (2026-08-30, dev `0c4a573` 기준)
+
+| 게이트 | 결과 | 근거 |
+|---|---|---|
+| Kubernetes 회귀 4개 | **4/4 통과** | 실클러스터에서 주입→장애감지→toolbox 복구→검증→revert 전 사이클 |
+| Docker 고정 미션 3개 | **3/3 통과** | 동일. 복구 명령이 BE-12 정책을 통과하는 것까지 확인 |
+| session ownership 침투 | **통과** | 사용자 A 토큰으로 B 세션 연결 시 4003, 없는 세션 4004 |
+| host shell 사용 0건 | **통과** | `app/**` 전체 AST 검사(문자열 grep 아님) |
+| P0/P1 0개 | **통과** | P0 4/4, P1 6/6 해소 |
+
+**P0 (4/4 해소)**
+
+| 결손 | 해소 |
+|---|---|
+| `CommandExecutor` host shell 실행 | BE-05 |
+| WebSocket 세션 소유권 미검증 | BE-06 |
+| environment 가 세션·명령 실행까지 미연결 | BE-03 / BE-07 |
+| active chaos ID 가 프로세스 메모리에만 존재 | BE-02 / BE-08 |
+
+**P1 (6/6 해소)**
+
+| 결손 | 해소 |
+|---|---|
+| factory 가 environment 로 분기하지 않음 | BE-08 |
+| MissionService 가 injector 를 고정 | BE-08 |
+| 미션 목록·잠금이 environment 로 필터되지 않음 | BE-09 |
+| `seed_missions()` 가 새 환경을 추가할 수 없음 | BE-09 |
+| attempt 에 environment·chaos ID 없음 | BE-02 |
+| 활성 attempt 유일성 DB 제약 없음 | BE-02 |
+
+**P2 (1/4 해소, 게이트 조건 아님)**
+
+| 결손 | 상태 |
+|---|---|
+| `create_all` + 수동 ALTER | 해소 (BE-02 Alembic) |
+| CORS wildcard | 미해소 → BE-23 |
+| print 디버깅 (`app/**` 21건) | 미해소 → BE-23 |
+| 환경별 분석 API 없음 | 미해소 → BE-21 |
+
+> 게이트를 통과했으므로 Application/DB 또는 고급 Docker 장애를 **검토할 수 있다.**
+> 다만 필수 환경 3종 중 Linux 가 아직 없고, Application 은 목업 한정으로 이미
+> 결정돼 있다(AGENTS.md). 범위 확대보다 Sprint 4(Linux)를 계획대로 진행하는 것을
+> 권고한다. 최종 결정은 팀이 한다.
+
 ---
 
 ## Sprint 4 - 9~10주차: Linux 환경
