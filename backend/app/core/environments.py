@@ -60,7 +60,8 @@ _CAPABILITIES: dict[str, tuple[str, ...]] = {
     # Docker 는 고정 미션과 터미널만 제공한다. 없는 기능을 광고하면 프론트가
     # 열 수 없는 화면을 그린다.
     #   ai_scenario  : 시나리오 생성이 Kubernetes fault type 기준이다 (BE-20)
-    #   tutor        : RuntimeContext 수집이 Kubernetes 전용이다 (BE-19)
+    #   tutor        : RuntimeContext 는 BE-19 에서 환경별로 확장됐으나 tutor_service 가
+    #                  아직 environment 를 넘기지 않는다(AI 소유 경로)
     #   observability: Grafana/Prometheus 대시보드가 K8s 메트릭 기준이다
     DOCKER: ("static_mission", "terminal"),
     # Linux 도 같은 이유로 고정 미션과 터미널만 제공한다.
