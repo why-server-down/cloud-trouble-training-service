@@ -151,8 +151,10 @@ app/
 - `POST /api/scenarios/debug/resolve` - (Mock 전용) 수동 해결 🔒
 
 ### 대시보드 / 게이미피케이션
-- `GET /api/dashboard/stats` - 내 통계 (총 점수, 티어, 스킬 점수) 🔒
-- `GET /api/dashboard/learning-curve` - 미션 시도 히스토리 🔒
+- `GET /api/dashboard/stats?environment=all|kubernetes|docker|linux` - 내 통계 🔒
+  - `all`이면 전체 합계와 `environment_stats`(환경별 분해)를 함께 준다
+  - 특정 환경이면 그 환경만 집계하고 `environment_stats`는 비운다
+- `GET /api/dashboard/learning-curve?environment=...` - 미션 시도 히스토리 🔒
 - `GET /api/leaderboard` - 전체 리더보드 🔒
 - `GET /api/achievements` - 업적 목록 및 달성 여부 🔒
 
@@ -223,6 +225,44 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### 환경별 분석 (BE-21)
+
+```json
+"environment_stats": {
+  "kubernetes": {"completed": 4, "average_score": 88, "average_mttr": 520,
+                 "hints_used": 2, "competency": 82},
+  "docker": {"completed": 0, "average_score": 0, "average_mttr": 0,
+             "hints_used": 0, "competency": null}
+}
+```
+
+**시도가 없으면 `competency`는 `null`이다.** 0으로 두면 "해봤는데 못했다"와
+"아직 안 했다"가 구분되지 않는다.
+
+`completed` 상태만 집계한다. **포기하거나 실패한 시도를 MTTR에 넣으면 시간 지표가
+실제 복구 능력을 나타내지 못한다.**
+
+#### competency 계산식
+
+```
+speed  = clamp(100 - average_mttr / TARGET_MTTR_SECONDS * 50, 0, 100)
+hint   = clamp(100 - hints_per_completion * 15, 0, 100)
+competency = round(0.5 * average_score + 0.3 * speed + 0.2 * hint)
+```
+
+`TARGET_MTTR_SECONDS`(기본 900초)는 설정값이다. 미션 `time_limit`이 600~2100초로
+환경마다 달라 대표값을 기준으로 삼는다.
+
+#### 학습 곡선의 키 분리
+
+`mission_id`만으로 묶으면 **AI 시나리오는 전부 `None`이라 한 덩어리가 된다.**
+서로 다른 시나리오가 같은 과제를 반복 시도한 것처럼 집계돼 `attempt_number`가
+계속 증가한다.
+
+```python
+"scenario:{scenario_id}"  if attempt_type == "ai_scenario" else  "mission:{mission_id}"
+```
 
 ### AI 시나리오 실행 계약 (BE-20)
 
