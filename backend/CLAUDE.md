@@ -85,6 +85,7 @@ app/
 │   ├── docker_chaos_injector.py  # Docker 환경 장애 주입 (DinD 안 docker CLI)
 │   ├── docker_validation_service.py # Docker 환경 해결 검증 (샌드박스 exec)
 │   ├── linux_chaos_injector.py   # Linux 환경 장애 주입 (supervisor 신호 방식)
+│   ├── linux_validation_service.py # Linux 환경 해결 검증 (/proc·df 구조적 판독)
 │   └── sandbox_assets/           # 샌드박스에 넣는 스크립트 (linux_supervisor.sh)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
@@ -221,6 +222,42 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Linux 환경 활성화 (BE-18)
+
+**필수 환경 3종이 모두 열렸다.** `GET /api/environments`가 kubernetes·docker·linux를
+전부 `available`로 반환한다.
+
+| level | 미션 | chaos_type | 사용자 복구 |
+|---|---|---|---|
+| 1 | 늘어나는 그림자 | `linux_process_flood` | `pkill -f afterfail-worker` |
+| 2 | 가득 찬 창고 | `linux_disk_pressure` | `rm /tmp/afterfail/afterfail-fill.dat` |
+| 3 | 보이지 않는 과부하 | `linux_cpu_saturation` | `pkill -f afterfail-cpuburn` |
+
+난이도는 **발견하기 쉬운 순서**다. 프로세스 폭증은 `ps`에 바로 드러나고, 디스크 압박은
+`df`를 봐야 알며, CPU 포화는 프로세스가 둘뿐이라 목록만 봐서는 눈에 띄지 않는다.
+
+Linux capabilities도 Docker와 같이 `static_mission` / `terminal`만 알린다.
+
+#### 검증에서 반드시 지켜야 하는 것 — 자기 명령줄 제외
+
+`grep -c afterfail-worker`를 쓰면 **검사를 실행하는 `sh`와 `grep` 자신의 명령줄에도**
+그 문자열이 들어가 항상 2 이상이 나온다. 사용자가 제대로 복구해도 영영 통과하지 못한다.
+`pkill -f afterfail-`도 같은 이유로 **자기를 먼저 죽여** 정리가 중단된다.
+
+첫 글자를 문자 클래스로 감싸 해결한다.
+
+```
+grep -c '[a]fterfail-worker'      pkill -f '[a]fterfail-'
+```
+
+패턴 자체는 매치되지 않고 실제 프로세스만 잡힌다. 회귀 테스트가 이 패턴을 고정한다.
+
+#### 검증 지연
+
+외부 의존이 없다. Kubernetes API도 Prometheus도 쓰지 않고 샌드박스 exec 한 번으로
+끝난다. 실측 **평균 92ms**로 계획서의 300ms 목표 안에 든다. `details.duration_ms`로
+매 검증의 소요 시간을 남긴다.
 
 ### Linux 장애 (linux_chaos_injector.py, BE-17)
 

@@ -176,9 +176,11 @@ class LinuxChaosInjector(BaseChaosInjector):
             self._run(sandbox, ["rm", "-f", f"{self._workdir}/afterfail-fill.dat"])
             return
 
-        # 프로세스 계열: 워크로드를 종료한다. 이미 없으면 pkill 이 1을 반환하므로
-        # 실패로 보지 않는다.
-        self._run(sandbox, ["sh", "-c", "pkill -f afterfail- || true"])
+        # 프로세스 계열: 워크로드를 종료한다.
+        # 패턴을 [a]fterfail- 로 쓰는 이유: pkill -f afterfail- 는 자기 명령줄과도
+        # 매치돼 스스로를 먼저 죽이고 정리가 중단된다.
+        # 이미 대상이 없으면 pkill 이 1을 반환하므로 실패로 보지 않는다.
+        self._run(sandbox, ["sh", "-c", "pkill -f '[a]fterfail-' || true"])
 
     def _snapshot(self, sandbox: SandboxRef) -> dict:
         """주입 전 상태. 복구가 실패했을 때 무엇이 달라졌는지 알기 위해 남긴다."""

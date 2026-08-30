@@ -28,9 +28,9 @@ class TestFactoryKeyIsEnvironmentAware:
             for env in environments.SUPPORTED_ENVIRONMENTS
             if env not in environments.IMPLEMENTED_ENVIRONMENTS
         ]
-        assert unimplemented, "이 테스트는 미구현 환경이 하나 이상 있을 때 의미가 있다"
-
-        for environment in unimplemented:
+        # 세 환경이 모두 열린 뒤에도 이 계약은 지켜져야 한다.
+        # 계약에 없는 값으로도 확인한다(application 은 목업 한정이라 SUPPORTED 에 없다).
+        for environment in [*unimplemented, "application"]:
             with pytest.raises(ValueError):
                 service_factory.create_chaos_injector(environment)
             with pytest.raises(ValueError):

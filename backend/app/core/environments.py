@@ -21,7 +21,7 @@ SUPPORTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER, LINUX)
 DEFAULT_ENVIRONMENT = KUBERNETES
 
 # 실제 장애 주입/검증이 구현된 환경. 새 환경 구현체를 붙일 때마다 여기에 추가한다.
-IMPLEMENTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER)
+IMPLEMENTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER, LINUX)
 
 
 def is_supported(environment: str) -> bool:
@@ -63,6 +63,8 @@ _CAPABILITIES: dict[str, tuple[str, ...]] = {
     #   tutor        : RuntimeContext 수집이 Kubernetes 전용이다 (BE-19)
     #   observability: Grafana/Prometheus 대시보드가 K8s 메트릭 기준이다
     DOCKER: ("static_mission", "terminal"),
+    # Linux 도 같은 이유로 고정 미션과 터미널만 제공한다.
+    LINUX: ("static_mission", "terminal"),
 }
 
 AVAILABLE = "available"

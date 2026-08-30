@@ -3,8 +3,13 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.environments import DOCKER, KUBERNETES
+from app.core.environments import DOCKER, KUBERNETES, LINUX
 from app.models import Mission
+from app.services.linux_chaos_injector import (
+    CPU_SATURATION as LINUX_CPU_SATURATION,
+    DISK_PRESSURE as LINUX_DISK_PRESSURE,
+    PROCESS_FLOOD as LINUX_PROCESS_FLOOD,
+)
 from app.services.docker_chaos_injector import (
     CONTAINER_STOPPED as DOCKER_CONTAINER_STOPPED,
     CPU_THROTTLE as DOCKER_CPU_THROTTLE,
@@ -84,6 +89,40 @@ MISSIONS = [
         "level": 3,
         "description": "컨테이너는 정상으로 보이지만 응답이 매우 느립니다. 할당된 자원을 점검하고 정상 수준으로 되돌리세요.",
         "chaos_type": DOCKER_CPU_THROTTLE,
+        "base_score": 100,
+        "time_limit": 1500,
+        "hint_penalty": 7,
+    },
+    # --- Linux 환경 (BE-18) ---
+    # 난이도 순서: 발견하기 쉬운 것부터. 프로세스 폭증은 ps 에 바로 드러나고,
+    # 디스크 압박은 df 를 봐야 알 수 있고,
+    # CPU 포화는 프로세스가 두 개뿐이라 목록만 봐서는 눈에 띄지 않는다.
+    {
+        "environment": LINUX,
+        "name": "늘어나는 그림자",
+        "level": 1,
+        "description": "시스템에 정체 불명의 프로세스가 대량으로 실행되고 있습니다. 프로세스 목록을 확인하고 정리하세요.",
+        "chaos_type": LINUX_PROCESS_FLOOD,
+        "base_score": 100,
+        "time_limit": 900,
+        "hint_penalty": 5,
+    },
+    {
+        "environment": LINUX,
+        "name": "가득 찬 창고",
+        "level": 2,
+        "description": "작업 디렉터리에 여유 공간이 없어 새 파일을 만들 수 없습니다. 어떤 파일이 공간을 차지하는지 찾아 정리하세요.",
+        "chaos_type": LINUX_DISK_PRESSURE,
+        "base_score": 100,
+        "time_limit": 1200,
+        "hint_penalty": 7,
+    },
+    {
+        "environment": LINUX,
+        "name": "보이지 않는 과부하",
+        "level": 3,
+        "description": "프로세스 수는 정상인데 시스템이 계속 느립니다. 자원 사용 현황을 살펴 원인을 찾아 제거하세요.",
+        "chaos_type": LINUX_CPU_SATURATION,
         "base_score": 100,
         "time_limit": 1500,
         "hint_penalty": 7,

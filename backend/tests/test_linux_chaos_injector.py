@@ -135,7 +135,18 @@ class TestRevertCleansUp:
     async def test_process_faults_kill_workloads(self):
         injector, fake = _injector()
         await injector.revert("linux-process-flood-abc12345", NS)
-        assert "pkill -f afterfail-" in _flat(fake.calls)
+        assert "pkill" in _flat(fake.calls)
+
+    @pytest.mark.asyncio
+    async def test_pkill_pattern_does_not_match_itself(self):
+        """pkill -f afterfail- 는 자기 명령줄과도 매치돼 스스로를 먼저 죽인다.
+
+        그러면 정리가 중단되고 워크로드가 남는다(실측).
+        """
+        injector, fake = _injector()
+        await injector.revert("linux-process-flood-abc12345", NS)
+        pkill = [c for c in fake.calls if "pkill" in " ".join(c)][0]
+        assert "[a]fterfail-" in " ".join(pkill)
 
     @pytest.mark.asyncio
     async def test_signal_is_cleared_so_it_can_be_reused(self):
