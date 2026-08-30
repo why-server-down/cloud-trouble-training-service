@@ -11,7 +11,7 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
 from app.core.config import settings
-from app.core.environments import DOCKER, EnvironmentId, KUBERNETES
+from app.core.environments import DOCKER, LINUX, EnvironmentId, KUBERNETES
 from app.services.k8s_setup import K8sSetupService, get_k8s_setup_service
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ class SandboxNotReadyError(RuntimeError):
 class SandboxService:
     TOOLBOX_CONTAINER = "toolbox"
     DIND_CONTAINER = "dind"
+    LINUX_CONTAINER = "shell"
     READINESS_POLL_SECONDS = 1.0
 
     def __init__(
@@ -178,6 +179,64 @@ class SandboxService:
         return self._exec_in_sandbox(
             sandbox.namespace, sandbox.pod_name, sandbox.container_name, argv
         )
+
+    def _provision_linux(self, namespace: str, name: str, labels: dict) -> str:
+        """Linux 샌드박스 Pod.
+
+        호스트 자원을 일절 붙이지 않는다. 장애는 컨테이너 cgroup 과
+        ephemeral storage 범위 안에서만 재현된다.
+          - host PID / host network / host filesystem 을 mount 하지 않는다
+          - ServiceAccount 토큰을 마운트하지 않아 Kubernetes API 에 접근할 수 없다
+          - privileged 를 쓰지 않는다(Docker 환경과 달리 데몬이 필요 없다)
+          - CPU/메모리/ephemeral-storage 상한과 PID 상한을 건다
+        """
+        try:
+            self._core_api.read_namespaced_pod(name, namespace)
+            return self.LINUX_CONTAINER
+        except ApiException as exc:
+            if not self._is_not_found(exc):
+                raise
+
+        self._core_api.create_namespaced_pod(
+            namespace,
+            client.V1Pod(
+                metadata=client.V1ObjectMeta(name=name, labels=labels),
+                spec=client.V1PodSpec(
+                    automount_service_account_token=False,
+                    restart_policy="Always",
+                    host_pid=False,
+                    host_network=False,
+                    host_ipc=False,
+                    containers=[
+                        client.V1Container(
+                            name=self.LINUX_CONTAINER,
+                            image=settings.SANDBOX_LINUX_IMAGE,
+                            command=[
+                                "/bin/sh", "-c",
+                                "trap : TERM INT; sleep infinity & wait",
+                            ],
+                            security_context=client.V1SecurityContext(
+                                privileged=False,
+                                allow_privilege_escalation=False,
+                            ),
+                            resources=client.V1ResourceRequirements(
+                                requests={
+                                    "cpu": "50m",
+                                    "memory": "64Mi",
+                                    "ephemeral-storage": "256Mi",
+                                },
+                                limits={
+                                    "cpu": settings.SANDBOX_LINUX_CPU_LIMIT,
+                                    "memory": settings.SANDBOX_LINUX_MEMORY_LIMIT,
+                                    "ephemeral-storage": settings.SANDBOX_LINUX_STORAGE_LIMIT,
+                                },
+                            ),
+                        )
+                    ],
+                ),
+            ),
+        )
+        return self.LINUX_CONTAINER
 
     def _exec_in_sandbox(self, namespace: str, pod: str, container: str, argv: list[str]) -> str:
         from kubernetes.stream import stream
@@ -514,9 +573,11 @@ def get_sandbox_service() -> SandboxService:
 SandboxService._PROVISIONERS = {
     KUBERNETES: SandboxService._provision_kubernetes,
     DOCKER: SandboxService._provision_docker,
+    LINUX: SandboxService._provision_linux,
 }
 
 SandboxService._CONTAINER_NAMES = {
     KUBERNETES: SandboxService.TOOLBOX_CONTAINER,
     DOCKER: SandboxService.DIND_CONTAINER,
+    LINUX: SandboxService.LINUX_CONTAINER,
 }

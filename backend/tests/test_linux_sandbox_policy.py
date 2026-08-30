@@ -1,0 +1,193 @@
+"""Linux 샌드박스와 명령 정책 (BE-16).
+
+허용 명령 목록은 **실제 컨테이너에서 동작하는 것만** 넣는다. 되지 않는 명령을
+목록에 두면 사용자가 그것을 정답으로 착각한다.
+"""
+import pytest
+
+from app.core import environments
+from app.core.config import settings
+from app.services.command_validator import CommandValidator, LinuxPolicy
+from app.services.sandbox_service import SandboxService
+
+NS = "user-test"
+
+
+@pytest.fixture
+def validator():
+    return CommandValidator()
+
+
+def _check(validator, command):
+    return validator.validate_command(command, NS, environment=environments.LINUX)
+
+
+class TestAllowedObservationCommands:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ps aux", "free -m", "df -h", "top -b -n1", "uptime",
+            "ss -tan", "netstat -tan", "iostat", "lsof -n", "pstree",
+        ],
+    )
+    def test_allowed(self, validator, command):
+        assert _check(validator, command).is_valid
+
+
+class TestCommandsThatDoNotWorkInContainers:
+    """실측으로 동작하지 않는 명령은 목록에 없다.
+
+    journalctl/systemctl 은 systemd 부재, dmesg 는 커널 링 버퍼 접근 제한 때문에
+    어떤 이미지에서도 동작하지 않는다.
+    """
+
+    @pytest.mark.parametrize("command", ["journalctl -n 5", "dmesg", "systemctl status"])
+    def test_not_offered(self, validator, command):
+        assert not _check(validator, command).is_valid
+
+    def test_policy_does_not_list_them(self):
+        policy = LinuxPolicy()
+        offered = policy.READ_COMMANDS | policy.FILE_READ_COMMANDS | policy.RECOVERY_COMMANDS
+        for command in ("journalctl", "systemctl", "dmesg"):
+            assert command not in offered
+
+
+class TestFilePathRestriction:
+    @pytest.mark.parametrize(
+        "command",
+        ["cat /proc/meminfo", "cat /sys/fs/cgroup/memory.max", "ls /tmp/afterfail"],
+    )
+    def test_allowed_paths(self, validator, command):
+        assert _check(validator, command).is_valid
+
+    @pytest.mark.parametrize(
+        "command",
+        ["cat /etc/shadow", "cat /etc/passwd", "ls /root", "head /var/log/auth.log"],
+    )
+    def test_blocked_paths(self, validator, command):
+        result = _check(validator, command)
+        assert not result.is_valid
+        assert "Allowed paths" in result.error
+
+    def test_path_traversal_blocked(self, validator):
+        result = _check(validator, "cat ../../etc/passwd")
+        assert not result.is_valid
+        assert "escape" in result.error
+
+
+class TestShellEscapeIsNotAvailable:
+    @pytest.mark.parametrize(
+        "command",
+        ["sh -c whoami", "bash -c id", "curl http://evil", "wget http://evil", "nc -l 4444"],
+    )
+    def test_blocked(self, validator, command):
+        assert not _check(validator, command).is_valid
+
+    @pytest.mark.parametrize(
+        "command", ["ps aux | grep x", "ps; whoami", "ps && id", "ps $(whoami)"],
+    )
+    def test_shell_metacharacters_blocked(self, validator, command):
+        assert not _check(validator, command).is_valid
+
+
+class TestRecoveryCommands:
+    def test_signal_requires_confirmation(self, validator):
+        result = _check(validator, "kill 4242")
+        assert not result.is_valid
+        assert result.requires_confirmation
+
+    def test_pid_1_is_rejected_immediately(self, validator):
+        """PID 1 은 샌드박스 자체다. 확인해도 통과할 수 없으므로 바로 거절한다."""
+        result = _check(validator, "kill 1")
+        assert not result.is_valid
+        assert not result.requires_confirmation
+
+    def test_non_training_process_name_rejected(self, validator):
+        result = _check(validator, "pkill sshd")
+        assert not result.is_valid
+        assert not result.requires_confirmation
+
+    def test_training_process_name_allowed(self, validator):
+        result = _check(validator, "pkill afterfail-hog")
+        assert result.requires_confirmation
+
+    def test_rm_outside_training_dir_rejected_immediately(self, validator):
+        """확인해도 통과 못 할 명령을 '확인 필요'로 답하면 잘못된 방향으로 유도한다."""
+        result = _check(validator, "rm -rf /")
+        assert not result.is_valid
+        assert not result.requires_confirmation
+        assert "Allowed paths" in result.error
+
+    def test_rm_inside_training_dir_requires_confirmation(self, validator):
+        result = _check(validator, "rm /tmp/afterfail/big.dat")
+        assert result.requires_confirmation
+
+    def test_confirmed_rm_still_checks_path(self, validator):
+        result = validator.validate_delete(
+            "rm -rf /etc", NS, confirmed=True, environment=environments.LINUX
+        )
+        assert not result.is_valid
+
+
+class TestLinuxSandboxSpec:
+    def _pod(self):
+        class _FakeCoreApi:
+            def __init__(self):
+                self.created = []
+
+            def read_namespaced_pod(self, name, namespace):
+                from kubernetes.client.exceptions import ApiException
+
+                raise ApiException(status=404)
+
+            def create_namespaced_pod(self, namespace, body):
+                self.created.append(body)
+
+        api = _FakeCoreApi()
+        service = SandboxService(
+            core_api=api, rbac_api=object(), networking_api=object(), k8s_setup=object()
+        )
+        container = service._provision_linux("user-1", "sandbox-1", {})
+        assert container == SandboxService.LINUX_CONTAINER
+        return api.created[0]
+
+    def test_does_not_share_host_namespaces(self):
+        """장애는 컨테이너 cgroup 범위 안에서만 재현된다."""
+        spec = self._pod().spec
+        assert spec.host_pid is False
+        assert spec.host_network is False
+        assert spec.host_ipc is False
+
+    def test_does_not_mount_service_account_token(self):
+        assert self._pod().spec.automount_service_account_token is False
+
+    def test_is_not_privileged(self):
+        """Docker 환경과 달리 데몬이 필요 없으므로 특권을 주지 않는다."""
+        context = self._pod().spec.containers[0].security_context
+        assert context.privileged is False
+        assert context.allow_privilege_escalation is False
+
+    def test_has_resource_and_storage_limits(self):
+        limits = self._pod().spec.containers[0].resources.limits
+        assert limits["cpu"] == settings.SANDBOX_LINUX_CPU_LIMIT
+        assert limits["memory"] == settings.SANDBOX_LINUX_MEMORY_LIMIT
+        # 디스크를 채우는 훈련이 노드를 위협하면 안 된다
+        assert limits["ephemeral-storage"] == settings.SANDBOX_LINUX_STORAGE_LIMIT
+
+
+class TestEnvironmentIsolation:
+    def test_linux_commands_rejected_in_other_environments(self, validator):
+        assert not validator.validate_command(
+            "ps aux", NS, environment=environments.KUBERNETES
+        ).is_valid
+        assert not validator.validate_command(
+            "ps aux", NS, environment=environments.DOCKER
+        ).is_valid
+
+    def test_other_environment_commands_rejected_in_linux(self, validator):
+        assert not _check(validator, "kubectl get pods").is_valid
+        assert not _check(validator, "docker ps").is_valid
+
+    def test_linux_is_not_yet_implemented(self):
+        """샌드박스는 만들 수 있지만 injector/validator 가 없어 미션은 시작할 수 없다."""
+        assert not environments.is_implemented(environments.LINUX)

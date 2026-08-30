@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     SANDBOX_TRAINING_VOLUME: str = "training-data"
     SANDBOX_TRAINING_CPUS: str = "1"   # 훈련 컨테이너 정상 상태의 CPU 상한
 
+    # Linux 환경 샌드박스. 관측 도구가 미리 들어 있는 이미지를 쓴다.
+    # (실측: journalctl/systemctl 은 systemd 부재로, dmesg 는 커널 버퍼 접근 제한으로
+    #  어떤 이미지에서도 동작하지 않는다. 그래서 명령 정책에서 제외한다)
+    SANDBOX_LINUX_IMAGE: str = "nicolaka/netshoot:v0.13"
+    SANDBOX_LINUX_CPU_LIMIT: str = "500m"
+    SANDBOX_LINUX_MEMORY_LIMIT: str = "512Mi"
+    SANDBOX_LINUX_STORAGE_LIMIT: str = "1Gi"
+    SANDBOX_LINUX_PID_LIMIT: int = 256
+
     # Chaos Mesh 가 설치된 네임스페이스.
     # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
     # 클러스터마다 다를 수 있어 설정으로 둔다.

@@ -66,7 +66,7 @@ app/
 │   ├── metrics.py       # Prometheus 메트릭
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
-│   ├── command_validator.py      # 환경별 명령 정책 (KubectlPolicy | DockerPolicy)
+│   ├── command_validator.py      # 환경별 명령 정책 (Kubectl | Docker | Linux)
 │   ├── command_executor.py       # 샌드박스 Pod exec 실행 (Sandbox | Mock)
 │   ├── websocket_handler.py      # WebSocket 연결·동시성·CommandLog
 │   ├── mission_service.py        # 고정 미션 오케스트레이터
@@ -219,6 +219,52 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Linux 샌드박스와 명령 정책 (BE-16)
+
+**허용 명령은 실제 컨테이너에서 동작하는 것만 넣었다.** 되지 않는 명령을 목록에 두면
+사용자가 그것을 정답으로 착각한다.
+
+| 동작 | 명령 |
+|---|---|
+| 조회 | `ps` `free` `df` `du` `top` `uptime` `iostat` `ss` `netstat` `lsof` `pstree` |
+| 파일 읽기 | `cat` `head` `tail` `wc` `ls` `stat` `find` — **경로 제한** |
+| 복구 (확인 필요) | `kill` `pkill` `rm` `truncate` — **대상 제한** |
+
+#### 계획서가 언급했지만 제외한 명령 (실측)
+
+| 명령 | 이유 |
+|---|---|
+| `journalctl` / `systemctl` | systemd가 없다. 어떤 이미지에서도 동작하지 않는다 |
+| `dmesg` | 커널 링 버퍼 접근이 막혀 있다 (privileged가 필요한데 주지 않는다) |
+
+계획서의 "systemctl status 대체"는 `ps` / `top`이 담당한다.
+
+#### 경로·대상 제한
+
+- **읽기 허용**: `/proc`, `/sys/fs/cgroup`, `/tmp/afterfail`, 상대경로.
+  `..`로 탈출하는 경로는 거절한다
+- **쓰기·삭제 허용**: `/tmp/afterfail`만
+- **신호 대상**: PID 또는 `afterfail-`로 시작하는 훈련 프로세스만.
+  **PID 1은 샌드박스 자체라 거절한다**
+
+#### 확인 요청 전에 정책을 먼저 검사한다
+
+`rm -rf /`나 `kill 1`처럼 **확인해도 통과할 수 없는 명령은 즉시 거절**한다.
+"확인 필요"로 답하면 사용자가 잘못된 방향으로 시도하게 된다. Docker 환경에도 같은
+개선이 적용돼, 허용되지 않은 대상은 확인 단계 이전에 거절된다.
+
+#### 샌드박스 격리
+
+Docker 환경과 달리 **privileged를 쓰지 않는다.** 데몬이 필요 없기 때문이다.
+
+- `hostPID` / `hostNetwork` / `hostIPC` 모두 비활성 — 장애는 컨테이너 cgroup 범위 안에서만
+- ServiceAccount 토큰 미마운트
+- `allowPrivilegeEscalation: false`
+- CPU / 메모리 / **ephemeral-storage** 상한
+
+> **`IMPLEMENTED_ENVIRONMENTS`에 linux는 아직 없다.** 샌드박스는 뜨지만
+> injector/validator가 없어(BE-17/BE-18) 미션을 시작할 수 없다.
 
 ### Docker 환경 활성화 (BE-14)
 
@@ -519,6 +565,13 @@ SANDBOX_TRAINING_CONTAINER=training-app
 SANDBOX_TRAINING_NETWORK=training-net
 SANDBOX_TRAINING_VOLUME=training-data
 SANDBOX_TRAINING_CPUS=1                   # 훈련 컨테이너 정상 상태의 CPU 상한
+
+# Linux 환경 샌드박스
+SANDBOX_LINUX_IMAGE=nicolaka/netshoot:v0.13   # 관측 도구 포함
+SANDBOX_LINUX_CPU_LIMIT=500m
+SANDBOX_LINUX_MEMORY_LIMIT=512Mi
+SANDBOX_LINUX_STORAGE_LIMIT=1Gi
+SANDBOX_LINUX_PID_LIMIT=256
 
 # 터미널 실행 (BE-05)
 TERMINAL_BACKEND=sandbox          # sandbox | mock
