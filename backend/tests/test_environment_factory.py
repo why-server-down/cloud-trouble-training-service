@@ -22,12 +22,29 @@ class TestFactoryKeyIsEnvironmentAware:
             assert isinstance(key, tuple) and len(key) == 2
 
     def test_unimplemented_environment_is_rejected(self):
-        """docker 요청이 kubernetes injector 를 받지 않는다."""
-        for environment in ("docker", "linux"):
+        """미구현 환경 요청이 kubernetes 구현으로 조용히 대체되지 않는다."""
+        unimplemented = [
+            env
+            for env in environments.SUPPORTED_ENVIRONMENTS
+            if env not in environments.IMPLEMENTED_ENVIRONMENTS
+        ]
+        assert unimplemented, "이 테스트는 미구현 환경이 하나 이상 있을 때 의미가 있다"
+
+        for environment in unimplemented:
             with pytest.raises(ValueError):
                 service_factory.create_chaos_injector(environment)
             with pytest.raises(ValueError):
                 service_factory.create_validation_service(environment)
+
+    def test_docker_gets_its_own_implementation(self):
+        """docker 요청은 kubernetes 구현이 아니라 docker 구현을 받는다."""
+        from app.services.docker_chaos_injector import DockerChaosInjector
+        from app.services.docker_validation_service import DockerValidationService
+
+        injector = service_factory._INJECTOR_FACTORIES[(environments.DOCKER, "chaos_mesh")]
+        validator = service_factory._VALIDATION_FACTORIES[(environments.DOCKER, "k8s")]
+        assert injector is DockerChaosInjector
+        assert validator is DockerValidationService
 
     def test_unregistered_backend_raises_clear_error(self, monkeypatch):
         monkeypatch.setattr(service_factory.settings, "CHAOS_BACKEND", "does_not_exist")

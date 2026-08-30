@@ -93,10 +93,15 @@ class TestEnvironmentAvailabilityApi:
             items = (await client.get("/api/environments")).json()["items"]
         by_id = {item["id"]: item for item in items}
 
-        assert by_id["kubernetes"]["status"] == "available"
-        assert by_id["kubernetes"]["capabilities"]
+        # 구현된 환경은 available 이고 capabilities 를 알린다
+        for env in environments.IMPLEMENTED_ENVIRONMENTS:
+            assert by_id[env]["status"] == "available"
+            assert by_id[env]["capabilities"], f"{env} 가 제공 기능을 알리지 않는다"
 
-        for env in ("docker", "linux"):
+        # 아직 구현되지 않은 환경은 preparing 이고 기능을 광고하지 않는다
+        for env in environments.SUPPORTED_ENVIRONMENTS:
+            if env in environments.IMPLEMENTED_ENVIRONMENTS:
+                continue
             assert by_id[env]["status"] == "preparing"
             assert by_id[env]["capabilities"] == []
 

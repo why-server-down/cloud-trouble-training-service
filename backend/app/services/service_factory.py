@@ -10,6 +10,7 @@ from app.core import environments
 from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.docker_chaos_injector import DockerChaosInjector
+from app.services.docker_validation_service import DockerValidationService
 from app.services.mission_service import MissionService
 from app.services.scenario_service import ScenarioService
 from app.services.scoring_service import ScoringService
@@ -41,6 +42,13 @@ _VALIDATION_FACTORIES: dict[tuple[str, str], Callable[[], BaseValidationService]
     ),
     (K8S, "k8s"): K8sValidationService,
     (K8S, "prometheus"): lambda: PrometheusValidationService(settings.PROMETHEUS_URL),
+    (DOCKER, "mock"): lambda: MockValidationService(
+        auto_pass=settings.MOCK_VALIDATION_AUTO_PASS, environment=DOCKER
+    ),
+    # Docker 는 Kubernetes API 도 Prometheus 도 쓰지 않는다. 두 backend 설정 모두에서
+    # 같은 검증기를 쓴다(샌드박스 exec 기반).
+    (DOCKER, "k8s"): DockerValidationService,
+    (DOCKER, "prometheus"): DockerValidationService,
 }
 
 

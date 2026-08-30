@@ -83,6 +83,7 @@ app/
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
 │   ├── sandbox_service.py        # 환경별 샌드박스 (kubernetes=toolbox, docker=DinD)
 │   ├── docker_chaos_injector.py  # Docker 환경 장애 주입 (DinD 안 docker CLI)
+│   ├── docker_validation_service.py # Docker 환경 해결 검증 (샌드박스 exec)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
@@ -218,6 +219,45 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Docker 환경 활성화 (BE-14)
+
+`IMPLEMENTED_ENVIRONMENTS`에 docker가 들어가 **`GET /api/environments`에서 Docker가
+`available`로 나간다.** 프론트 Docker 탭이 열린다.
+
+```json
+{"id": "docker", "status": "available", "capabilities": ["static_mission", "terminal"]}
+```
+
+**capabilities는 실제로 제공하는 것만 알린다.** 없는 기능을 광고하면 프론트가 열 수 없는
+화면을 그린다.
+
+| 기능 | Docker | 이유 |
+|---|---|---|
+| `static_mission` | 제공 | 미션 3개 시드 + injector + validator |
+| `terminal` | 제공 | 샌드박스 exec + 명령 정책 |
+| `ai_scenario` | 미제공 | 시나리오 생성이 Kubernetes fault type 기준 (BE-20) |
+| `tutor` | 미제공 | RuntimeContext 수집이 Kubernetes 전용 (BE-19) |
+| `observability` | 미제공 | Grafana/Prometheus 대시보드가 K8s 메트릭 기준 |
+
+#### Docker 미션 시드
+
+난이도는 **발견하기 쉬운 순서**로 매겼다.
+
+| level | 미션 | chaos_type |
+|---|---|---|
+| 1 | 멈춰버린 컨테이너 | `docker_container_stopped` — `docker ps -a`로 바로 보인다 |
+| 2 | 고립된 컨테이너 | `docker_network_disconnect` — running이라 알아채기 어렵다 |
+| 3 | 숨 막히는 컨테이너 | `docker_cpu_throttle` — running이고 연결도 되는데 느리다 |
+
+#### 검증 (docker_validation_service.py)
+
+`docker inspect`를 **필드별 `--format`으로 구조적으로 읽는다.** inspect 전체 출력은
+exec 채널을 거치며 표준 JSON으로 오지 않아 `json.loads`가 실패한다(BE-13 실측).
+
+- CPU 회복은 기준값의 50% 이상이면 통과한다. 사용자가 정확히 같은 값을 넣지 않아도
+  훈련 목적은 달성되고, `--cpus`로 제한을 아예 푼 경우(`0`)도 해결로 본다
+- `details`는 내부 진단용이고 **`message`에는 정답을 담지 않는다**
 
 ### Docker 장애 (docker_chaos_injector.py, BE-13)
 
