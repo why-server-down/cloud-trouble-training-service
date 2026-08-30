@@ -3,8 +3,13 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.environments import KUBERNETES
+from app.core.environments import DOCKER, KUBERNETES
 from app.models import Mission
+from app.services.docker_chaos_injector import (
+    CONTAINER_STOPPED as DOCKER_CONTAINER_STOPPED,
+    CPU_THROTTLE as DOCKER_CPU_THROTTLE,
+    NETWORK_DISCONNECT as DOCKER_NETWORK_DISCONNECT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +53,40 @@ MISSIONS = [
         "base_score": 100,
         "time_limit": 2100,
         "hint_penalty": 10,
+    },
+    # --- Docker 환경 (BE-14) ---
+    # 난이도 순서: 발견하기 쉬운 것부터. 중지된 컨테이너는 docker ps -a 로 바로 보이고,
+    # 네트워크 분리는 컨테이너가 running 이라 알아채기 어렵고,
+    # CPU 제한은 running 이고 연결도 되는데 느린 것이라 가장 어렵다.
+    {
+        "environment": DOCKER,
+        "name": "멈춰버린 컨테이너",
+        "level": 1,
+        "description": "훈련용 컨테이너가 실행되지 않고 있습니다. 컨테이너 상태를 확인하고 다시 시작하세요.",
+        "chaos_type": DOCKER_CONTAINER_STOPPED,
+        "base_score": 100,
+        "time_limit": 900,
+        "hint_penalty": 5,
+    },
+    {
+        "environment": DOCKER,
+        "name": "고립된 컨테이너",
+        "level": 2,
+        "description": "컨테이너는 실행 중이지만 다른 서비스와 통신하지 못합니다. 네트워크 연결 상태를 확인하고 복구하세요.",
+        "chaos_type": DOCKER_NETWORK_DISCONNECT,
+        "base_score": 100,
+        "time_limit": 1200,
+        "hint_penalty": 7,
+    },
+    {
+        "environment": DOCKER,
+        "name": "숨 막히는 컨테이너",
+        "level": 3,
+        "description": "컨테이너는 정상으로 보이지만 응답이 매우 느립니다. 할당된 자원을 점검하고 정상 수준으로 되돌리세요.",
+        "chaos_type": DOCKER_CPU_THROTTLE,
+        "base_score": 100,
+        "time_limit": 1500,
+        "hint_penalty": 7,
     },
 ]
 

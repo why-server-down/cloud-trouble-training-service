@@ -130,7 +130,7 @@ class TestTerminalSessionApi:
         client, _, db, sandbox = terminal_client
         async with client:
             response = await client.post(
-                "/api/terminal/sessions", json={"environment": "docker"}
+                "/api/terminal/sessions", json={"environment": "linux"}
             )
 
         assert response.status_code == 400
