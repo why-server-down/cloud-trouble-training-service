@@ -224,6 +224,54 @@ POST /api/scenarios/current/check
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
 
+### AI 시나리오 실행 계약 (BE-20)
+
+#### 점수를 승인하는 유일한 기준은 mechanical validation
+
+이전 구현은 LLM 판정이 confidence 0.7 이상이면 **`resolved`를 덮어썼다.**
+
+```python
+if ai_judgment.confidence >= 0.7:
+    resolved = ai_judgment.resolved   # ← LLM 오판이 곧 완료 처리
+```
+
+LLM이 오판하는 순간 **사용자가 고치지 않았는데도 완료 처리된다.** 지금은 LLM 판정을
+`advisory_only: True`로 저장만 하고 `resolved`는 mechanical 결과만 따른다.
+테스트가 이 코드가 되돌아오지 않는지 감시한다.
+
+#### 환경별 허용 fault type
+
+`allowed_fault_types(environment)`가 AI에 전달되는 목록이자 컴파일 단계의 거절 기준이다.
+각 환경의 목록이 **그 환경 injector가 지원하는 chaos_type과 정확히 일치**하는지
+테스트가 확인한다.
+
+| 환경 | fault type |
+|---|---|
+| kubernetes | 19종 (`image_pull_error`, `oom_killed`, …) |
+| docker | `docker_network_disconnect`, `docker_container_stopped`, `docker_cpu_throttle` |
+| linux | `linux_disk_pressure`, `linux_cpu_saturation`, `linux_process_flood` |
+
+- 다른 환경의 fault를 주면 `ChaosPlanCompileError`로 거절한다
+- **AI가 만든 시나리오의 environment가 요청과 다르면 거절한다.** 미구현 환경 요청을
+  다른 환경 시나리오로 대체하지 않는다
+- docker/linux는 injector가 고정 절차로 주입하므로 **AI가 임의 step을 끼워 넣을 수 없다**
+
+#### 검증 기록
+
+`last_validation_result`에 `environment` · `rules` · `checked_at` · `duration_ms`를 남긴다.
+LLM 판정은 `advisory_only` 표시와 함께 저장된다.
+
+#### AI 계층이 돌려주는 형태 (schemas.py)
+
+```python
+TutorResult(message, hint_level, environment, sources, observations_used,
+            token_usage, latency_ms, fallback_used, error_code)
+ValidationJudgment(resolved, reason, confidence, advisory_only=True)
+```
+
+`TutorSource`에는 **외부 URL 필드가 없다.** 링크를 그대로 렌더링하면 프론트가 임의
+외부 주소를 열게 된다. 표시 가능한 `title` / `path` / `snippet`만 넘긴다.
+
 ### RuntimeContext — AI 계층 계약 (BE-19)
 
 환경마다 수집 방법이 다르지만 **출력 스키마는 같다.** AI 담당이 환경별로 분기하지

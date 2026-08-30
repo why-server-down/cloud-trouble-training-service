@@ -2,6 +2,7 @@
 ScenarioService - AI 시나리오 생성/시작/완료 오케스트레이터.
 기존 MissionService와 분리: /api/scenarios/* 전용.
 """
+import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -201,9 +202,20 @@ class ScenarioService:
         best = max(valid, key=lambda c: c.score)
         scenario_json = best.scenario
 
+        # AI 가 만든 시나리오의 환경이 요청과 다르면 그 환경 injector 가 처리할 수 없다.
+        # 같은 환경 fixture 로의 fallback 만 허용하고, 환경을 바꾸는 fallback 은 막는다.
+        generated_environment = scenario_json.get("environment", environment)
+        if generated_environment != environment:
+            raise ValueError(
+                f"요청 환경('{environment}')과 생성된 시나리오 환경"
+                f"('{generated_environment}')이 일치하지 않습니다"
+            )
+
         # ChaosPlan 컴파일
         try:
-            plan = self._compiler.compile(scenario_json, namespace)
+            plan = self._compiler.compile(
+                scenario_json, namespace, environment=environment
+            )
         except Exception as e:
             raise RuntimeError(f"장애 계획 컴파일 실패: {e}")
 
@@ -318,6 +330,7 @@ class ScenarioService:
             raise ValueError("시나리오를 찾을 수 없습니다")
 
         namespace = f"user-{user_id}"
+        check_started = time.perf_counter()
         resolved, rule_results = await self._vrs.check_rules(
             scenario_id=scenario.id,
             namespace=namespace,
@@ -333,7 +346,11 @@ class ScenarioService:
                 namespace=namespace,
             )
 
-        # AI 판정: mechanical check 후에도 미해결 시 LLM이 K8s 상태 전체를 보고 재판정
+        # AI 판정은 **advisory 로만** 쓴다. mechanical 결과를 뒤집지 않는다.
+        #
+        # 이전에는 confidence >= 0.7 이면 resolved 를 LLM 판정으로 덮어썼다.
+        # 그러면 LLM 이 오판하는 순간 사용자가 고치지 않았는데도 완료 처리된다.
+        # 점수를 승인하는 유일한 기준은 mechanical validation 이다(BE-20).
         ai_judgment = None
         if not resolved and settings.VALIDATION_BACKEND != "mock" and settings.AI_BACKEND in ("openai", "gemini"):
             from app.ai.validation_agent import get_validation_agent
@@ -348,16 +365,19 @@ class ScenarioService:
                 },
                 namespace=namespace,
             )
-            if ai_judgment.confidence >= 0.7:
-                resolved = ai_judgment.resolved
 
         attempt.last_validation_result = {
             "resolved": resolved,
+            "environment": scenario.environment,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "duration_ms": round((time.perf_counter() - check_started) * 1000),
             "rules": [{"name": r.name, "passed": r.passed, "error": r.error} for r in rule_results],
+            # advisory. 점수 승인에는 쓰이지 않는다.
             "ai_judgment": {
                 "resolved": ai_judgment.resolved,
                 "reason": ai_judgment.reason,
                 "confidence": ai_judgment.confidence,
+                "advisory_only": True,
             } if ai_judgment else None,
         }
 
