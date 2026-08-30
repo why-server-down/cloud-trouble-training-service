@@ -1,19 +1,40 @@
 """
-RuntimeContextCollector - AI 튜터가 현재 클러스터 상태를 보고 답할 수 있도록
-K8s / Prometheus / CommandLog를 수집해 컨텍스트 dict로 반환.
+RuntimeContextCollector - AI 계층이 현재 환경 상태를 보고 답할 수 있도록
+관측값을 모아 공통 스키마로 반환한다.
 
-Phase 4: K8s state + Prometheus validation 수집 구현
-Phase 5: Loki log 수집 추가 예정
+환경마다 수집 방법이 다르지만 **출력 스키마는 같다**. AI 담당이 환경별로 분기하지
+않아도 되도록 하기 위한 계약이다(BE-19).
+
+    {
+      "environment": "docker",
+      "scope": {"namespace": "...", "sandbox_id": "..."},
+      "mission": {...},
+      "recent_user_commands": [...],
+      "observations": {...},   # 환경별 상태
+      "metrics": {...},
+      "logs": [...]
+    }
+
+원칙
+  - 부분 실패를 허용한다. 수집 하나가 실패하거나 느려도 나머지는 그대로 넘긴다
+  - 정답이 아니라 관측값만 넘긴다. 무엇이 문제인지는 AI 가 판단한다
+  - 토큰·비밀번호·환경변수는 지운다(runtime_redaction)
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import environments
+from app.core.config import settings
 from app.models import CommandLog, TerminalSession
+from app.services.runtime_redaction import redact
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeContextCollector:
@@ -27,30 +48,137 @@ class RuntimeContextCollector:
         student_brief: str = "",
         difficulty: str = "",
         scenario_id: uuid.UUID | None = None,
+        environment: str = environments.KUBERNETES,
+        sandbox=None,
     ) -> dict:
-        recent_commands = await self._collect_recent_commands(user_id, db)
+        """환경에 맞는 관측값을 모아 공통 스키마로 돌려준다.
 
-        loop = asyncio.get_event_loop()
-        k8s_state = await loop.run_in_executor(
-            None, lambda: self._collect_k8s_state(namespace)
+        수집 하나가 실패해도 나머지는 그대로 넘긴다. 튜터 응답이 관측 실패 때문에
+        통째로 막히면 안 된다.
+        """
+        recent_commands = await self._guard(
+            self._collect_recent_commands(user_id, db), "recent_commands", default=[]
         )
 
-        prometheus_result = None
-        if scenario_id is not None:
-            prometheus_result = await self._collect_prometheus(scenario_id, namespace, db)
+        observations = await self._guard(
+            self._collect_observations(environment, namespace, sandbox),
+            "observations",
+            default={},
+        )
 
-        return {
-            "namespace": namespace,
+        metrics = {}
+        if scenario_id is not None and environment == environments.KUBERNETES:
+            prometheus = await self._guard(
+                self._collect_prometheus(scenario_id, namespace, db),
+                "prometheus",
+                default=None,
+            )
+            if prometheus is not None:
+                metrics["prometheus"] = prometheus
+
+        context = {
+            "environment": environment,
+            "scope": {
+                "namespace": namespace,
+                "sandbox_id": getattr(sandbox, "id", None),
+            },
             "mission": {
                 "title": scenario_title,
                 "difficulty": difficulty,
                 "student_brief": student_brief,
             },
             "recent_user_commands": recent_commands,
-            "kubernetes_state": k8s_state,
-            "prometheus": prometheus_result,
-            "loki": None,  # Phase 5
+            "observations": observations,
+            "metrics": metrics,
+            "logs": [],
         }
+
+        # 기존 튜터 구현이 쓰는 키를 함께 남긴다. AI 담당이 새 스키마로 옮길 때까지
+        # 양쪽이 같이 동작해야 한다(소유 경로가 달라 한 PR 에서 못 바꾼다).
+        context["namespace"] = namespace
+        context["kubernetes_state"] = observations.get("kubernetes_state")
+        context["prometheus"] = metrics.get("prometheus")
+        context["loki"] = None
+
+        # AI 프로바이더로 나가기 전에 민감값을 지운다.
+        return redact(context)
+
+    # ── 부분 실패 허용 ────────────────────────────────────────────────────────
+
+    async def _guard(self, awaitable, label: str, default):
+        """수집 하나가 실패하거나 느려도 전체를 막지 않는다."""
+        try:
+            return await asyncio.wait_for(
+                awaitable, timeout=settings.RUNTIME_CONTEXT_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            logger.warning("runtime context collection timed out", extra={"part": label})
+        except Exception:
+            logger.exception("runtime context collection failed", extra={"part": label})
+        return default
+
+    # ── 환경별 관측 ───────────────────────────────────────────────────────────
+
+    async def _collect_observations(self, environment: str, namespace: str, sandbox) -> dict:
+        collector = self._OBSERVERS.get(environment)
+        if collector is None:
+            return {}
+        return await collector(self, namespace, sandbox)
+
+    async def _observe_kubernetes(self, namespace: str, sandbox) -> dict:
+        loop = asyncio.get_event_loop()
+        state = await loop.run_in_executor(
+            None, lambda: self._collect_k8s_state(namespace)
+        )
+        return {"kubernetes_state": state}
+
+    async def _observe_docker(self, namespace: str, sandbox) -> dict:
+        probes = {
+            "containers": ["docker", "ps", "-a", "--format", "{{.Names}} {{.Status}}"],
+            "networks": ["docker", "network", "ls", "--format", "{{.Name}}"],
+        }
+        return await self._probe_sandbox(namespace, sandbox, environments.DOCKER, probes)
+
+    async def _observe_linux(self, namespace: str, sandbox) -> dict:
+        probes = {
+            "processes": ["sh", "-c", "ps -eo pid,stat,args | head -25"],
+            "disk": ["sh", "-c", "df -h | head -10"],
+            "memory": ["sh", "-c", "free -m"],
+            "load": ["sh", "-c", "cat /proc/loadavg"],
+        }
+        return await self._probe_sandbox(namespace, sandbox, environments.LINUX, probes)
+
+    async def _probe_sandbox(
+        self, namespace: str, sandbox, environment: str, probes: dict
+    ) -> dict:
+        """샌드박스 안에서 읽기 전용 관측 명령을 돌린다.
+
+        sandbox 가 없으면 서버가 DB 세션 값으로 복원한다. 클라이언트 값은 쓰지 않는다.
+        """
+        from app.services.sandbox_service import get_sandbox_service
+
+        service = get_sandbox_service()
+        if sandbox is None:
+            sandbox = service.reference_for(
+                user_id=namespace.removeprefix("user-"),
+                namespace=namespace,
+                environment=environment,
+            )
+
+        loop = asyncio.get_event_loop()
+        observations = {}
+        for key, argv in probes.items():
+            try:
+                observations[key] = await loop.run_in_executor(
+                    None, lambda a=argv: service.exec_in_sandbox(sandbox, a).strip()
+                )
+            except Exception:
+                # 관측 하나가 실패해도 나머지는 넘긴다.
+                logger.warning(
+                    "sandbox probe failed",
+                    extra={"environment": environment, "probe": key},
+                )
+        return observations
 
     # ── K8s state ─────────────────────────────────────────────────────────────
 
@@ -263,6 +391,13 @@ def format_events(k8s_state: dict | None) -> str:
 
 
 _collector: RuntimeContextCollector | None = None
+
+
+RuntimeContextCollector._OBSERVERS = {
+    environments.KUBERNETES: RuntimeContextCollector._observe_kubernetes,
+    environments.DOCKER: RuntimeContextCollector._observe_docker,
+    environments.LINUX: RuntimeContextCollector._observe_linux,
+}
 
 
 def get_runtime_context_collector() -> RuntimeContextCollector:

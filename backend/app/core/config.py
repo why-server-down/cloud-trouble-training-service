@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # 클러스터마다 다를 수 있어 설정으로 둔다.
     CHAOS_MESH_NAMESPACE: str = "chaos-mesh"
 
+    # RuntimeContext 수집 (BE-19)
+    # 부분 실패를 허용하므로, 느린 수집 하나가 튜터 응답 전체를 붙잡지 않게 한다.
+    RUNTIME_CONTEXT_TIMEOUT_SECONDS: float = 3.0
+
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
