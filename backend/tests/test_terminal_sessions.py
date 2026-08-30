@@ -126,7 +126,20 @@ class TestTerminalSessionApi:
         sandbox.ensure.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_preparing_environment_returns_concrete_400(self, terminal_client):
+    async def test_preparing_environment_returns_concrete_400(
+        self, terminal_client, monkeypatch
+    ):
+        """계약에는 있지만 아직 구현되지 않은 환경은 400 과 구체적인 이유를 준다.
+
+        현재는 세 환경이 모두 구현돼 있으므로, 하나를 임시로 미구현으로 돌려 검증한다.
+        """
+        from app.core import environments as env_module
+
+        monkeypatch.setattr(
+            env_module,
+            "IMPLEMENTED_ENVIRONMENTS",
+            tuple(e for e in env_module.IMPLEMENTED_ENVIRONMENTS if e != "linux"),
+        )
         client, _, db, sandbox = terminal_client
         async with client:
             response = await client.post(

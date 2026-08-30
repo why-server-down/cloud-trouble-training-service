@@ -203,6 +203,6 @@ class TestEnvironmentIsolation:
         assert not _check(validator, "kubectl get pods").is_valid
         assert not _check(validator, "docker ps").is_valid
 
-    def test_linux_is_not_yet_implemented(self):
-        """샌드박스는 만들 수 있지만 injector/validator 가 없어 미션은 시작할 수 없다."""
-        assert not environments.is_implemented(environments.LINUX)
+    def test_linux_is_implemented(self):
+        """BE-18 에서 injector/validator 와 시드가 붙어 환경이 열렸다."""
+        assert environments.is_implemented(environments.LINUX)

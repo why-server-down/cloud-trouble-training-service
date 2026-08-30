@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
 from app.services.docker_chaos_injector import DockerChaosInjector
 from app.services.docker_validation_service import DockerValidationService
+from app.services.linux_chaos_injector import LinuxChaosInjector
+from app.services.linux_validation_service import LinuxValidationService
 from app.services.mission_service import MissionService
 from app.services.scenario_service import ScenarioService
 from app.services.scoring_service import ScoringService
@@ -24,6 +26,7 @@ from app.services.validation_service import (
 
 K8S = environments.KUBERNETES
 DOCKER = environments.DOCKER
+LINUX = environments.LINUX
 
 # (environment, CHAOS_BACKEND) → injector 팩토리
 # CHAOS_BACKEND 는 "mock 이냐 실제냐"를 고르는 값이다. Docker 환경은 Chaos Mesh 를
@@ -33,6 +36,8 @@ _INJECTOR_FACTORIES: dict[tuple[str, str], Callable[[], BaseChaosInjector]] = {
     (K8S, "chaos_mesh"): ChaosMeshInjector,
     (DOCKER, "mock"): lambda: MockChaosInjector(environment=DOCKER),
     (DOCKER, "chaos_mesh"): DockerChaosInjector,
+    (LINUX, "mock"): lambda: MockChaosInjector(environment=LINUX),
+    (LINUX, "chaos_mesh"): LinuxChaosInjector,
 }
 
 # (environment, VALIDATION_BACKEND) → 검증 서비스 팩토리
@@ -49,6 +54,12 @@ _VALIDATION_FACTORIES: dict[tuple[str, str], Callable[[], BaseValidationService]
     # 같은 검증기를 쓴다(샌드박스 exec 기반).
     (DOCKER, "k8s"): DockerValidationService,
     (DOCKER, "prometheus"): DockerValidationService,
+    (LINUX, "mock"): lambda: MockValidationService(
+        auto_pass=settings.MOCK_VALIDATION_AUTO_PASS, environment=LINUX
+    ),
+    # Linux 도 외부 의존 없이 샌드박스 exec 으로 검증한다.
+    (LINUX, "k8s"): LinuxValidationService,
+    (LINUX, "prometheus"): LinuxValidationService,
 }
 
 
