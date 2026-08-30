@@ -134,6 +134,7 @@ class TestLinuxSandboxSpec:
         class _FakeCoreApi:
             def __init__(self):
                 self.created = []
+                self.config_maps = []
 
             def read_namespaced_pod(self, name, namespace):
                 from kubernetes.client.exceptions import ApiException
@@ -142,6 +143,15 @@ class TestLinuxSandboxSpec:
 
             def create_namespaced_pod(self, namespace, body):
                 self.created.append(body)
+
+            # supervisor 스크립트는 ConfigMap 으로 들어간다
+            def read_namespaced_config_map(self, name, namespace):
+                from kubernetes.client.exceptions import ApiException
+
+                raise ApiException(status=404)
+
+            def create_namespaced_config_map(self, namespace, body):
+                self.config_maps.append(body)
 
         api = _FakeCoreApi()
         service = SandboxService(
@@ -160,6 +170,11 @@ class TestLinuxSandboxSpec:
 
     def test_does_not_mount_service_account_token(self):
         assert self._pod().spec.automount_service_account_token is False
+
+    def test_supervisor_is_the_main_process(self):
+        """exec 으로 띄운 워크로드는 살아남지 않는다. PID 1 이 대신 띄운다."""
+        container = self._pod().spec.containers[0]
+        assert SandboxService.LINUX_SUPERVISOR_FILE in " ".join(container.command)
 
     def test_is_not_privileged(self):
         """Docker 환경과 달리 데몬이 필요 없으므로 특권을 주지 않는다."""

@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import pathlib
 import logging
 import time
 from dataclasses import dataclass
@@ -40,6 +41,10 @@ class SandboxService:
     TOOLBOX_CONTAINER = "toolbox"
     DIND_CONTAINER = "dind"
     LINUX_CONTAINER = "shell"
+    LINUX_WORKDIR_VOLUME = "afterfail-workdir"
+    LINUX_SUPERVISOR_VOLUME = "afterfail-supervisor"
+    LINUX_SUPERVISOR_DIR = "/opt/afterfail"
+    LINUX_SUPERVISOR_FILE = "supervisor.sh"
     READINESS_POLL_SECONDS = 1.0
 
     def __init__(
@@ -180,6 +185,34 @@ class SandboxService:
             sandbox.namespace, sandbox.pod_name, sandbox.container_name, argv
         )
 
+    @staticmethod
+    def _supervisor_script() -> str:
+        path = (
+            pathlib.Path(__file__).parent / "sandbox_assets" / "linux_supervisor.sh"
+        )
+        return path.read_text()
+
+    def _ensure_supervisor_config(self, namespace: str, name: str, labels: dict) -> None:
+        """supervisor 스크립트를 ConfigMap 으로 넣는다.
+
+        이미지에 스크립트를 굽지 않는 이유: 커스텀 이미지 빌드와 레지스트리가 필요해진다.
+        내용이 바뀌면 갱신한다.
+        """
+        body = client.V1ConfigMap(
+            metadata=client.V1ObjectMeta(name=name, labels=labels),
+            data={self.LINUX_SUPERVISOR_FILE: self._supervisor_script()},
+        )
+        try:
+            existing = self._core_api.read_namespaced_config_map(name, namespace)
+        except ApiException as exc:
+            if not self._is_not_found(exc):
+                raise
+            self._core_api.create_namespaced_config_map(namespace, body)
+            return
+
+        if existing.data != body.data:
+            self._core_api.replace_namespaced_config_map(name, namespace, body)
+
     def _provision_linux(self, namespace: str, name: str, labels: dict) -> str:
         """Linux 샌드박스 Pod.
 
@@ -190,6 +223,7 @@ class SandboxService:
           - privileged 를 쓰지 않는다(Docker 환경과 달리 데몬이 필요 없다)
           - CPU/메모리/ephemeral-storage 상한과 PID 상한을 건다
         """
+        self._ensure_supervisor_config(namespace, name, labels)
         try:
             self._core_api.read_namespaced_pod(name, namespace)
             return self.LINUX_CONTAINER
@@ -211,9 +245,17 @@ class SandboxService:
                         client.V1Container(
                             name=self.LINUX_CONTAINER,
                             image=settings.SANDBOX_LINUX_IMAGE,
+                            # exec 으로 띄운 백그라운드 프로세스는 세션 종료와 함께
+                            # 정리된다. 장애 워크로드는 PID 1 인 supervisor 가 띄운다.
                             command=[
-                                "/bin/sh", "-c",
-                                "trap : TERM INT; sleep infinity & wait",
+                                "/bin/sh",
+                                f"{self.LINUX_SUPERVISOR_DIR}/{self.LINUX_SUPERVISOR_FILE}",
+                            ],
+                            env=[
+                                client.V1EnvVar(
+                                    name="AFTERFAIL_WORKDIR",
+                                    value=settings.SANDBOX_LINUX_WORKDIR,
+                                )
                             ],
                             security_context=client.V1SecurityContext(
                                 privileged=False,
@@ -231,7 +273,34 @@ class SandboxService:
                                     "ephemeral-storage": settings.SANDBOX_LINUX_STORAGE_LIMIT,
                                 },
                             ),
+                            volume_mounts=[
+                                client.V1VolumeMount(
+                                    name=self.LINUX_WORKDIR_VOLUME,
+                                    mount_path=settings.SANDBOX_LINUX_WORKDIR,
+                                ),
+                                client.V1VolumeMount(
+                                    name=self.LINUX_SUPERVISOR_VOLUME,
+                                    mount_path=self.LINUX_SUPERVISOR_DIR,
+                                    read_only=True,
+                                ),
+                            ],
                         )
+                    ],
+                    volumes=[
+                        # tmpfs 로 마운트해야 크기 상한이 컨테이너 안 df 에 보인다.
+                        # ephemeral-storage 상한은 kubelet 검사용이라 df 에 나타나지 않아
+                        # 사용자가 디스크 압박을 관측할 수 없다.
+                        client.V1Volume(
+                            name=self.LINUX_WORKDIR_VOLUME,
+                            empty_dir=client.V1EmptyDirVolumeSource(
+                                medium="Memory",
+                                size_limit=settings.SANDBOX_LINUX_WORKDIR_SIZE,
+                            ),
+                        ),
+                        client.V1Volume(
+                            name=self.LINUX_SUPERVISOR_VOLUME,
+                            config_map=client.V1ConfigMapVolumeSource(name=name),
+                        ),
                     ],
                 ),
             ),

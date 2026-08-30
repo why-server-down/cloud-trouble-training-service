@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     SANDBOX_LINUX_MEMORY_LIMIT: str = "512Mi"
     SANDBOX_LINUX_STORAGE_LIMIT: str = "1Gi"
     SANDBOX_LINUX_PID_LIMIT: int = 256
+    # 훈련 작업 디렉터리. tmpfs 로 마운트해 크기 상한이 df 에 보이게 한다.
+    # ephemeral-storage 상한은 kubelet 검사용이라 컨테이너 안 df 에 나타나지 않아
+    # 사용자가 디스크 압박을 관측할 수 없다.
+    SANDBOX_LINUX_WORKDIR: str = "/tmp/afterfail"
+    SANDBOX_LINUX_WORKDIR_SIZE: str = "64Mi"
 
     # Chaos Mesh 가 설치된 네임스페이스.
     # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.

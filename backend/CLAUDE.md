@@ -84,6 +84,8 @@ app/
 │   ├── sandbox_service.py        # 환경별 샌드박스 (kubernetes=toolbox, docker=DinD)
 │   ├── docker_chaos_injector.py  # Docker 환경 장애 주입 (DinD 안 docker CLI)
 │   ├── docker_validation_service.py # Docker 환경 해결 검증 (샌드박스 exec)
+│   ├── linux_chaos_injector.py   # Linux 환경 장애 주입 (supervisor 신호 방식)
+│   └── sandbox_assets/           # 샌드박스에 넣는 스크립트 (linux_supervisor.sh)
 │   ├── service_factory.py        # (environment, backend) 조합 레지스트리로 구현체 선택
 │   ├── seed_data.py              # 미션 시드. (environment, level) 기준 upsert
 │   └── qdrant_init.py            # 서버 시작 시 Qdrant knowledge-base 자동 ingestion
@@ -219,6 +221,51 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### Linux 장애 (linux_chaos_injector.py, BE-17)
+
+**장애 워크로드를 exec으로 직접 띄울 수 없다.** Kubernetes exec으로 만든 백그라운드
+프로세스는 세션이 끝나면 containerd가 프로세스 그룹째 정리한다(실측: `setsid`/`nohup`/
+`</dev/null` 모두 무효). 그래서 샌드박스의 **PID 1을 supervisor 스크립트**로 두고,
+injector는 신호 파일만 만든다.
+
+```
+injector → /tmp/afterfail/.signals/<name> 생성
+              ↓ (supervisor 가 2초마다 폴링)
+supervisor → 워크로드 실행 → .done 표시
+```
+
+`.done` 표시가 있으면 다시 실행하지 않는다. **사용자가 워크로드를 정리하면 그대로
+복구된다.** 재실행하면 복구가 불가능해진다.
+
+| chaos_type | 장애 | 사용자 복구 |
+|---|---|---|
+| `linux_disk_pressure` | 작업 디렉터리(tmpfs)를 채움 | `rm /tmp/afterfail/afterfail-fill.dat` |
+| `linux_cpu_saturation` | CPU를 태우는 워커 2개 | `pkill -f afterfail-cpuburn` |
+| `linux_process_flood` | 프로세스 120개 생성 | `pkill -f afterfail-worker` |
+
+#### 계획서의 zombie/orphan을 제외한 이유 (실측)
+
+이 이미지의 busybox sh는 자식을 곧바로 회수해 **좀비가 유지되지 않는다.**
+중첩 셸로 exec 세션 안에서는 좀비를 만들 수 있었지만 supervisor가 띄운 워크로드에서는
+재현되지 않았다. 관측되지 않는 장애는 훈련이 될 수 없어 CPU 포화로 대체했다.
+
+#### 워크로드 이름 규칙
+
+명령 정책이 `afterfail-`로 시작하는 대상만 신호를 허용하므로 워크로드를 그 이름으로
+띄워야 한다. **바이너리를 복사해 이름을 바꾸는 방식은 쓸 수 없다** — 이 이미지의 명령은
+전부 busybox 심볼릭 링크이고 busybox는 `argv[0]`으로 applet을 고르기 때문에
+`applet not found`로 실행되지 않는다. 대신 그 이름의 셸 스크립트를 만들어 띄운다.
+스크립트 안에서 `exec`을 쓰지 않는다 — `exec`하면 명령줄에서 이름이 사라져
+`pkill -f`로 찾을 수 없다.
+
+#### 안전 기준
+
+- 작업 디렉터리가 **크기 제한된 tmpfs**라 호스트 디스크를 채우지 않는다
+- 프로세스 생성 수를 PID 상한보다 낮게 묶는다. **PID 고갈로 샌드박스가 마비되면
+  복구도 못 한다**
+- 모든 워크로드에 종료 시점(24시간)이 있고 revert가 즉시 정리한다
+- 모든 장애가 컨테이너 cgroup 안에서 끝나 호스트 OOM-Killer를 유발하지 않는다
 
 ### Linux 샌드박스와 명령 정책 (BE-16)
 
