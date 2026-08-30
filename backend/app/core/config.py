@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # 부분 실패를 허용하므로, 느린 수집 하나가 튜터 응답 전체를 붙잡지 않게 한다.
     RUNTIME_CONTEXT_TIMEOUT_SECONDS: float = 3.0
 
+    # 환경별 분석 (BE-21)
+    # competency 의 speed 항이 기준으로 삼는 목표 복구 시간(초).
+    # 미션 time_limit 이 환경마다 다르므로 환경별 대표값을 설정으로 둔다.
+    TARGET_MTTR_SECONDS: int = 900
+
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
     VALIDATION_BACKEND: str = "mock"  # "mock" | "k8s" | "prometheus"
