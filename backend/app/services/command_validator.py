@@ -11,7 +11,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from app.core.config import settings
-from app.core.environments import DEFAULT_ENVIRONMENT, DOCKER, EnvironmentId, KUBERNETES
+from app.core.environments import DEFAULT_ENVIRONMENT, DOCKER, LINUX, EnvironmentId, KUBERNETES
 
 
 @dataclass
@@ -32,7 +32,22 @@ def _invalid(error: str) -> ValidationResult:
     return ValidationResult(is_valid=False, error=error)
 
 
-class KubectlPolicy:
+class _PolicyBase:
+    binary: str | None = None
+    MIN_ARGV = 2
+
+    # 하위 명령 위치가 환경마다 다르다. kubectl/docker 는 argv[1], Linux 는 argv[0].
+    CONFIRM_INDEX = 1
+    CONFIRM_SUBCOMMANDS: tuple[str, ...] = ()
+
+    def confirmation_target(self, argv: list[str]) -> str | None:
+        if len(argv) <= self.CONFIRM_INDEX:
+            return None
+        token = argv[self.CONFIRM_INDEX]
+        return token if token in self.CONFIRM_SUBCOMMANDS else None
+
+
+class KubectlPolicy(_PolicyBase):
     """Kubernetes 환경 정책."""
 
     binary = "kubectl"
@@ -112,7 +127,7 @@ class KubectlPolicy:
         return requested == allowed_namespace
 
 
-class DockerPolicy:
+class DockerPolicy(_PolicyBase):
     """Docker 환경 정책.
 
     샌드박스가 privileged DinD 이므로, 사용자가 칠 수 있는 명령을 좁히는 것이
@@ -282,6 +297,97 @@ class DockerPolicy:
         return positional
 
 
+class LinuxPolicy(_PolicyBase):
+    """Linux 환경 정책.
+
+    kubectl/docker 와 달리 단일 바이너리가 아니라 명령 자체가 argv[0] 이다.
+
+    허용 목록은 **실제 컨테이너에서 동작하는 것만** 넣었다(BE-16 실측).
+    `journalctl` / `systemctl` 은 systemd 가 없어서, `dmesg` 는 커널 링 버퍼 접근이
+    막혀 있어서 어떤 이미지에서도 동작하지 않는다. 되지 않는 명령을 목록에 넣으면
+    사용자가 그것을 정답으로 착각한다.
+    """
+
+    binary = None
+    MIN_ARGV = 1
+    CONFIRM_INDEX = 0
+    CONFIRM_SUBCOMMANDS = ("kill", "pkill", "rm", "truncate")
+
+    # 상태를 바꾸지 않는 조회 명령
+    READ_COMMANDS = {
+        "ps", "free", "df", "du", "top", "uptime", "iostat",
+        "ss", "netstat", "lsof", "pstree", "id", "whoami", "env",
+    }
+    # 파일을 읽는 명령. 경로 제한을 받는다.
+    FILE_READ_COMMANDS = {"cat", "head", "tail", "wc", "ls", "stat", "find"}
+    # 복구 명령. 확인 계약을 따르고 대상이 제한된다.
+    RECOVERY_COMMANDS = {"kill", "pkill", "rm", "truncate"}
+
+    # 읽기가 허용된 경로. 훈련과 무관한 파일을 뒤지지 못하게 한다.
+    READABLE_PREFIXES = ("/proc", "/sys/fs/cgroup", "/tmp/afterfail", ".")
+    # 쓰기·삭제가 허용된 경로
+    WRITABLE_PREFIXES = ("/tmp/afterfail",)
+
+    def validate(self, argv: list[str], namespace: str, allowed_targets) -> ValidationResult:
+        command = argv[0]
+
+        if command in self.READ_COMMANDS:
+            return ValidationResult(is_valid=True, argv=argv)
+
+        if command in self.FILE_READ_COMMANDS:
+            return self._check_paths(argv, self.READABLE_PREFIXES, "read")
+
+        if command in self.RECOVERY_COMMANDS:
+            if command in ("rm", "truncate"):
+                return self._check_paths(argv, self.WRITABLE_PREFIXES, "modify")
+            return self._check_signal_target(argv)
+
+        allowed = ", ".join(sorted(self.READ_COMMANDS | self.FILE_READ_COMMANDS))
+        return _invalid(f"'{command}' is not allowed. Available: {allowed}")
+
+    def validate_confirmed(self, argv: list[str]) -> ValidationResult:
+        """확인을 거친 명령도 대상·경로 검사는 그대로 받는다."""
+        command = argv[0]
+        if command in ("rm", "truncate"):
+            return self._check_paths(argv, self.WRITABLE_PREFIXES, "modify")
+        return self._check_signal_target(argv)
+
+    def _positional(self, tokens: list[str]) -> list[str]:
+        return [t for t in tokens if not t.startswith("-")]
+
+    def _check_paths(
+        self, argv: list[str], prefixes: tuple[str, ...], action: str
+    ) -> ValidationResult:
+        paths = self._positional(argv[1:])
+        for path in paths:
+            if ".." in path:
+                return _invalid("Relative paths that escape the directory are not allowed")
+            if not path.startswith(prefixes):
+                allowed = ", ".join(p for p in prefixes if p != ".")
+                return _invalid(
+                    f"Cannot {action} '{path}'. Allowed paths: {allowed}"
+                )
+        return ValidationResult(is_valid=True, argv=argv)
+
+    def _check_signal_target(self, argv: list[str]) -> ValidationResult:
+        """신호를 보낼 대상은 PID 나 훈련 프로세스 이름만 허용한다."""
+        targets = self._positional(argv[1:])
+        if not targets:
+            return _invalid("This command requires a target")
+        for target in targets:
+            if target.isdigit():
+                if int(target) <= 1:
+                    # PID 1 은 샌드박스 자체다. 죽이면 훈련이 끝난다.
+                    return _invalid("PID 1 is the sandbox itself and cannot be signaled")
+                continue
+            if not target.startswith("afterfail-"):
+                return _invalid(
+                    f"'{target}' is not a training process. "
+                    "Use a PID or a name starting with 'afterfail-'"
+                )
+        return ValidationResult(is_valid=True, argv=argv)
+
+
 class CommandValidator:
     # 셸을 쓰지 않으므로 아래 문자들은 실행 전에 거절한다.
     # (argv 로 넘어가면 리터럴이 되지만, 사용자가 셸 동작을 기대하고 입력한 것이므로
@@ -300,6 +406,7 @@ class CommandValidator:
     _POLICIES = {
         KUBERNETES: KubectlPolicy(),
         DOCKER: DockerPolicy(),
+        LINUX: LinuxPolicy(),
     }
 
     def validate_command(
@@ -314,15 +421,22 @@ class CommandValidator:
             return parsed
         policy, argv = parsed
 
-        if argv[1] in policy.CONFIRM_SUBCOMMANDS:
+        targets = self._targets(allowed_targets)
+        confirm_target = policy.confirmation_target(argv)
+        if confirm_target is not None:
+            # 확인해도 통과하지 못할 명령은 지금 거절한다.
+            # "확인하면 되겠구나"로 읽히면 사용자가 잘못된 방향으로 시도한다.
+            precheck = self._validate_confirmed(policy, argv, namespace, targets)
+            if not precheck.is_valid:
+                return precheck
             return ValidationResult(
                 is_valid=False,
-                error=f"{argv[1].capitalize()} operation requires confirmation",
+                error=f"{confirm_target.capitalize()} operation requires confirmation",
                 requires_confirmation=True,
                 argv=argv,
             )
 
-        return policy.validate(argv, namespace, self._targets(allowed_targets))
+        return policy.validate(argv, namespace, targets)
 
     def validate_delete(
         self,
@@ -347,10 +461,16 @@ class CommandValidator:
             return parsed
         policy, argv = parsed
 
-        # 확인을 거친 삭제도 정책 검사는 그대로 받는다.
+        return self._validate_confirmed(policy, argv, namespace, self._targets(allowed_targets))
+
+    @staticmethod
+    def _validate_confirmed(policy, argv: list[str], namespace: str, targets) -> ValidationResult:
+        """확인을 거친 명령도 정책 검사는 그대로 받는다."""
         if isinstance(policy, KubectlPolicy):
             return policy._finalize(argv, namespace)
-        return policy._validate_targets(argv, self._targets(allowed_targets), required=True)
+        if isinstance(policy, LinuxPolicy):
+            return policy.validate_confirmed(argv)
+        return policy._validate_targets(argv, targets, required=True)
 
     def _parse(self, command: str, environment: str):
         """공통 전처리: 대상 바이너리 확인 → 셸 메타문자 거절 → argv 분리."""
@@ -359,7 +479,7 @@ class CommandValidator:
         if policy is None:
             return _invalid(f"'{environment}' 환경의 명령 정책이 없습니다")
 
-        if not command.startswith(policy.binary):
+        if policy.binary and not command.startswith(policy.binary):
             return _invalid(f"Only {policy.binary} commands are allowed")
 
         for pattern in self.BLACKLIST_PATTERNS:
@@ -371,8 +491,9 @@ class CommandValidator:
         except ValueError:
             return _invalid("Command could not be parsed. Check quotes.")
 
-        if len(argv) < 2:
-            return _invalid(f"명령어 목록을 보려면 '{policy.binary} help'를 입력하세요.")
+        if len(argv) < policy.MIN_ARGV:
+            hint = f"'{policy.binary} help'" if policy.binary else "'help'"
+            return _invalid(f"명령어 목록을 보려면 {hint}를 입력하세요.")
 
         return policy, argv
 

@@ -39,17 +39,33 @@ def _service(core_api):
 
 
 class TestProvisionerRegistry:
-    def test_kubernetes_and_docker_are_registered(self):
-        assert set(SandboxService._PROVISIONERS) == {
-            environments.KUBERNETES,
-            environments.DOCKER,
+    def test_registered_provisioners_are_supported_environments(self):
+        """프로비저너는 계약에 있는 환경에만 등록된다."""
+        assert set(SandboxService._PROVISIONERS) <= set(
+            environments.SUPPORTED_ENVIRONMENTS
+        )
+        assert environments.DOCKER in SandboxService._PROVISIONERS
+
+    def test_every_provisioner_has_a_container_name(self):
+        """참조 복원 시 컨테이너 이름이 환경마다 달라야 한다.
+
+        고정값을 쓰면 "container toolbox is not valid for pod ..." 로 exec 이 실패한다.
+        """
+        for environment in SandboxService._PROVISIONERS:
+            assert SandboxService.container_name_for(environment)
+        names = {
+            SandboxService.container_name_for(env)
+            for env in SandboxService._PROVISIONERS
         }
+        assert len(names) == len(SandboxService._PROVISIONERS), "환경마다 이름이 달라야 한다"
 
     @pytest.mark.asyncio
     async def test_unregistered_environment_is_rejected(self):
         service = _service(_FakeCoreApi())
         with pytest.raises(ValueError):
-            await service.ensure(user_id="u1", namespace="user-u1", environment="linux")
+            await service.ensure(
+                user_id="u1", namespace="user-u1", environment="application"
+            )
 
 
 class TestDindPodSpec:
