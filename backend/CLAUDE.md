@@ -77,7 +77,8 @@ app/
 │   ├── validation_service.py     # 해결 검증 (Mock | K8s API | Prometheus), chaos_type → _CHECKS 레지스트리
 │   ├── validation_rule_service.py # AI 생성 검증 조건 저장/실행 + K8s fallback, rule_type → _RULE_RUNNERS 레지스트리
 │   ├── promql_guard.py           # PromQL 안전성 검사 (namespace 격리, allowlist)
-│   ├── runtime_context.py        # K8s/Prometheus/CommandLog 수집 (구현 완료, 튜터 연결됨)
+│   ├── runtime_context.py        # 환경별 관측 수집 → 공통 스키마 (AI 계층 계약)
+│   ├── runtime_redaction.py      # AI 로 나가는 값에서 토큰·비밀번호 제거
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
@@ -222,6 +223,52 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### RuntimeContext — AI 계층 계약 (BE-19)
+
+환경마다 수집 방법이 다르지만 **출력 스키마는 같다.** AI 담당이 환경별로 분기하지
+않아도 되도록 하기 위한 계약이다.
+
+```json
+{
+  "environment": "docker",
+  "scope": {"namespace": "user-...", "sandbox_id": "..."},
+  "mission": {"title": "...", "difficulty": "...", "student_brief": "..."},
+  "recent_user_commands": [],
+  "observations": {},
+  "metrics": {},
+  "logs": []
+}
+```
+
+| 환경 | observations |
+|---|---|
+| kubernetes | `kubernetes_state` (pods / deployments / services / events) |
+| docker | `containers`, `networks` |
+| linux | `processes`, `disk`, `memory`, `load` |
+
+**부분 실패를 허용한다.** 수집 하나가 실패하거나 느려도(기본 3초 timeout) 나머지는
+그대로 넘긴다. 관측 실패 때문에 튜터 응답이 통째로 막히면 안 된다.
+
+**정답이 아니라 관측값만 넘긴다.** 무엇이 문제인지는 AI가 판단한다.
+
+#### 민감정보 제거 (runtime_redaction.py)
+
+관측값은 그대로 LLM 프로바이더로 나간다. 토큰·비밀번호·환경변수를 지운다.
+
+```
+--from-literal=password=hunter2  → --from-literal=password=***REDACTED***
+Authorization: Bearer abc.def.ghi → Authorization=***REDACTED***
+{"env": {...}}                    → {"env": "***REDACTED***"}
+```
+
+키가 붙은 값은 **줄 끝까지** 지운다. `Authorization: Bearer a.b.c`처럼 값이 여러
+토큰인 경우 한 토큰만 지우면 나머지가 남는다. 정상 명령(`kubectl get pods`)은
+건드리지 않는다.
+
+> **하위 호환**: `namespace` / `kubernetes_state` / `prometheus` 키를 함께 남긴다.
+> 튜터 구현(`app/ai/`)은 AI 담당 소유라 한 PR에서 함께 바꿀 수 없다. AI가 새 스키마로
+> 옮긴 뒤 제거한다.
 
 ### Linux 환경 활성화 (BE-18)
 
