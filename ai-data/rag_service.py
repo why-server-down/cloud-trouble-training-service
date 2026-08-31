@@ -489,7 +489,10 @@ class RAGService:
                             time.sleep(wait)
                         else:
                             raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
-                if batch_start + BATCH_SIZE < len(texts):
+                if (
+                    self.settings.AI_BACKEND != "mock"
+                    and batch_start + BATCH_SIZE < len(texts)
+                ):
                     time.sleep(35)  # 다음 배치 전 rate limit 회복 대기
 
             # Prepare points for Qdrant
