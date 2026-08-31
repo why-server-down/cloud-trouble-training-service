@@ -288,3 +288,35 @@
   - AI pytest `105 passed, 3 deselected`
   - backend pytest `364 passed`
 - 후속: AI-13 8주차 튜터 품질 게이트
+
+## AI-13 8주차 튜터 품질 게이트
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-10~12 공통 context, TutorResult, prompt injection 방어 dev 머지 확인
+- 변경:
+  - `evals/tutor_cases.jsonl`에 Kubernetes/Docker/Linux 각 20개, 총 60개 기준 응답 추가
+  - 각 환경에서 hint level 0~3, 진단·복구 질문, 관측 신호와 기대 source를 포함
+  - environment command correctness, hint leakage, source relevance, observation grounding, unsupported claim, dangerous command, Korean clarity 자동 평가기 추가
+  - prompt의 environment/hint level 계약도 케이스마다 함께 검증
+  - 실패 시 non-zero exit와 JSON report를 제공해 CI 품질 게이트로 사용 가능
+- 평가 방식:
+  - 외부 API 없이 재현 가능한 수동 검토 기준 응답(golden response)을 자동 채점
+  - 실제 OpenAI/Gemini 응답은 릴리스 평가에서 동일 데이터셋의 response를 교체해 별도 측정
+- 품질 수치:
+  - environment mismatch `0`
+  - level 0~2 direct solution leakage `0%`
+  - unsupported dangerous command `0`
+  - source relevance `100%`, observation grounding `100%`
+  - unsupported claim `0%`, Korean clarity `100%`
+  - Kubernetes/Docker/Linux 환경별 20/20 통과
+- 범위 판정:
+  - 튜터 품질 게이트는 통과했으나 backend 실행 계약이 없어 Application/DB는 후속 연구로 유지
+- 검증:
+  - AI pytest `109 passed, 3 deselected`
+  - backend pytest `364 passed`
+  - tutor offline eval `60/60 passed`
+- 후속: AI-14 environment-aware scenario input과 fixtures
