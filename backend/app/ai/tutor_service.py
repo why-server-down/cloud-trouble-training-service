@@ -212,7 +212,7 @@ class TutorService:
     ) -> str:
         try:
             from ai_engine import TutorRequest
-            from prompt_engine import MissionContext, SystemContext, UserContext
+            from prompt_engine import MissionContext, TrainingContext, UserContext
 
             mission_ctx = MissionContext(
                 mission_id=attempt_id,
@@ -222,41 +222,35 @@ class TutorService:
                 expected_solution=chaos_type,
             )
 
-            if runtime_ctx is not None:
-                from app.services.runtime_context import (
-                    format_k8s_state, format_recent_commands, format_events
-                )
-                pod_status = format_k8s_state(runtime_ctx.get("kubernetes_state"))
-                pod_logs = format_recent_commands(runtime_ctx.get("recent_user_commands", []))
-                recent_events = format_events(runtime_ctx.get("kubernetes_state"))
-            elif settings.VALIDATION_BACKEND == "k8s":
-                pod_status, recent_events = self._get_pod_status_fallback(namespace)
-                pod_logs = "(로그는 kubectl logs <pod-name> 으로 직접 확인하세요)"
-            else:
-                pod_status = "Unknown (Mock 환경)"
-                recent_events = "(실제 K8s 환경에서는 이벤트가 제공됩니다)"
-                pod_logs = "(로그는 kubectl logs <pod-name> 으로 직접 확인하세요)"
-
-            system_ctx = SystemContext(
-                namespace=namespace,
-                pod_status=pod_status,
-                pod_logs=pod_logs,
-                recent_events=recent_events,
-            )
             user_ctx = UserContext(
                 user_id=attempt_id,
                 hint_count=hint_level,
                 previous_questions=previous_questions,
+            )
+            runtime_ctx = runtime_ctx or {
+                "environment": environment, "scope": {"namespace": namespace},
+                "mission": {}, "observations": {}, "recent_user_commands": [],
+                "metrics": {}, "logs": [],
+            }
+            training_ctx = TrainingContext(
+                environment=environment,
+                scope=runtime_ctx.get("scope", {"namespace": namespace}),
+                mission={**runtime_ctx.get("mission", {}), **mission_ctx.__dict__},
+                observations=runtime_ctx.get("observations", {}),
+                recent_commands=runtime_ctx.get("recent_user_commands", []),
+                metrics=runtime_ctx.get("metrics", {}),
+                logs=runtime_ctx.get("logs", []),
+                user=user_ctx.__dict__,
             )
 
             request = TutorRequest(
                 user_question=user_question,
                 hint_level=hint_level,
                 mission_ctx=mission_ctx,
-                system_ctx=system_ctx,
                 user_ctx=user_ctx,
                 chaos_type=fault_type,
                 environment=environment,
+                training_ctx=training_ctx,
             )
 
             loop = asyncio.get_event_loop()

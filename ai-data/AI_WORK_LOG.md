@@ -212,3 +212,28 @@
   - backend pytest `363 passed`
   - 기존 offline eval `6/6 passed`
 - 후속: AI-10 공통 TrainingContext와 prompt 일반화
+
+## AI-10 공통 TrainingContext와 prompt 일반화
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-09 PR #65 dev 머지 확인
+  - AI-07에서 확인한 BE-15 범위 결정과 BE-16~21 RuntimeContext 계약 유지 확인
+- 변경:
+  - Kubernetes/Docker/Linux 공통 `TrainingContext`를 추가하고 기존 context 호출 호환 adapter 유지
+  - mission, observations/runtime logs, recent commands, retrieved docs, learner history를 명시적 구역으로 분리
+  - 사용자 입력·관측값·로그·검색 문서를 untrusted data 경계로 표시
+  - 환경별 command vocabulary와 hint level 0~3 규칙을 코드·시스템 prompt에서 통일
+  - `TutorService`가 RuntimeContext의 공통 observations/metrics/logs를 K8s 전용 문자열로 축약하지 않고 전달
+  - RAG 문서를 문자열 치환하지 않고 `TrainingContext.retrieved_docs`로 전달
+- 인수 조건 검증:
+  - Docker level 2 prompt에 Docker 진단 vocabulary만 포함하고 recovery command 금지
+  - Linux level 0에서 root cause와 command 노출 금지
+  - level 3 명령을 현재 환경 vocabulary와 backend command policy에 제한
+- 검증:
+  - AI pytest `80 passed, 3 deselected`
+  - backend pytest `363 passed`
+- 후속: AI-11 TutorResult 정보 보존

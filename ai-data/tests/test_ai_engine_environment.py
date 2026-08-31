@@ -6,7 +6,11 @@ from tests.fakes import DeterministicFakeOpenAI
 
 
 class _PromptEngine:
+    def __init__(self):
+        self.kwargs = None
+
     def generate_prompt(self, **kwargs):
+        self.kwargs = kwargs
         return "SYSTEM\n=== USER QUESTION ==="
 
 
@@ -52,6 +56,10 @@ def test_tutor_engine_passes_request_environment_to_rag():
         )
     ]
     assert response.sources == ["docker.md"]
+    assert engine.prompt_engine.kwargs["training_ctx"].environment == "docker"
+    assert engine.prompt_engine.kwargs["training_ctx"].retrieved_docs == [
+        {"source": "docker.md", "content": "Docker network diagnostic"}
+    ]
 
 
 def test_tutor_request_keeps_kubernetes_default_for_existing_callers():
