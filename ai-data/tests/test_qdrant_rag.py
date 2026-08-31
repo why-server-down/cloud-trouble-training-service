@@ -3,6 +3,8 @@ Test suite for Qdrant-based RAG Service
 Tests document ingestion, search, and error handling
 """
 
+from types import SimpleNamespace
+
 import pytest
 from langchain.schema import Document
 from config import AISettings
@@ -226,6 +228,90 @@ class TestSearch:
         )
 
         assert results == []
+
+    def test_hybrid_reranking_promotes_exact_command_and_records_scores(
+        self, rag_service, monkeypatch
+    ):
+        captured = {}
+
+        def query_points(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                points=[
+                    SimpleNamespace(
+                        score=0.90,
+                        payload={
+                            "source": "general.md",
+                            "source_id": "general",
+                            "title": "일반 점검",
+                            "content": "서비스 상태를 차례로 확인합니다",
+                            "authority": 0.25,
+                        },
+                    ),
+                    SimpleNamespace(
+                        score=0.85,
+                        payload={
+                            "source": "command.md",
+                            "source_id": "command",
+                            "title": "kubectl describe pod 명령",
+                            "content": "kubectl describe pod 로 Events를 확인합니다",
+                            "authority": 1.0,
+                        },
+                    ),
+                ]
+            )
+
+        monkeypatch.setattr(rag_service.client, "query_points", query_points)
+
+        first = rag_service.search_knowledge(
+            "kubectl describe pod",
+            environment="kubernetes",
+            top_k=2,
+            min_similarity=0,
+        )
+        second = rag_service.search_knowledge(
+            "kubectl describe pod",
+            environment="kubernetes",
+            top_k=2,
+            min_similarity=0,
+        )
+
+        assert captured["limit"] == 20
+        assert [document.source for document in first] == ["command.md", "general.md"]
+        assert [document.source for document in second] == ["command.md", "general.md"]
+        assert first[0].metadata["semantic_score"] == 0.85
+        assert first[0].metadata["keyword_score"] == 1.0
+        assert first[0].metadata["final_score"] == pytest.approx(0.8875)
+
+    def test_reranking_can_be_disabled_for_vector_baseline(
+        self, rag_service, monkeypatch
+    ):
+        captured = {}
+
+        def query_points(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                points=[
+                    SimpleNamespace(
+                        score=0.8,
+                        payload={"source": "vector.md", "content": "vector"},
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(rag_service.client, "query_points", query_points)
+
+        results = rag_service.search_knowledge(
+            "query",
+            environment="kubernetes",
+            top_k=3,
+            min_similarity=0,
+            rerank=False,
+        )
+
+        assert captured["limit"] == 3
+        assert results[0].metadata["semantic_score"] == 0.8
+        assert results[0].metadata["final_score"] == 0.8
     
     def test_search_empty_collection(self, rag_service):
         """Test search on empty collection"""
