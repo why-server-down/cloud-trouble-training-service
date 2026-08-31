@@ -188,3 +188,27 @@
   - backend pytest `363 passed`
   - offline eval `6/6 passed`
 - 후속: AI-09 3개 환경 retrieval 정식 평가와 latency 보고
+
+## AI-09 retrieval eval
+
+- 상태: 완료 — PR #65
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/ai-retrieval-eval`
+- Wave: Wave 3
+- 변경:
+  - `evals/retrieval_cases.jsonl`에 Kubernetes/Docker/Linux 각 20문항, 총 60문항 추가
+  - 한국어 70%, 영문/명령형 30%와 일반·애매·타 환경 용어 질문 포함
+  - Recall@1/3/5, MRR, environment contamination, empty retrieval, latency p50/p95 평가기 추가
+  - 환경별 Recall@5 85%와 contamination 1% 미만을 자동 gate로 적용
+  - mock ingestion의 불필요한 Gemini rate-limit 대기를 제거해 offline 평가 시간을 단축
+- 품질 수치:
+  - 전체 Recall@1/3/5: `0.6000 / 0.8333 / 0.9167`, MRR `0.7156`
+  - Kubernetes Recall@5 `0.85`, Docker `0.90`, Linux `1.00`
+  - environment contamination `0`, empty retrieval rate `0`
+  - 전체 latency p50 `5.32ms`, p95 `10.55ms` (offline deterministic embedding)
+  - 평가 근거로 `top_k=5`, candidate `20`, min similarity `0` 고정
+- 검증:
+  - AI pytest `76 passed, 3 deselected`
+  - backend pytest `363 passed`
+  - 기존 offline eval `6/6 passed`
+- 후속: AI-10 공통 TrainingContext와 prompt 일반화
