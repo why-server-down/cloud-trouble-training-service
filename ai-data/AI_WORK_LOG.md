@@ -237,3 +237,28 @@
   - AI pytest `80 passed, 3 deselected`
   - backend pytest `363 passed`
 - 후속: AI-11 TutorResult 정보 보존
+
+## AI-11 TutorResult 정보 보존
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 계약:
+  - 백엔드 계약 PR #67을 먼저 머지해 `TutorSource`와 `ChatResponse` 메타데이터 필드 확장
+- 변경:
+  - `AITutorEngine`의 sources, observations_used, token_usage, latency, fallback 상태를 응답 끝까지 보존
+  - source를 title/source_id/상대 path/environment/similarity만 포함하는 안전한 형태로 변환
+  - prompt에 실제 포함된 observation/metric/log/recent command 키를 observations_used로 기록
+  - RAG 또는 provider 실패 시 내부 exception을 숨기고 안전한 fallback과 빈 sources 반환
+  - `TutorService`가 최종 message만 저장하되 API에는 전체 `TutorResult`를 반환
+- 인수 조건 검증:
+  - ChatResponse가 sources/observations_used/token_usage를 반환하도록 백엔드 계약 연결
+  - 절대 로컬 경로와 raw exception/API key 문자열 노출 방지 테스트 추가
+  - RAG 실패 시 `fallback_used=true`, `sources=[]` 확인
+- 검증:
+  - AI pytest `82 passed, 3 deselected`
+  - backend pytest `364 passed`
+- DB 결정:
+  - TutorMessage에는 기존대로 최종 message만 저장하며 AI-11에서는 migration을 추가하지 않음
+- 후속: AI-12 prompt injection과 redaction
