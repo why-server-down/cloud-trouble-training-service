@@ -10,6 +10,7 @@ Task 2: Vector Database Setup (Migrated to Qdrant)
 
 import os
 import hashlib
+import re
 import time
 import uuid
 from typing import List, Dict, Optional
@@ -44,6 +45,21 @@ _EMBEDDING_DIMENSIONS = {
     "mock": 1536,
 }
 SUPPORTED_ENVIRONMENTS = frozenset({"kubernetes", "docker", "linux"})
+VECTOR_CANDIDATE_LIMIT = 20
+_TOKEN_PATTERN = re.compile(r"[가-힣]+|[a-z0-9_]+(?:[./:-][a-z0-9_]+)*")
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    """한국어, 영문, 숫자와 command 형태를 dependency 없이 정규화한다."""
+    return set(_TOKEN_PATTERN.findall(text.casefold()))
+
+
+def _keyword_overlap(query: str, title: str, content: str) -> float:
+    query_tokens = _normalized_tokens(query)
+    if not query_tokens:
+        return 0.0
+    document_tokens = _normalized_tokens(f"{title} {content}")
+    return len(query_tokens & document_tokens) / len(query_tokens)
 
 
 class _OfflineEmbeddings:
@@ -541,6 +557,7 @@ class RAGService:
         top_k: Optional[int] = None,
         min_similarity: Optional[float] = None,
         filter_source: Optional[str] = None,
+        rerank: bool = True,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
@@ -552,6 +569,7 @@ class RAGService:
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
             filter_source: Optional filter by source metadata
+            rerank: semantic 후보에 keyword와 authority 점수를 결합할지 여부
 
         Returns:
             List of retrieved documents with similarity scores
@@ -601,6 +619,8 @@ class RAGService:
                 )
             query_filter = Filter(must=conditions)
             
+            candidate_limit = VECTOR_CANDIDATE_LIMIT if rerank else top_k
+
             # Search similar documents in Qdrant (qdrant-client 1.7+ API)
             try:
                 # 신버전 API
@@ -608,7 +628,7 @@ class RAGService:
                 search_results = self.client.query_points(
                     collection_name=self.collection_name,
                     query=query_embedding,
-                    limit=top_k,
+                    limit=candidate_limit,
                     query_filter=query_filter,
                     score_threshold=min_similarity,
                 ).points
@@ -617,7 +637,7 @@ class RAGService:
                 search_results = self.client.search(
                     collection_name=self.collection_name,
                     query_vector=query_embedding,
-                    limit=top_k,
+                    limit=candidate_limit,
                     query_filter=query_filter,
                     score_threshold=min_similarity,
                 )
@@ -625,14 +645,47 @@ class RAGService:
             # Format results
             documents = []
             for result in search_results:
+                payload = dict(result.payload or {})
+                semantic_score = float(result.score)
+                keyword_score = _keyword_overlap(
+                    query,
+                    str(payload.get("title", "")),
+                    str(payload.get("content", "")),
+                )
+                try:
+                    authority = min(1.0, max(0.0, float(payload.get("authority", 0))))
+                except (TypeError, ValueError):
+                    authority = 0.0
+                final_score = (
+                    0.75 * semantic_score
+                    + 0.15 * keyword_score
+                    + 0.10 * authority
+                    if rerank
+                    else semantic_score
+                )
+                payload.update(
+                    {
+                        "semantic_score": semantic_score,
+                        "keyword_score": keyword_score,
+                        "final_score": final_score,
+                    }
+                )
                 documents.append(RetrievedDocument(
-                    content=result.payload.get("content", ""),
-                    similarity=result.score,
-                    source=result.payload.get("source", "unknown"),
-                    metadata=result.payload
+                    content=payload.get("content", ""),
+                    similarity=semantic_score,
+                    source=payload.get("source", "unknown"),
+                    metadata=payload,
                 ))
-            
-            return documents
+
+            documents.sort(
+                key=lambda document: (
+                    -document.metadata["final_score"],
+                    -document.metadata["semantic_score"],
+                    str(document.metadata.get("source_id", document.source)),
+                    str(document.metadata.get("content_hash", "")),
+                )
+            )
+            return documents[:top_k]
             
         except SearchError:
             raise

@@ -143,3 +143,39 @@ def test_docker_retrieval_recall_at_five_meets_target():
         hits += question["expected_source_id"] in source_ids
 
     assert hits / len(questions) >= 0.85
+
+
+def test_hybrid_recall_at_five_is_compared_with_vector_baseline():
+    documents = _docker_documents()
+    chunks = attach_chunk_metadata(
+        RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(
+            documents
+        )
+    )
+    rag = RAGService(
+        collection_name="docker_hybrid_comparison",
+        use_memory=True,
+        settings=AISettings(AI_BACKEND="mock", RAG_MIN_SIMILARITY=0),
+    )
+    rag.ingest_documents(chunks)
+    questions = json.loads(EVAL_DATASET.read_text(encoding="utf-8"))["questions"]
+
+    recalls = {}
+    for mode, rerank in (("vector", False), ("hybrid", True)):
+        hits = 0
+        for question in questions:
+            results = rag.search_knowledge(
+                question["query"],
+                environment="docker",
+                fault_type=question["fault_type"],
+                top_k=5,
+                min_similarity=0,
+                rerank=rerank,
+            )
+            hits += question["expected_source_id"] in {
+                result.metadata.get("source_id") for result in results
+            }
+        recalls[mode] = hits / len(questions)
+
+    assert recalls["hybrid"] >= 0.85
+    assert recalls["hybrid"] >= recalls["vector"]
