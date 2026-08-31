@@ -20,6 +20,8 @@ def _document(source_id: str, content: str, chunk_index: int = 0) -> Document:
                     "source_id": source_id,
                     "source": f"{source_id}.md",
                     "version": "2026-08-29",
+                    "environments": ["general"],
+                    "fault_types": ["general"],
                 },
             )
         ]
@@ -61,7 +63,9 @@ def test_changed_source_replaces_only_its_stale_chunk(rag):
     assert report.unchanged == 1
     assert report.added == 0
     assert rag.get_collection_stats()["document_count"] == 2
-    assert rag.search_knowledge("alpha changed", top_k=2, min_similarity=0)[0].content
+    assert rag.search_knowledge(
+        "alpha changed", environment="kubernetes", top_k=2, min_similarity=0
+    )[0].content
 
 
 def test_point_id_uses_source_chunk_and_content_hash(rag):

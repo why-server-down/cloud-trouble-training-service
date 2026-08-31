@@ -64,7 +64,7 @@ def example_1_inmemory():
     print(f"Query: {query}")
     print("-" * 80)
     
-    results = rag.search_knowledge(query, top_k=2)
+    results = rag.search_knowledge(query, environment="kubernetes", top_k=2)
     
     for i, doc in enumerate(results, 1):
         print(f"\nResult {i}:")
@@ -105,7 +105,9 @@ def example_2_local_server():
         print(f"✓ Ingested {count} documents")
         
         # Search
-        results = rag.search_knowledge("Pod lifecycle", top_k=1)
+        results = rag.search_knowledge(
+            "Pod lifecycle", environment="kubernetes", top_k=1
+        )
         print(f"\nFound {len(results)} results")
         
         if results:
@@ -154,7 +156,7 @@ def example_3_metadata_filtering():
     print("\n" + "-" * 80)
     print("Search: 'kubectl' (no filter)")
     print("-" * 80)
-    results = rag.search_knowledge("kubectl", top_k=3)
+    results = rag.search_knowledge("kubectl", environment="kubernetes", top_k=3)
     print(f"Found {len(results)} results:")
     for r in results:
         print(f"  - {r.source}: {r.content[:50]}...")
@@ -163,7 +165,9 @@ def example_3_metadata_filtering():
     print("\n" + "-" * 80)
     print("Search: 'kubectl' (filter: source=commands.md)")
     print("-" * 80)
-    results = rag.search_knowledge("kubectl", top_k=3, filter_source="commands.md")
+    results = rag.search_knowledge(
+        "kubectl", environment="kubernetes", top_k=3, filter_source="commands.md"
+    )
     print(f"Found {len(results)} results:")
     for r in results:
         print(f"  - {r.source}: {r.content[:50]}...")

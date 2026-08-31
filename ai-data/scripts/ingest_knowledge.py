@@ -227,7 +227,9 @@ def main():
         print("\n  Running test queries:")
         for query in test_queries:
             print(f"\n  Query: \"{query}\"")
-            results = rag.search_knowledge(query, top_k=2)
+            results = rag.search_knowledge(
+                query, environment="kubernetes", top_k=2
+            )
             
             if results:
                 print(f"  Found {len(results)} results:")

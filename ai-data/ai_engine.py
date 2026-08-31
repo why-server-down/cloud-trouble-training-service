@@ -26,6 +26,7 @@ class TutorRequest:
     system_ctx: Optional[SystemContext] = None
     user_ctx: Optional[UserContext] = None
     chaos_type: Optional[str] = None
+    environment: str = "kubernetes"
 
 
 @dataclass
@@ -114,6 +115,7 @@ class AITutorEngine:
         if self.use_rag and request.hint_level >= 1:
             retrieved_docs = self.rag_service.search_knowledge(
                 request.user_question,
+                environment=request.environment,
                 fault_type=request.chaos_type,
             )
             
