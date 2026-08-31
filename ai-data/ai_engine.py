@@ -5,7 +5,7 @@ Integrates RAG, Prompt Engineering, and LLM
 """
 
 from typing import Dict, Optional
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import openai
 
 from config import AISettings, config
@@ -14,7 +14,8 @@ from prompt_engine import (
     SocraticPromptEngine,
     MissionContext,
     SystemContext,
-    UserContext
+    TrainingContext,
+    UserContext,
 )
 
 @dataclass
@@ -27,6 +28,7 @@ class TutorRequest:
     user_ctx: Optional[UserContext] = None
     chaos_type: Optional[str] = None
     environment: str = "kubernetes"
+    training_ctx: Optional[TrainingContext] = None
 
 
 @dataclass
@@ -101,17 +103,9 @@ class AITutorEngine:
         if temperature is None:
             temperature = self.settings.OPENAI_TEMPERATURE
 
-        # Generate base prompt
-        prompt = self.prompt_engine.generate_prompt(
-            user_question=request.user_question,
-            hint_level=request.hint_level,
-            mission_ctx=request.mission_ctx,
-            system_ctx=request.system_ctx,
-            user_ctx=request.user_ctx
-        )
-        
         # Augment with RAG if enabled and hint level >= 1
         sources = []
+        retrieved_context = []
         if self.use_rag and request.hint_level >= 1:
             retrieved_docs = self.rag_service.search_knowledge(
                 request.user_question,
@@ -121,18 +115,35 @@ class AITutorEngine:
             
             if retrieved_docs:
                 sources = [doc.source for doc in retrieved_docs]
-                
-                # Format retrieved docs
-                docs_text = "\n\n=== RELEVANT DOCUMENTATION ===\n"
-                for i, doc in enumerate(retrieved_docs, 1):
-                    docs_text += f"\n[Source {i}: {doc.source}]\n"
-                    docs_text += f"{doc.content}\n"
-                    docs_text += "-" * 80 + "\n"
-                
-                prompt = prompt.replace(
-                    "=== USER QUESTION ===",
-                    f"{docs_text}\n\n=== USER QUESTION ==="
-                )
+                retrieved_context = [
+                    {"source": doc.source, "content": doc.content}
+                    for doc in retrieved_docs
+                ]
+
+        training_ctx = request.training_ctx
+        if training_ctx is not None:
+            training_ctx = TrainingContext(**{
+                **training_ctx.__dict__,
+                "environment": request.environment,
+                "retrieved_docs": retrieved_context,
+            })
+        else:
+            training_ctx = TrainingContext(
+                environment=request.environment,
+                mission=asdict(request.mission_ctx) if request.mission_ctx else {},
+                observations=asdict(request.system_ctx) if request.system_ctx else {},
+                retrieved_docs=retrieved_context,
+                user=asdict(request.user_ctx) if request.user_ctx else {},
+            )
+
+        prompt = self.prompt_engine.generate_prompt(
+            user_question=request.user_question,
+            hint_level=request.hint_level,
+            training_ctx=training_ctx,
+            mission_ctx=request.mission_ctx,
+            system_ctx=request.system_ctx,
+            user_ctx=request.user_ctx,
+        )
         
         # Call LLM
         try:
