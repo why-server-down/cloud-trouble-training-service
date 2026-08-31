@@ -191,7 +191,7 @@
 
 ## AI-09 retrieval eval
 
-- 상태: 완료
+- 상태: 완료 — PR #65
 - 작업일: 2026-08-31
 - 작업 브랜치: `feature/ai-retrieval-eval`
 - Wave: Wave 3
