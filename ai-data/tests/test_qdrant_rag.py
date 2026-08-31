@@ -34,15 +34,15 @@ def sample_documents():
     return [
         Document(
             page_content="Pod is in CrashLoopBackOff status. Check logs with kubectl logs.",
-            metadata={"source": "troubleshooting.md", "type": "guide"}
+            metadata={"source": "troubleshooting.md", "type": "guide", "environments": ["kubernetes"]}
         ),
         Document(
             page_content="ImagePullBackOff means the image cannot be pulled. Check image name and registry.",
-            metadata={"source": "errors.md", "type": "guide"}
+            metadata={"source": "errors.md", "type": "guide", "environments": ["kubernetes"]}
         ),
         Document(
             page_content="Use kubectl describe pod to see detailed pod information and events.",
-            metadata={"source": "commands.md", "type": "reference"}
+            metadata={"source": "commands.md", "type": "reference", "environments": ["kubernetes"]}
         )
     ]
 
@@ -86,17 +86,20 @@ class TestDocumentIngestion:
         docs = [
             Document(
                 page_content="Test content",
-                metadata={"source": "test.md", "custom_field": "value"}
+                metadata={"source": "test.md", "custom_field": "value", "environments": ["general"]}
             )
         ]
         count = rag_service.ingest_documents(docs)
         assert count == 1
         
         # Search to verify metadata
-        results = rag_service.search_knowledge("Test content", top_k=1)
+        results = rag_service.search_knowledge(
+            "Test content", environment="kubernetes", top_k=1
+        )
         assert len(results) > 0
         assert results[0].metadata["source"] == "test.md"
         assert results[0].metadata["custom_field"] == "value"
+        assert results[0].metadata["environments"] == ["general"]
 
 
 class TestSearch:
@@ -108,7 +111,9 @@ class TestSearch:
         rag_service.ingest_documents(sample_documents)
         
         # Search
-        results = rag_service.search_knowledge("Pod CrashLoopBackOff", top_k=2)
+        results = rag_service.search_knowledge(
+            "Pod CrashLoopBackOff", environment="kubernetes", top_k=2
+        )
         
         assert len(results) > 0
         assert results[0].similarity > 0.2
@@ -118,7 +123,9 @@ class TestSearch:
         """Test search with top_k parameter"""
         rag_service.ingest_documents(sample_documents)
         
-        results = rag_service.search_knowledge("kubectl", top_k=1)
+        results = rag_service.search_knowledge(
+            "kubectl", environment="kubernetes", top_k=1
+        )
         assert len(results) <= 1
     
     def test_search_with_min_similarity(self, rag_service, sample_documents):
@@ -127,6 +134,7 @@ class TestSearch:
         
         results = rag_service.search_knowledge(
             "completely unrelated query xyz123",
+            environment="kubernetes",
             min_similarity=0.9
         )
         # Should return few or no results due to high threshold
@@ -138,6 +146,7 @@ class TestSearch:
         
         results = rag_service.search_knowledge(
             "kubectl",
+            environment="kubernetes",
             filter_source="commands.md"
         )
         
@@ -148,28 +157,79 @@ class TestSearch:
         documents = [
             Document(
                 page_content="CrashLoop logs and restart count",
-                metadata={"source": "crash.md", "fault_types": ["crash_loop"]},
+                metadata={"source": "crash.md", "fault_types": ["crash_loop"], "environments": ["kubernetes"]},
             ),
             Document(
                 page_content="CrashLoop and image registry",
-                metadata={"source": "image.md", "fault_types": ["image_pull_error"]},
+                metadata={"source": "image.md", "fault_types": ["image_pull_error"], "environments": ["kubernetes"]},
             ),
             Document(
                 page_content="General diagnostic workflow",
-                metadata={"source": "general.md", "fault_types": ["general"]},
+                metadata={"source": "general.md", "fault_types": ["general"], "environments": ["general"]},
             ),
         ]
         rag_service.ingest_documents(documents)
 
         results = rag_service.search_knowledge(
-            "CrashLoop logs", fault_type="crash_loop", min_similarity=0
+            "CrashLoop logs", environment="kubernetes", fault_type="crash_loop", min_similarity=0
         )
 
         assert {result.source for result in results} == {"crash.md", "general.md"}
+
+    def test_environment_and_fault_filters_are_combined(self, rag_service):
+        documents = [
+            Document(
+                page_content="Docker network disconnect",
+                metadata={
+                    "source": "docker.md",
+                    "environments": ["docker"],
+                    "fault_types": ["container_network_disconnect"],
+                },
+            ),
+            Document(
+                page_content="Kubernetes network disconnect",
+                metadata={
+                    "source": "kubernetes.md",
+                    "environments": ["kubernetes"],
+                    "fault_types": ["container_network_disconnect"],
+                },
+            ),
+            Document(
+                page_content="General network workflow",
+                metadata={
+                    "source": "general.md",
+                    "environments": ["general"],
+                    "fault_types": ["general"],
+                },
+            ),
+        ]
+        rag_service.ingest_documents(documents)
+
+        results = rag_service.search_knowledge(
+            "network disconnect",
+            environment="docker",
+            fault_type="container_network_disconnect",
+            top_k=5,
+            min_similarity=0,
+        )
+
+        assert {result.source for result in results} == {"docker.md", "general.md"}
+
+    @pytest.mark.parametrize("environment", [None, "", "application", "Docker"])
+    def test_missing_or_invalid_environment_is_rejected(self, rag_service, environment):
+        with pytest.raises(SearchError, match="environment"):
+            rag_service.search_knowledge("query", environment=environment)
+
+    def test_explicit_zero_top_k_is_not_replaced_by_default(self, rag_service):
+        results = rag_service.search_knowledge(
+            "query", environment="kubernetes", top_k=0, min_similarity=0
+        )
+
+        assert results == []
     
     def test_search_empty_collection(self, rag_service):
         """Test search on empty collection"""
-        results = rag_service.search_knowledge("test query")
+        results = rag_service.search_knowledge("test query", environment="kubernetes")
         assert len(results) == 0
 
 
@@ -183,7 +243,9 @@ class TestAugmentPrompt:
         base_prompt = "You are a helpful assistant."
         user_question = "Why is my pod crashing?"
         
-        augmented = rag_service.augment_prompt(base_prompt, user_question, top_k=2)
+        augmented = rag_service.augment_prompt(
+            base_prompt, user_question, environment="kubernetes", top_k=2
+        )
         
         assert base_prompt in augmented
         assert user_question in augmented
@@ -194,7 +256,9 @@ class TestAugmentPrompt:
         base_prompt = "You are a helpful assistant."
         user_question = "Test question"
         
-        augmented = rag_service.augment_prompt(base_prompt, user_question)
+        augmented = rag_service.augment_prompt(
+            base_prompt, user_question, environment="kubernetes"
+        )
         
         # Should return base prompt when no docs found
         assert base_prompt in augmented
@@ -261,7 +325,7 @@ class TestErrorHandling:
         """Test search error handling"""
         # Search should not raise error even with invalid query
         try:
-            results = rag_service.search_knowledge("")
+            results = rag_service.search_knowledge("", environment="kubernetes")
             assert isinstance(results, list)
         except SearchError:
             # SearchError is acceptable

@@ -83,9 +83,10 @@ class TutorService:
         # DB에서 이전 질문 이력 로드 (세션 간 연속성)
         previous_questions = await self._load_previous_questions(attempt_id, db)
 
-        # RuntimeContext 수집 (k8s 환경에서만)
+        # DB attempt가 결정한 환경과 sandbox 범위에서 RuntimeContext 수집
         runtime_ctx: dict | None = None
-        if db is not None and settings.VALIDATION_BACKEND == "k8s":
+        attempt_environment = "kubernetes"
+        if db is not None:
             try:
                 from app.services.runtime_context import (
                     get_runtime_context_collector,
@@ -99,15 +100,28 @@ class TutorService:
                 )
                 attempt = result.scalar_one_or_none()
                 user_id = attempt.user_id if attempt else None
+                attempt_environment = (
+                    attempt.environment if attempt and attempt.environment else "kubernetes"
+                )
 
                 if user_id:
+                    from app.services.sandbox_service import get_sandbox_service
+
+                    sandbox = get_sandbox_service().reference_for(
+                        user_id=user_id,
+                        namespace=namespace,
+                        environment=attempt_environment,
+                    )
                     collector = get_runtime_context_collector()
                     runtime_ctx = await collector.collect(
                         user_id=user_id,
                         namespace=namespace,
                         db=db,
                         scenario_title=mission_name,
+                        difficulty=str(mission_level),
                         scenario_id=scenario_id,
+                        environment=attempt_environment,
+                        sandbox=sandbox,
                     )
             except Exception as e:
                 print(f"[AI Tutor] RuntimeContext 수집 실패 (무시): {e}")
@@ -126,6 +140,7 @@ class TutorService:
                 attempt_id=str(attempt_id),
                 runtime_ctx=runtime_ctx,
                 fault_type=chaos_type,
+                environment=attempt_environment,
             )
 
         # TutorMessage DB 저장
@@ -193,6 +208,7 @@ class TutorService:
         attempt_id: str,
         runtime_ctx: dict | None,
         fault_type: str | None = None,
+        environment: str = "kubernetes",
     ) -> str:
         try:
             from ai_engine import TutorRequest
@@ -240,6 +256,7 @@ class TutorService:
                 system_ctx=system_ctx,
                 user_ctx=user_ctx,
                 chaos_type=fault_type,
+                environment=environment,
             )
 
             loop = asyncio.get_event_loop()

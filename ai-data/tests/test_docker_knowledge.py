@@ -134,6 +134,7 @@ def test_docker_retrieval_recall_at_five_meets_target():
     for question in questions:
         results = rag.search_knowledge(
             question["query"],
+            environment="docker",
             fault_type=question["fault_type"],
             top_k=5,
             min_similarity=0,

@@ -43,6 +43,7 @@ _EMBEDDING_DIMENSIONS = {
     "gemini": 3072,
     "mock": 1536,
 }
+SUPPORTED_ENVIRONMENTS = frozenset({"kubernetes", "docker", "linux"})
 
 
 class _OfflineEmbeddings:
@@ -535,20 +536,22 @@ class RAGService:
     def search_knowledge(
         self,
         query: str,
+        environment: Optional[str] = None,
+        fault_type: Optional[str] = None,
         top_k: Optional[int] = None,
         min_similarity: Optional[float] = None,
         filter_source: Optional[str] = None,
-        fault_type: Optional[str] = None,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
 
         Args:
             query: User query
+            environment: kubernetes, docker, linux 중 검색 대상 환경
+            fault_type: Optional chaos/fault type — filters to matching + general docs
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
             filter_source: Optional filter by source metadata
-            fault_type: Optional chaos/fault type — filters to matching + general docs
 
         Returns:
             List of retrieved documents with similarity scores
@@ -557,37 +560,46 @@ class RAGService:
             SearchError: If search fails
         """
         try:
+            if environment not in SUPPORTED_ENVIRONMENTS:
+                raise SearchError(
+                    "environment는 kubernetes, docker, linux 중 하나여야 합니다"
+                )
             top_k = self.settings.RAG_TOP_K if top_k is None else top_k
             min_similarity = (
                 self.settings.RAG_MIN_SIMILARITY
                 if min_similarity is None
                 else min_similarity
             )
+            if top_k == 0:
+                return []
+            if top_k < 0:
+                raise SearchError("top_k는 0 이상이어야 합니다")
 
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)
 
             # Prepare filter
-            query_filter = None
+            conditions = [
+                FieldCondition(
+                    key="environments",
+                    match=MatchAny(any=[environment, "general"]),
+                )
+            ]
             if fault_type:
-                # fault_type에 해당하는 문서 + general 문서 포함
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="fault_types",
-                            match=MatchAny(any=[fault_type, "general"])
-                        )
-                    ]
+                conditions.append(
+                    FieldCondition(
+                        key="fault_types",
+                        match=MatchAny(any=[fault_type, "general"]),
+                    )
                 )
-            elif filter_source:
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="source",
-                            match=MatchValue(value=filter_source)
-                        )
-                    ]
+            if filter_source:
+                conditions.append(
+                    FieldCondition(
+                        key="source",
+                        match=MatchValue(value=filter_source),
+                    )
                 )
+            query_filter = Filter(must=conditions)
             
             # Search similar documents in Qdrant (qdrant-client 1.7+ API)
             try:
@@ -622,6 +634,8 @@ class RAGService:
             
             return documents
             
+        except SearchError:
+            raise
         except Exception as e:
             raise SearchError(f"Failed to search knowledge base: {str(e)}")
     
@@ -629,6 +643,7 @@ class RAGService:
         self,
         base_prompt: str,
         user_question: str,
+        environment: Optional[str] = None,
         top_k: int = 3
     ) -> str:
         """
@@ -643,7 +658,9 @@ class RAGService:
             Augmented prompt with retrieved knowledge
         """
         # Search for relevant docs
-        docs = self.search_knowledge(user_question, top_k=top_k)
+        docs = self.search_knowledge(
+            user_question, environment=environment, top_k=top_k
+        )
         
         if not docs:
             return base_prompt
@@ -706,7 +723,7 @@ def main():
     # Test search
     print("\nTesting search...")
     query = "Pod is in ImagePullBackOff status"
-    results = rag.search_knowledge(query, top_k=2)
+    results = rag.search_knowledge(query, environment="kubernetes", top_k=2)
     
     print(f"\nQuery: {query}")
     print(f"Found {len(results)} relevant documents:\n")
