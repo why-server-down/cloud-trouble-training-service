@@ -141,6 +141,8 @@ class ChatResponse(BaseModel):
     mission_name: Optional[str] = None
     sources: Optional[list[dict]] = None
     observations_used: Optional[list[str]] = None
+    token_usage: Optional[dict] = None
+    fallback_used: bool = False
 
 
 # AI Scenario
@@ -191,9 +193,11 @@ class TutorSource(BaseModel):
     """튜터 답변의 근거. 표시 가능한 필드만 담는다."""
 
     title: str
+    source_id: Optional[str] = None
     # 외부 링크를 그대로 렌더링하지 않는다. 안전한 경로만 프론트가 anchor 로 만든다.
     path: Optional[str] = None
-    snippet: Optional[str] = None
+    environment: Optional[EnvironmentId] = None
+    similarity: Optional[float] = None
 
 
 class TutorResult(BaseModel):

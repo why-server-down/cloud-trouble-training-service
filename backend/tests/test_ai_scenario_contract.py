@@ -140,6 +140,19 @@ class TestAiContracts:
         assert result.sources[0].title == "docs"
         assert result.token_usage == {"total": 120}
 
+    def test_tutor_source_preserves_safe_retrieval_metadata(self):
+        from app.schemas import TutorSource
+
+        source = TutorSource(
+            title="Docker Network",
+            source_id="docker-network-troubleshooting",
+            path="07-docker/network-troubleshooting.md",
+            environment="docker",
+            similarity=0.91,
+        )
+        assert source.environment == "docker"
+        assert source.similarity == 0.91
+
     def test_tutor_result_rejects_unknown_environment(self):
         from pydantic import ValidationError
 

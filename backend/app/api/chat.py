@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, TutorResult
 from app.ai.tutor_service import get_tutor_service
 from app.services.service_factory import get_mission_service
 
@@ -68,7 +68,7 @@ async def chat_with_tutor(
         mission_name, mission_level, chaos_type = await _get_mission_info(db, attempt)
 
     scenario_id = attempt.scenario_id if attempt.attempt_type == "ai_scenario" else None
-    response_text = await tutor.get_hint(
+    tutor_result = await tutor.get_hint(
         user_question=body.message,
         attempt_id=attempt.id,
         hint_level=body.hint_level,
@@ -80,10 +80,22 @@ async def chat_with_tutor(
         scenario_id=scenario_id,
     )
 
+    # AI-11 이전 adapter나 테스트 double의 문자열 반환도 한동안 호환한다.
+    if isinstance(tutor_result, str):
+        tutor_result = TutorResult(
+            message=tutor_result,
+            hint_level=body.hint_level,
+            environment=attempt.environment,
+        )
+
     return ChatResponse(
-        response=response_text,
+        response=tutor_result.message,
         hint_level=body.hint_level,
         mission_name=mission_name,
+        sources=[source.model_dump(exclude_none=True) for source in tutor_result.sources],
+        observations_used=tutor_result.observations_used,
+        token_usage=tutor_result.token_usage,
+        fallback_used=tutor_result.fallback_used,
     )
 
 
