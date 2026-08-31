@@ -77,7 +77,9 @@ class TutorService:
         namespace: str,
         db: AsyncSession | None = None,
         scenario_id: uuid.UUID | None = None,
-    ) -> str:
+    ):
+        from app.schemas import TutorResult
+
         self._init_engine()
 
         # DB에서 이전 질문 이력 로드 (세션 간 연속성)
@@ -127,7 +129,13 @@ class TutorService:
                 print(f"[AI Tutor] RuntimeContext 수집 실패 (무시): {e}")
 
         if self._engine is None:
-            response = self._mock_response(user_question, hint_level, chaos_type)
+            response = TutorResult(
+                message=self._mock_response(user_question, hint_level, chaos_type),
+                hint_level=hint_level,
+                environment=attempt_environment,
+                fallback_used=True,
+                error_code="mock_backend",
+            )
         else:
             response = await self._call_engine(
                 user_question=user_question,
@@ -145,7 +153,7 @@ class TutorService:
 
         # TutorMessage DB 저장
         if db is not None:
-            await self._save_messages(db, attempt_id, user_question, response, hint_level)
+            await self._save_messages(db, attempt_id, user_question, response.message, hint_level)
 
         return response
 
@@ -209,7 +217,7 @@ class TutorService:
         runtime_ctx: dict | None,
         fault_type: str | None = None,
         environment: str = "kubernetes",
-    ) -> str:
+    ):
         try:
             from ai_engine import TutorRequest
             from prompt_engine import MissionContext, TrainingContext, UserContext
@@ -257,10 +265,28 @@ class TutorService:
             response = await loop.run_in_executor(
                 None, lambda: self._engine.get_response(request)
             )
-            return response.message
+            from app.schemas import TutorResult
+            return TutorResult(
+                message=response.message,
+                hint_level=response.hint_level,
+                environment=response.environment,
+                sources=response.sources,
+                observations_used=response.observations_used,
+                token_usage=response.token_usage,
+                latency_ms=response.latency_ms,
+                fallback_used=response.fallback_used,
+                error_code=response.error_code,
+            )
 
-        except Exception as e:
-            return f"AI 튜터 응답 중 오류가 발생했습니다: {str(e)}"
+        except Exception:
+            from app.schemas import TutorResult
+            return TutorResult(
+                message="현재 AI 튜터 응답을 생성하지 못했습니다. 잠시 후 다시 질문해 주세요.",
+                hint_level=hint_level,
+                environment=environment,
+                fallback_used=True,
+                error_code="adapter_failed",
+            )
 
     def _get_pod_status_fallback(self, namespace: str) -> tuple[str, str]:
         """RuntimeContextCollector 실패 시 직접 K8s 조회 fallback."""
