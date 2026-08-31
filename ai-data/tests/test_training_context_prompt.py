@@ -15,9 +15,9 @@ def test_prompt_has_explicit_context_sections_and_untrusted_boundaries():
     prompt = SocraticPromptEngine().generate_prompt(
         "무엇을 확인할까요?", training_ctx=_context("docker"), hint_level=1
     )
-    for section in ("ENVIRONMENT: docker", "MISSION", "OBSERVATIONS AND RUNTIME LOGS", "RECENT COMMANDS", "RETRIEVED DOCUMENTS"):
+    for section in ("ENVIRONMENT: docker", "MISSION", "OBSERVATIONS", "RUNTIME LOGS", "RECENT COMMANDS", "RETRIEVED DOCUMENTS"):
         assert section in prompt
-    assert prompt.count("<untrusted-data>") == 4
+    assert prompt.count("<untrusted-data>") == 5
 
 
 def test_docker_level_two_allows_diagnostics_but_not_kubectl_recovery():

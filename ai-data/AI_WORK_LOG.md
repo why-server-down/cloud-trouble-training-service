@@ -262,3 +262,29 @@
 - DB 결정:
   - TutorMessage에는 기존대로 최종 message만 저장하며 AI-11에서는 migration을 추가하지 않음
 - 후속: AI-12 prompt injection과 redaction
+
+## AI-12 prompt injection과 redaction
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-11 PR #68 dev 머지와 TutorResult fallback 계약 확인
+- 변경:
+  - user question, observations, runtime logs, recent commands, retrieved docs를 각각 untrusted data 경계로 분리
+  - raw 사용자 질문을 OpenAI user message로 중복 전송하던 경로 제거
+  - Bearer/provider token, password/secret/API key, Kubernetes Secret data, 환경변수 재귀 redaction 추가
+  - 모델 응답에도 동일 redaction을 적용해 출력 단계의 secret 반복 노출 차단
+  - question 2,000자, observations 8,000자, logs 4,000자, commands 3,000자, docs 8,000자 제한
+  - 전체 prompt를 약 9,000 token 상당의 36,000자 이내로 제한하고 observations를 문서·로그보다 우선 보존
+  - prompt 전체를 production log에 기록하는 코드가 없음을 확인
+- 보안 평가:
+  - `evals/prompt_injection_cases.jsonl`에 한국어/영문 prompt 탈취, role 변경, secret 출력 요청 등 20개 추가
+  - 20개 adversarial case에서 입력 secret 노출 0건
+  - 모델 출력 secret 재노출 방지와 raw question 중복 전송 방지 검증
+  - 장문 로그·문서가 truncate되어도 핵심 observation summary 유지 검증
+- 검증:
+  - AI pytest `105 passed, 3 deselected`
+  - backend pytest `364 passed`
+- 후속: AI-13 8주차 튜터 품질 게이트

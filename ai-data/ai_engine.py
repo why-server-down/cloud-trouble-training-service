@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 import openai
 
 from config import AISettings, config
+from context_safety import redact_text
 from rag_service import RAGService
 from prompt_engine import (
     SocraticPromptEngine,
@@ -166,14 +167,14 @@ class AITutorEngine:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": prompt},
-                    {"role": "user", "content": request.user_question}
+                    {"role": "user", "content": "구조화된 USER QUESTION 데이터에 대해 튜터 지침대로 답하세요."}
                 ],
                 max_tokens=max_tokens,
                 temperature=temperature,
                 timeout=self.settings.OPENAI_TIMEOUT
             )
             
-            message = response.choices[0].message.content
+            message = redact_text(response.choices[0].message.content or "")
             token_usage = {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
