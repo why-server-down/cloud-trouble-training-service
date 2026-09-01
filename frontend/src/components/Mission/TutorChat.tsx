@@ -301,6 +301,14 @@ const TutorChat: React.FC<TutorChatProps> = ({
         const exact = err.retryAfterSeconds !== null && err.retryAfterSeconds > 0
         setCooldown(exact ? (err.retryAfterSeconds as number) : RATE_LIMIT_FALLBACK_COOLDOWN_SEC)
         setIsCooldownExact(exact)
+        /*
+         * 백엔드 detail 에도 "N초 후" 가 들어 있는데 그것은 응답 시점의 고정값이다.
+         * 아래 카운트다운과 함께 띄우면 서로 다른 두 숫자가 동시에 보인다.
+         * 제한 안내는 카운트다운 한 곳에서만 낸다.
+         */
+        setError(null)
+        setRetryQuestion(question)
+        return
       }
 
       setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다.')
@@ -385,31 +393,45 @@ const TutorChat: React.FC<TutorChatProps> = ({
           )}
           <div ref={messagesEndRef} />
         </div>
+        {/*
+          * 상태 문구는 한 곳에서만 낸다. 429 는 아래 제한 안내가 담당하고,
+          * 그때 error 는 비워 둔다 — 백엔드 detail 의 고정 숫자와 카운트다운이
+          * 함께 보이면 사용자에게 서로 다른 두 숫자가 동시에 보인다.
+          */}
         {error && (
           <div className="chat-error" role="alert">
             <span>{error}</span>
-            {retryQuestion && (
-              <button
-                className="chat-retry-btn"
-                type="button"
-                disabled={isChatDisabled}
-                onClick={() => void ask(retryQuestion)}
-              >
-                {isRateLimited
-                  ? isCooldownExact
-                    ? `${cooldown}초 후 재시도`
-                    : '잠시 후 재시도'
-                  : '다시 질문'}
-              </button>
-            )}
           </div>
         )}
         {isRateLimited && (
-          <p className="chat-rate-limit-note" role="status" aria-live="polite">
-            {isCooldownExact
-              ? `질문 횟수 제한에 걸렸습니다. ${cooldown}초 후 다시 질문할 수 있습니다.`
-              : '질문 횟수 제한에 걸렸습니다. 잠시 후 다시 질문할 수 있습니다.'}
-          </p>
+          <div className="chat-rate-limit-note" role="status" aria-live="polite">
+            <span>
+              {isCooldownExact
+                ? `질문 횟수 제한에 걸렸습니다. ${cooldown}초 후 다시 질문할 수 있습니다.`
+                : '질문 횟수 제한에 걸렸습니다. 잠시 후 다시 질문할 수 있습니다.'}
+            </span>
+          </div>
+        )}
+        {/*
+          * 실패한 질문이 남아 있는 동안은 재전송 버튼을 계속 둔다.
+          * 제한 중에는 잠기고, 제한이 풀리면 그대로 다시 보낼 수 있다 —
+          * 사용자가 질문을 다시 타이핑하게 만들지 않는다 (FE-11).
+          */}
+        {retryQuestion && (
+          <div className="chat-retry-bar">
+            <button
+              className="chat-retry-btn"
+              type="button"
+              disabled={isChatDisabled}
+              onClick={() => void ask(retryQuestion)}
+            >
+              {isRateLimited
+                ? isCooldownExact
+                  ? `${cooldown}초 후 재시도`
+                  : '잠시 후 재시도'
+                : '다시 질문'}
+            </button>
+          </div>
         )}
         <form className="chat-form" onSubmit={submitQuestion}>
           {/* label 이 없으면 스크린리더가 이 입력을 읽지 못한다 (FE-11 인수 조건). */}

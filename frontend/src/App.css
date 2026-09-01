@@ -504,10 +504,15 @@
   flex: 1;
 }
 
-/* 관측 대시보드가 없는 환경의 안내 자리 (FE-08). iframe 자리를 그대로 채운다. */
+/*
+ * 관측 대시보드가 없는 환경의 안내 자리 (FE-08).
+ * 세로 중앙에 두면 위아래 여백이 커서 "로딩 중"처럼 읽힌다 (라이브 확인).
+ * 패널 위쪽에 붙여 "이 패널에 대한 설명"으로 읽히게 한다.
+ */
 .grafana-frame-wrap.grafana-frame-empty {
   display: grid;
-  place-items: center;
+  align-content: start;
+  justify-items: stretch;
   padding: 1.25rem;
   background: #111;
 }
