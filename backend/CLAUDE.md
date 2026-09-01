@@ -940,10 +940,59 @@ uvicorn app.main:app --reload --port 8000
 ### 테스트
 ```bash
 cd backend && source venv/bin/activate
-python -m pytest -q          # 전체
-python -m pytest -q -rs      # skip된 테스트까지 확인
+python -m pytest -q                      # 유닛 (클러스터 불필요, CI가 도는 것)
+python -m pytest -q -rs                  # skip된 테스트까지 확인
+python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 ```
-설정은 `backend/pytest.ini` (`testpaths = tests`, `asyncio_mode = strict`).
+설정은 `backend/pytest.ini` (`testpaths = tests`, `asyncio_mode = strict`,
+`addopts = -m "not integration" --strict-markers`).
+
+`integration` 마커가 붙은 테스트는 **기본 실행에서 빠진다.** 유닛 스위트는
+클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
+`-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
+
+### 테스트 확대 (BE-24)
+
+계획서가 요구한 12종을 채우면서 **가짜 객체가 가려주던 결함 하나를 실제로 잡았다.**
+
+**터미널 WebSocket이 실제 배포에서 끊기고 있었다.**
+`terminal_websocket`(엔드포인트)과 `handle_connection`(핸들러)이 각각
+`websocket.accept()`를 호출했다. Starlette는 accept된 연결에 다시 accept를 보내면
+`RuntimeError`를 낸다 — 즉 명령 하나 받기 전에 연결이 죽는다. 기존 WebSocket
+테스트는 전부 가짜 WebSocket을 썼고, 가짜의 `accept()`는 플래그만 세우므로
+ASGI 상태 기계를 위반해도 통과했다. accept는 엔드포인트가 소유하도록 정리했다.
+
+그래서 `tests/test_terminal_websocket_e2e.py`만 **ASGI 앱을 직접 호출한다.**
+Starlette의 `WebSocket` 객체가 그대로 쓰이므로 순서를 어기면 실제와 같이 실패한다.
+(설치된 httpx 버전에서 Starlette `TestClient`가 동작하지 않아 최소 드라이버를 직접 썼다.)
+
+**session ↔ sandbox 불일치를 핸들러에서 막는다.**
+명령은 `session.environment` 정책으로 검증하고 실행은 `sandbox`에서 한다. 둘이
+어긋나면 kubernetes 정책을 통과한 argv가 docker 샌드박스에서 실행된다. 엔드포인트가
+session에서 sandbox를 만들지만, 핸들러에서도 environment·namespace를 확인하고
+어긋나면 4010으로 닫는다(`reference_for`가 잘못된 값을 준 전례가 있다).
+
+**새 테스트 파일**
+- `test_environment_command_matrix.py` — 환경 × 명령 표. 한 환경에서 허용된 명령이
+  다른 환경으로 새지 않는 것, 셸 메타문자가 모든 환경에서 막히는 것,
+  확인(confirm)이 정책을 우회하지 못하는 것을 고정한다.
+- `test_attempt_concurrency.py` — 사용자당 진행 중 attempt 1개. 진 요청이
+  **자기가 주입한 장애를 되돌리는지**까지 본다(안 되돌리면 고아 장애가 남는다).
+- `test_inject_rollback.py` — 세 환경 주입기의 부분 실패 롤백. 롤백까지 실패해도
+  호출자에게는 success=False가 가야 한다.
+- `tests/integration/test_environment_loop.py` — 실제 클러스터에서
+  주입 → 검증(미해결) → 사용자 복구 명령 → 검증(해결) → 정리 한 바퀴.
+
+**통합 테스트에서 실측한 것 (2026-09-01, Docker Desktop k8s v1.34.3)**
+- 네임스페이스는 반드시 `user-{user_id}` 형식이어야 한다. 주입기·검증기가
+  namespace에서 user_id를 복원해 샌드박스 id를 다시 계산하기 때문에, 형식이 다르면
+  만든 샌드박스와 찾는 샌드박스가 어긋나 `pods ... not found`가 난다.
+- Linux 샌드박스에 ServiceAccount 토큰이 실제로 없다.
+- Kubernetes 샌드박스는 정책을 우회해 직접 exec해도 `kube-system`을 볼 수 없다(RBAC).
+- 4개 테스트 왕복 33초~2분(네임스페이스·Pod를 새로 만드는 만큼 편차가 크다).
+  네임스페이스는 **실행마다 새 id**로 만들고 모듈이 끝날 때
+  지운다. 고정 id를 쓰면 연속 실행 시 앞 실행이 지우는 중인(Terminating)
+  네임스페이스에 다시 만들려다 실패한다. 테스트 도중에 지우지 않는 것도 같은 이유다.
 
 ## 데이터베이스 마이그레이션
 

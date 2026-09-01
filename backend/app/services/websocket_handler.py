@@ -56,6 +56,26 @@ class WebSocketHandler:
     ):
         session_id = str(session.id)
 
+        # accept 는 호출자(엔드포인트)가 이미 했다. 여기서 다시 부르면
+        # ASGI 상태 기계가 accept 를 두 번 받아 RuntimeError 로 연결이 끊긴다.
+
+        # 실행 대상(sandbox)과 검증 기준(session)이 어긋나면 한 환경의 정책으로
+        # 통과한 명령이 다른 환경에서 실행된다. 엔드포인트가 session 에서
+        # sandbox 를 만들지만, 여기서도 한 번 더 확인한다.
+        if sandbox.environment != session.environment or sandbox.namespace != session.namespace:
+            logger.error(
+                "sandbox does not match session",
+                extra={
+                    "session_id": session_id,
+                    "session_environment": session.environment,
+                    "sandbox_environment": sandbox.environment,
+                },
+            )
+            await websocket.close(
+                code=CLOSE_ENVIRONMENT_UNAVAILABLE, reason="Sandbox does not match the session"
+            )
+            return
+
         # 같은 세션에 이미 연결이 있으면 이전 연결을 정리한다.
         previous = self.active_connections.get(session_id)
         if previous is not None:
@@ -64,7 +84,6 @@ class WebSocketHandler:
             except Exception:
                 pass
 
-        await websocket.accept()
         self.active_connections[session_id] = websocket
         self._locks.setdefault(session_id, asyncio.Lock())
 
