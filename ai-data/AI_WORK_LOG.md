@@ -392,3 +392,44 @@
   - AI pytest `142 passed, 3 deselected`
   - backend pytest `511 passed, 4 deselected`
 - 후속: AI-16 후보 scoring과 다양성
+
+## AI-16 후보 scoring과 다양성
+
+- 상태: 완료 — AI PR #79 + backend 경계 PR #80
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`, `feature/be-scenario-selection-contract`
+- 변경:
+  - 다양성·난이도·관측 신호·compiler·학습 근거 가산과 안전·중복·정답 노출 감점 적용
+  - schema/safety 거절 후보를 선택 전에 제외하고 후보별 reject reason과 score breakdown 보존
+  - seed/eval mode에서 동점 후보 결정적 선택 지원
+  - LLM 후보 전체 거절 시 fallback metric만 기록
+  - ScenarioService와 API randomize 계약을 안전 선택기에 연결
+- 검증:
+  - AI pytest `147 passed, 3 deselected`
+  - backend pytest `512 passed, 4 deselected`
+- 후속: AI-17 scenario eval
+
+## AI-17 scenario eval
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-14~16 및 backend 선택 계약 PR #80 dev 머지 확인
+- 변경:
+  - Kubernetes/Docker/Linux × 4개 난이도 × 5개, 총 60개 scenario eval dataset 추가
+  - schema/environment/allowed fault/compiler/observation/validation/leakage/unsafe 지표 추가
+  - 생성 latency와 token 사용량 보고 필드 추가
+  - 품질 목표를 종료 코드로 강제하는 offline runner와 회귀 테스트 추가
+- 평가 결과:
+  - 총 60개, Kubernetes/Docker/Linux 각 20개 및 환경×난이도 조합별 5개
+  - schema validity `100%`, environment match `100%`, compiler success `100%`
+  - observation availability `100%`, validation executability `100%`
+  - answer leakage `0건`, unsafe accepted `0건`
+  - offline mock token `0`, 생성 latency mean `0.06ms` 미만
+- 검증:
+  - scenario offline eval `60/60 passed`
+  - AI pytest `151 passed, 3 deselected`
+  - backend pytest `512 passed, 4 deselected`
+- 후속: AI-18 환경별 runtime observation 사용
