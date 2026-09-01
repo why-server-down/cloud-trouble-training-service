@@ -86,7 +86,12 @@ class TestNoHostShellExecution:
     """인수 조건: repository backend code 에서 host shell 실행 0건."""
 
     FORBIDDEN_CALLS = {"system", "popen", "create_subprocess_shell"}
-    FORBIDDEN_SUBPROCESS = {"run", "call", "check_call", "check_output", "Popen"}
+    # 모듈별로 금지 이름이 다르다. `asyncio.run` 은 이벤트 루프 진입점이지 호스트
+    # 프로세스 실행이 아니므로, 모듈을 구분하지 않으면 거짓 위반이 잡힌다.
+    FORBIDDEN_BY_MODULE = {
+        "subprocess": {"run", "call", "check_call", "check_output", "Popen"},
+        "asyncio": {"create_subprocess_shell", "create_subprocess_exec"},
+    }
 
     def _violations(self):
         found = []
@@ -107,13 +112,42 @@ class TestNoHostShellExecution:
                 name = getattr(func, "attr", None) or getattr(func, "id", None)
                 if name in self.FORBIDDEN_CALLS:
                     found.append(f"{path.name}:{node.lineno} {name}()")
-                if isinstance(func, ast.Attribute) and name in self.FORBIDDEN_SUBPROCESS:
+                if isinstance(func, ast.Attribute):
                     root = func.value
-                    if isinstance(root, ast.Name) and root.id in ("subprocess", "asyncio"):
-                        found.append(f"{path.name}:{node.lineno} {root.id}.{name}()")
+                    if isinstance(root, ast.Name):
+                        forbidden = self.FORBIDDEN_BY_MODULE.get(root.id, set())
+                        if name in forbidden:
+                            found.append(f"{path.name}:{node.lineno} {root.id}.{name}()")
         return found
 
     def test_no_shell_execution_in_backend_code(self):
+        assert self._violations() == []
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "subprocess.run(['ls'])",
+            "subprocess.Popen(['ls'])",
+            "asyncio.create_subprocess_shell('ls')",
+            "asyncio.create_subprocess_exec('ls')",
+            "os.system('ls')",
+            "run(['ls'], shell=True)",
+        ],
+    )
+    def test_guard_catches_real_violations(self, source, tmp_path, monkeypatch):
+        """가드가 좁아지다 아무것도 못 잡는 상태가 되지 않게 고정한다."""
+        (tmp_path / "sample.py").write_text(source)
+        import tests.test_terminal_security as module
+
+        monkeypatch.setattr(module, "APP_DIR", tmp_path)
+        assert self._violations() != []
+
+    def test_guard_allows_event_loop_entry(self, tmp_path, monkeypatch):
+        """`asyncio.run` 은 호스트 프로세스 실행이 아니다."""
+        (tmp_path / "sample.py").write_text("asyncio.run(main())")
+        import tests.test_terminal_security as module
+
+        monkeypatch.setattr(module, "APP_DIR", tmp_path)
         assert self._violations() == []
 
 

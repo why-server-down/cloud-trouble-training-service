@@ -25,6 +25,7 @@ from app.core.database import (
 )
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
 from app.services.reconciliation_service import reconcile_active_attempts
+from app.services.retention_service import purge_expired_tutor_messages
 from app.services.seed_data import seed_missions
 from app.services.qdrant_init import auto_ingest_if_empty
 
@@ -69,6 +70,14 @@ async def lifespan(app: FastAPI):
             await reconcile_active_attempts(db)
         except Exception:
             logger.exception("startup reconciliation failed")
+
+        # 보존 기간이 지난 튜터 대화를 지운다. 별도 스케줄러를 두지 않고 같은
+        # 기동 경로에 얹는다. 오래 떠 있는 배포에서는
+        # `python -m app.services.retention_service` 를 주기 작업으로 돌린다.
+        try:
+            await purge_expired_tutor_messages(db)
+        except Exception:
+            logger.exception("startup retention failed")
     await auto_ingest_if_empty()
     yield
 

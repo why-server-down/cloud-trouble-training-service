@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
     COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
 
+    # 보존 정책 (BE-29)
+    # 튜터 대화에는 사용자가 친 명령과 장애 상황이 그대로 남는다. 훈련이 끝난 뒤에도
+    # 무기한 보관할 이유가 없으므로 기간을 정해 지운다. 0 이하로 두면 정리하지 않는다.
+    TUTOR_MESSAGE_RETENTION_DAYS: int = 30
+    # 한 번에 지우는 행 수. 한 트랜잭션이 테이블을 오래 잡지 않게 나눠 지운다.
+    RETENTION_DELETE_BATCH: int = 1000
+
     # 샌드박스 (BE-04)
     # 이미지는 shell 을 포함해야 한다. toolbox Pod 가 /bin/sh 로 유지되기 때문이며,
     # distroless 계열(registry.k8s.io/kubectl 등)은 쓸 수 없다.

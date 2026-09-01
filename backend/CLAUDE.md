@@ -951,6 +951,46 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 튜터 대화 보존 정책 (BE-29)
+
+`models.py`의 `TODO(phase7)`을 해소했다. 튜터 대화에는 사용자가 친 명령과 장애
+상황이 그대로 남으므로 훈련이 끝난 뒤 무기한 보관하지 않는다.
+
+- 보존 기간은 `TUTOR_MESSAGE_RETENTION_DAYS`(기본 30일). **0 이하면 정리하지 않는다.**
+- **진행 중인 attempt의 대화는 기간이 지나도 지우지 않는다.** 훈련 도중 대화가
+  사라지면 튜터가 앞의 문맥을 잃는다.
+- `RETENTION_DELETE_BATCH`(기본 1000) 단위로 나눠 지운다. 한 트랜잭션이 테이블을
+  오래 잡으면 다른 요청이 밀린다. 배치 반복은 100회로 제한한다(시계 오류 등으로
+  끝나지 않는 상황에서 기동이 막히지 않게).
+- 삭제 건수만 `retention_deleted_total{table}`과 로그에 남긴다. **메시지 본문은
+  남기지 않는다** — 남기면 지운 의미가 없다.
+- 예외를 밖으로 던지지 않는다. 정리 실패가 기동이나 요청 처리를 막으면 안 된다.
+
+**별도 스케줄러를 만들지 않았다.** 서버 기동 시 BE-22의 reconciliation과 같은
+자리에서 한 번 돌고, 오래 떠 있는 배포에서는 주기 작업으로 부른다.
+
+```bash
+python -m app.services.retention_service     # EKS에서는 CronJob으로 (BE-25)
+```
+
+**실측 (2026-09-01, 임시 DB `be29_check`)**
+- 40일 지난 completed attempt의 메시지 → 삭제
+- 40일 지난 **in_progress** attempt의 메시지 → 남음
+- 3일 된 메시지 → 남음
+- 두 번째 실행 `deleted: 0` (멱등)
+- `alembic upgrade head`와 `create_all` 두 경로 모두에서 인덱스가 생긴다
+
+**기존 DB 영향**: 기동 차단 판정(`schema_needs_migration`)은 `0002`가 넣은 컬럼만
+본다. `0003`에 머문 DB도 그대로 뜨고, 인덱스만 없는 상태가 된다(성능 문제일 뿐
+기능은 동작). 그래도 `alembic upgrade head`를 권한다.
+
+**같이 고친 것 — host shell 가드의 거짓 양성**
+`test_no_shell_execution_in_backend_code`가 모듈을 구분하지 않고 `run`을 금지해
+`asyncio.run()`을 위반으로 잡았다. `asyncio.run`은 이벤트 루프 진입점이지 호스트
+프로세스 실행이 아니다. 모듈별 금지 목록으로 나누고(`subprocess`는 run/Popen 등,
+`asyncio`는 `create_subprocess_*`), **가드가 실제 위반을 여전히 잡는지 확인하는
+테스트를 같이 넣었다.** 가드가 좁아지다 아무것도 못 잡는 상태가 되면 더 위험하다.
+
 ### 테스트 확대 (BE-24)
 
 계획서가 요구한 12종을 채우면서 **가짜 객체가 가려주던 결함 하나를 실제로 잡았다.**
@@ -1016,6 +1056,7 @@ alembic current                               # 현재 리비전 확인
 | `0001` | baseline 스키마. 빈 DB면 전체 생성, Alembic 이전에 만들어진 기존 DB면 예전 `ensure_schema_compatibility()`가 하던 idempotent 보정을 수행해 같은 상태로 수렴시킨다 (`alembic stamp` 불필요) |
 | `0002` | `mission_attempts`에 `environment`·`chaos_id`·`sandbox_id` 추가 + backfill, environment/attempt_type/FK조합 CHECK, 사용자당 `in_progress` partial unique index |
 | `0003` | `missions`에 `(environment, level)` unique 제약. 시드의 stable key를 DB로 못 박는다. 중복 행이 있으면 정리 안내와 함께 실패한다 |
+| `0004` | `tutor_messages.created_at` 인덱스. 보존 정책(BE-29)이 훑는 컬럼이다. 이미 있으면 만들지 않는다 |
 
 > `0001`은 테이블이 **전부 있거나 전부 없는** DB를 가정한다. 일부 테이블만 있는
 > DB는 대상이 아니므로 재생성한다.
