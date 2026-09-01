@@ -6,11 +6,16 @@ AI 시나리오 생성 에이전트.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from copy import deepcopy
 from dataclasses import dataclass
 
 from app.core.config import settings
+from app.ai.observability import record_ai_call
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -852,10 +857,12 @@ class OpenAIScenarioAgent:
         os.path.dirname(__file__), "../../../ai-data/prompts/scenario_gen.md"
     )
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str | None = None):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str | None = None,
+                 provider: str = "openai"):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
+        self._provider = provider
         self._system_prompt = self._load_system_prompt()
 
     def _load_system_prompt(self) -> str:
@@ -866,6 +873,7 @@ class OpenAIScenarioAgent:
             return "You are a multi-environment chaos scenario generator. Return JSON scenario candidates."
 
     def generate(self, gen_input: ScenarioGenerationInput) -> list[ScenarioCandidate]:
+        started = time.perf_counter()
         try:
             import openai
             client_kwargs: dict = {"api_key": self._api_key}
@@ -888,10 +896,19 @@ class OpenAIScenarioAgent:
             )
 
             raw = response.choices[0].message.content
+            record_ai_call(
+                provider=self._provider, purpose="scenario", result="success",
+                duration_seconds=time.perf_counter() - started,
+                token_usage=getattr(response, "usage", None),
+            )
             return self._parse_response(raw, gen_input)
 
-        except Exception as e:
-            print(f"[ScenarioAgent] OpenAI 호출 실패, mock fallback: {e}")
+        except Exception:
+            record_ai_call(
+                provider=self._provider, purpose="scenario", result="fallback",
+                duration_seconds=time.perf_counter() - started,
+            )
+            logger.exception("scenario LLM call failed; using environment fixture fallback")
             return MockScenarioAgent().generate(gen_input)
 
     def _build_user_message(self, gen_input: ScenarioGenerationInput) -> str:
@@ -912,8 +929,8 @@ class OpenAIScenarioAgent:
     ) -> list[ScenarioCandidate]:
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            print(f"[ScenarioAgent] JSON 파싱 실패: {e}")
+        except json.JSONDecodeError:
+            logger.warning("scenario LLM response JSON parsing failed; using fixture fallback")
             return MockScenarioAgent().generate(gen_input)
 
         # {"scenarios": [...]} 또는 배열 직접 처리
@@ -945,7 +962,7 @@ class OpenAIScenarioAgent:
             candidates.append(ScenarioCandidate(scenario=s, score=score))
 
         if not candidates:
-            print("[ScenarioAgent] 유효한 후보 없음, mock fallback")
+            logger.warning("scenario LLM returned no valid candidates; using fixture fallback")
             return MockScenarioAgent().generate(gen_input)
 
         return candidates
@@ -957,10 +974,12 @@ def get_scenario_agent() -> MockScenarioAgent | OpenAIScenarioAgent:
             api_key=settings.GEMINI_API_KEY,
             model=settings.GEMINI_MODEL,
             base_url=_GEMINI_BASE_URL,
+            provider="gemini",
         )
     if settings.AI_BACKEND == "openai" and settings.OPENAI_API_KEY:
         return OpenAIScenarioAgent(
             api_key=settings.OPENAI_API_KEY,
             model=settings.SCENARIO_MODEL,
+            provider="openai",
         )
     return MockScenarioAgent()
