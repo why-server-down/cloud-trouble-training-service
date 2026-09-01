@@ -664,6 +664,15 @@ docker volume inspect
 
 ### FE-08 Docker 관측 패널
 
+> **범위 재정의 (2026-09-01, 구현 시점 판정).**
+> `infra/monitoring/grafana/dashboards/` 에 존재하는 대시보드는
+> `k8s-survival-overview` 하나뿐이다(백엔드 소유 경로). Docker dashboard UID 와
+> readiness query 가 존재하지 않으므로 아래 지시를 그대로 구현하면 읽을 값이 없는
+> 코드가 되고 사용자에게는 Grafana 404 가 보인다.
+> 그래서 **"Docker 대시보드 연결"이 아니라 "관측 패널의 환경 일반화 + 대시보드가
+> 없는 환경의 명시적 안내"** 로 범위를 잡았다. 대시보드가 추가되면
+> `ENVIRONMENT_OBSERVABILITY` 표만 채우면 화면이 열린다.
+
 수정 파일:
 
 - `src/config/environments.ts`
@@ -703,27 +712,42 @@ docker volume inspect
 - config에 Linux label, prompt, command suggestions, Grafana UID, readiness query를 채운다.
 - 기존 공용 MissionList, Terminal, TutorChat, MissionStatus를 그대로 사용한다.
 - Linux 명령 출력은 ANSI escape와 긴 로그가 올 수 있으므로 xterm 렌더링을 유지한다.
-- `journalctl`, `dmesg`처럼 출력이 긴 명령은 서버가 잘라서 보내거나 streaming하는 계약을 확인한다. 프론트가 전체 로그를 별도 state에 복제하지 않는다.
+- 출력이 긴 명령은 서버가 잘라서 보내거나 streaming하는 계약을 확인한다. 프론트가 전체 로그를 별도 state에 복제하지 않는다.
 - 위험 명령 차단 메시지는 서버의 detail/code를 그대로 사용자 친화적으로 표시한다.
 
 Linux 자동완성 최소 목록:
 
+> **정정 (2026-09-01, FE-09 구현 시점).** 원래 목록에 있던 `systemctl status` ·
+> `journalctl -u` · `dmesg` 는 **제외한다.** 백엔드 `LinuxPolicy`(BE-16 실측)가
+> 셋 다 배제했다 — 샌드박스 이미지에 systemd 가 없고 커널 링 버퍼 접근도 막혀 있어
+> 어떤 이미지에서도 동작하지 않는다. 제안하면 사용자가 그것을 정답으로 착각한다.
+> 자동완성의 원본은 이 문서가 아니라
+> `backend/app/services/command_validator.py` 의 `LinuxPolicy` 다.
+
 ```text
 ps aux
-top
+pstree -p
+top -b -n 1
 free -m
 df -h
-du -sh
-systemctl status
-journalctl -u
-dmesg
+du -sh /tmp/afterfail
 ss -lntp
+cat /proc/loadavg
+ls -al /tmp/afterfail
+pkill -f afterfail-
 ```
+
+경로 인자를 받는 명령(`cat` `head` `tail` `wc` `ls` `stat` `find` `rm` `truncate`)에는
+값이 분리되는 플래그(`-n 50` 처럼)를 붙이지 않는다. `LinuxPolicy._check_paths` 가
+플래그 값을 경로로 오인해 거절한다.
 
 인수 조건:
 
 - Linux 미션에서 Docker/kubectl 명령 가이드가 섞이지 않는다.
-- OOM, disk I/O, zombie 시나리오의 상태·점수·힌트가 공용 UI에 정상 반영된다.
+- ~~OOM, disk I/O, zombie~~ → **disk pressure, CPU saturation, process flood**
+  시나리오의 상태·점수·힌트가 공용 UI에 정상 반영된다.
+  (정정: `linux_chaos_injector` 가 구현한 유형이 이 셋이다. zombie/orphan 은
+  BE-17 이 실측 후 제외했고 OOM 은 호스트 OOM-Killer 유발을 피하려 넣지 않았다.)
 - 환경별 코드 분기가 config 조회 외에 MissionList/Terminal에 반복되지 않는다.
 
 ### FE-10 8주차 범위 게이트

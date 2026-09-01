@@ -39,6 +39,7 @@ const K8S: EnvironmentItem = { id: 'kubernetes', status: 'available', capabiliti
 const DOCKER_AVAILABLE: EnvironmentItem = { id: 'docker', status: 'available', capabilities: [] }
 const DOCKER_PREPARING: EnvironmentItem = { id: 'docker', status: 'preparing', capabilities: [] }
 const LINUX_PREPARING: EnvironmentItem = { id: 'linux', status: 'preparing', capabilities: [] }
+const LINUX_AVAILABLE: EnvironmentItem = { id: 'linux', status: 'available', capabilities: [] }
 
 const activeMissionStatus = (environment: 'kubernetes' | 'docker'): MissionStatusResponse => ({
   attempt: {
@@ -463,5 +464,51 @@ describe('환경별 관측 패널 (FE-08)', () => {
     await screen.findByRole('tablist')
     expect(screen.getByText('PROFILE / LEARNING DASHBOARD')).toBeTruthy()
     expect(probe).not.toHaveBeenCalled()
+  })
+})
+
+describe('환경별 field guide (FE-09)', () => {
+  const openTerminalTab = async () => {
+    await screen.findByRole('tablist')
+    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+  }
+
+  it('Linux 탭에서는 kubectl / docker 가이드가 섞이지 않는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE, LINUX_AVAILABLE])
+    localStorage.setItem('afterfail:environment:v1:user-1', 'linux')
+    render(<App />)
+
+    await openTerminalTab()
+    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const commands = guide.parentElement as HTMLElement
+
+    expect(commands.textContent).toContain('ps aux')
+    expect(commands.textContent).not.toContain('kubectl')
+    expect(commands.textContent).not.toContain('docker ')
+  })
+
+  it('Docker 탭에서는 docker 조사 명령을 안내한다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    localStorage.setItem('afterfail:environment:v1:user-1', 'docker')
+    render(<App />)
+
+    await openTerminalTab()
+    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const commands = guide.parentElement as HTMLElement
+
+    expect(commands.textContent).toContain('docker ps -a')
+    expect(commands.textContent).not.toContain('kubectl')
+  })
+
+  it('Kubernetes 탭은 기존 kubectl 안내를 유지한다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    render(<App />)
+
+    await openTerminalTab()
+    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const commands = guide.parentElement as HTMLElement
+
+    expect(commands.textContent).toContain('kubectl get pods')
+    expect(commands.textContent).not.toContain('docker ')
   })
 })

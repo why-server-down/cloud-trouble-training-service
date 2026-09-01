@@ -9,6 +9,7 @@ import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
 import {
   getEnvironmentMeta,
+  getEnvironmentTerminal,
   getGrafanaDataProbeUrl,
   getGrafanaUrl,
   isSelectableStatus,
@@ -168,6 +169,17 @@ function App() {
   const hasObservability = grafanaUrl !== null
   /** 관측 패널 문구에 쓰는 환경 이름. iframe title 에도 넣어 스크린리더가 구분할 수 있게 한다. */
   const observabilityLabel = sessionEnvironment ? getEnvironmentMeta(sessionEnvironment).label : ''
+  /*
+   * 미션 시작 전 field guide 는 선택된 환경 기준으로 그린다 (FE-09).
+   * 예전에는 kubectl 명령이 하드코딩돼 Docker / Linux 탭에서도 그대로 보였다.
+   */
+  const fieldGuideTerminal = activeEnvironment ? getEnvironmentTerminal(activeEnvironment) : null
+  /** 실행 파일이 고정된 환경만 이름을 문장에 넣는다. Linux 는 단일 바이너리가 없다. */
+  const fieldGuideLabel = fieldGuideTerminal?.binary ?? null
+  const fieldGuideStarters = fieldGuideTerminal?.investigationStarters ?? []
+  const fieldGuideInvestigationHint = activeEnvironment
+    ? getEnvironmentMeta(activeEnvironment).investigationHint
+    : '현재 상태와 최근 변화를 차례로 확인합니다.'
   const isGrafanaLoading =
     hasActiveAttempt && hasObservability && (!isGrafanaFrameReady || !isGrafanaDataReady)
   const activeEnvironmentItem = environments?.find((item) => item.id === activeEnvironment) ?? null
@@ -542,7 +554,12 @@ function App() {
                           <div className="tutorial-content">
                             <span className="tutorial-kicker">AfterFail</span>
                             <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
-                            <p>왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다. 오른쪽 대시보드와 Kubernetes 명령을 함께 사용해 원인을 찾아보세요.</p>
+                            <p>
+                              왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다.
+                              {fieldGuideLabel
+                                ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
+                                : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
+                            </p>
                             <div className="tutorial-steps">
                               <article>
                                 <strong>01 / 미션 선택</strong>
@@ -550,7 +567,7 @@ function App() {
                               </article>
                               <article>
                                 <strong>02 / 상태 조사</strong>
-                                <span>Pod, Deployment, Service 상태와 이벤트를 차례로 확인합니다.</span>
+                                <span>{fieldGuideInvestigationHint}</span>
                               </article>
                               <article>
                                 <strong>03 / 복구 및 검증</strong>
@@ -559,10 +576,9 @@ function App() {
                             </div>
                             <div className="tutorial-commands">
                               <span>INVESTIGATION STARTERS</span>
-                              <code>kubectl get pods</code>
-                              <code>kubectl get deployments</code>
-                              <code>kubectl get services</code>
-                              <code>kubectl get events --sort-by=.metadata.creationTimestamp</code>
+                              {fieldGuideStarters.map((command) => (
+                                <code key={command}>{command}</code>
+                              ))}
                             </div>
                             <EnvironmentRoadmap items={environments} />
                           </div>

@@ -26,15 +26,28 @@ export const getTerminalPrompt = (environment: EnvironmentId, namespace: string 
  * 예전에는 어느 환경이든 "Only kubectl commands are allowed" 를 냈다.
  */
 export const getOfflineCommandNotice = (environment: EnvironmentId, command: string): string => {
-  const { binary } = getEnvironmentTerminal(environment)
+  const { binary, allowedCommands } = getEnvironmentTerminal(environment)
   const trimmed = command.trim()
+  const notConnected = '터미널이 아직 연결되지 않았습니다. 연결된 뒤 다시 실행해 주세요.'
 
-  // 명령 정책이 아직 없는 환경에서는 무엇이 허용되는지 단정하지 않는다.
-  if (!binary) return '터미널이 아직 연결되지 않았습니다. 연결된 뒤 다시 실행해 주세요.'
-
-  if (trimmed === binary || trimmed.startsWith(`${binary} `)) {
-    return '터미널이 아직 연결되지 않았습니다. 연결된 뒤 다시 실행해 주세요.'
+  // 실행 파일이 고정된 환경 (kubectl / docker).
+  if (binary) {
+    if (trimmed === binary || trimmed.startsWith(`${binary} `)) return notConnected
+    return `이 환경에서는 ${binary} 명령만 실행할 수 있습니다.`
   }
 
-  return `이 환경에서는 ${binary} 명령만 실행할 수 있습니다.`
+  /*
+   * 명령 자체가 argv[0] 인 환경 (Linux, FE-09).
+   * 최종 판정은 서버가 한다 — 프론트는 허용 목록에 아예 없는 명령만 미리 걸러
+   * 왜 실행되지 않았는지 구분해 준다. 목록에 있으면 연결 문제로 안내한다.
+   */
+  if (allowedCommands) {
+    if (!trimmed) return notConnected
+    const head = trimmed.split(/\s+/)[0]
+    if (allowedCommands.includes(head)) return notConnected
+    return `'${head}' 는 이 환경에서 실행할 수 없습니다. Tab 으로 사용 가능한 명령을 확인해 보세요.`
+  }
+
+  // 명령 정책을 모르는 환경에서는 무엇이 허용되는지 단정하지 않는다.
+  return notConnected
 }
