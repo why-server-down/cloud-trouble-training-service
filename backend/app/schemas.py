@@ -228,7 +228,9 @@ class ValidationJudgment(BaseModel):
     resolved: bool
     reason: str
     confidence: float = 0.0
+    evidence: list[str] = []
     advisory_only: bool = True
+    error_code: Optional[str] = None
 
 
 class UnlockStatusResponse(BaseModel):

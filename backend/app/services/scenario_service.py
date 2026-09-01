@@ -2,6 +2,7 @@
 ScenarioService - AI 시나리오 생성/시작/완료 오케스트레이터.
 기존 MissionService와 분리: /api/scenarios/* 전용.
 """
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -22,6 +23,9 @@ from app.services.scoring_service import ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
 from app.core.environments import DEFAULT_ENVIRONMENT
+
+logger = logging.getLogger(__name__)
+
 
 class ScenarioService:
 
@@ -346,18 +350,40 @@ class ScenarioService:
         # 점수를 승인하는 유일한 기준은 mechanical validation 이다(BE-20).
         ai_judgment = None
         if not resolved and settings.VALIDATION_BACKEND != "mock" and settings.AI_BACKEND in ("openai", "gemini"):
-            from app.ai.validation_agent import get_validation_agent
-            agent = get_validation_agent()
-            ai_judgment = await agent.judge(
-                scenario_context={
-                    "title": scenario.title,
-                    "fault_type": scenario.fault_type,
-                    "student_brief": scenario.student_brief,
-                    "internal_summary": scenario.internal_summary,
-                    "namespace": namespace,
-                },
-                namespace=namespace,
-            )
+            try:
+                from app.ai.validation_agent import get_validation_agent
+                from app.services.runtime_context import get_runtime_context_collector
+                from app.services.sandbox_service import get_sandbox_service
+
+                sandbox = get_sandbox_service().reference_for(
+                    user_id=user_id,
+                    namespace=namespace,
+                    environment=scenario.environment,
+                )
+                runtime_context = await get_runtime_context_collector().collect(
+                    user_id=user_id,
+                    namespace=namespace,
+                    db=db,
+                    scenario_title=scenario.title,
+                    difficulty=scenario.difficulty,
+                    scenario_id=scenario.id,
+                    environment=scenario.environment,
+                    sandbox=sandbox,
+                )
+                agent = get_validation_agent()
+                ai_judgment = await agent.judge(
+                    scenario_context={
+                        "title": scenario.title,
+                        "fault_type": scenario.fault_type,
+                        "scenario_json": scenario.scenario_json,
+                    },
+                    namespace=namespace,
+                    runtime_context=runtime_context,
+                    environment=scenario.environment,
+                )
+            except Exception:
+                # advisory 계층의 실패가 mechanical 검증 결과나 점수 처리를 막지 않는다.
+                logger.exception("validation advisory collection failed")
 
         attempt.last_validation_result = {
             "resolved": resolved,
@@ -370,7 +396,9 @@ class ScenarioService:
                 "resolved": ai_judgment.resolved,
                 "reason": ai_judgment.reason,
                 "confidence": ai_judgment.confidence,
+                "evidence": ai_judgment.evidence or [],
                 "advisory_only": True,
+                "error_code": ai_judgment.error_code,
             } if ai_judgment else None,
         }
 
