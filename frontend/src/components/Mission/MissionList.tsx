@@ -620,7 +620,8 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
             <div className="ai-lock-notice">
               <span className="ai-lock-icon">🔒</span>
               <span>
-                AI 문제 모드는 계정 단위로 열립니다. 기본 미션을 모두 완료하면 모든 환경에서
+                AI 문제 모드는 계정 단위로 열립니다. Kubernetes · Docker · Linux 를 합친
+                기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
                 활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
               </span>
             </div>

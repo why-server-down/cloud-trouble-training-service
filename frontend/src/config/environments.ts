@@ -104,6 +104,88 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
 export const getEnvironmentTerminal = (environment: EnvironmentId): EnvironmentTerminalMeta =>
   ENVIRONMENT_TERMINAL[environment]
 
+/**
+ * 환경별 관측(Grafana / Prometheus) 설정 (FE-08).
+ *
+ * 대시보드 정의의 원본은 `infra/monitoring/grafana/dashboards/` 다(백엔드 소유 경로).
+ * 지금 존재하는 것은 `k8s-survival-overview` 하나뿐이므로 Docker / Linux 는
+ * `dashboard: null` 이다 — 없는 UID 를 추측해 iframe 을 띄우면 사용자에게
+ * Grafana 404 가 보인다. 대시보드가 추가되면 이 표만 채우면 화면이 열린다.
+ */
+export interface EnvironmentObservabilityMeta {
+  /** Grafana 대시보드. 이 환경 전용 대시보드가 없으면 null. */
+  dashboard: {
+    uid: string
+    /** URL 경로의 slug. Grafana 는 slug 가 틀려도 열어주지만 링크 가독성을 위해 맞춘다. */
+    slug: string
+    /** scope 값을 넘길 대시보드 변수 이름. */
+    scopeVar: string
+  } | null
+  /**
+   * readiness 판정에 쓸 PromQL. `{scope}` 자리에 escape 된 scope 가 들어간다.
+   * 대시보드가 없는 환경은 null 이다 — 없는 화면의 준비 상태를 물을 이유가 없다.
+   */
+  readinessQueryTemplate: string | null
+}
+
+export const ENVIRONMENT_OBSERVABILITY: Record<EnvironmentId, EnvironmentObservabilityMeta> = {
+  kubernetes: {
+    dashboard: {
+      uid: 'k8s-survival-overview',
+      slug: 'afterfail-incident-triage',
+      scopeVar: 'namespace',
+    },
+    readinessQueryTemplate: 'sum(kube_pod_status_phase{namespace=~"{scope}"})',
+  },
+  // BE 소유의 infra/monitoring 에 Docker 컨테이너 메트릭 대시보드가 아직 없다.
+  docker: { dashboard: null, readinessQueryTemplate: null },
+  // Linux 샌드박스 메트릭 대시보드도 마찬가지다.
+  linux: { dashboard: null, readinessQueryTemplate: null },
+}
+
+export const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
+export const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
+
+/** PromQL 라벨 값 안의 특수문자. 이걸 빼먹으면 namespace 에 `"` 가 있을 때 쿼리가 깨진다. */
+export const escapePrometheusLabelValue = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+export const hasObservabilityDashboard = (environment: EnvironmentId | null): boolean =>
+  Boolean(environment && ENVIRONMENT_OBSERVABILITY[environment].dashboard)
+
+/**
+ * 관측 대시보드 URL. 대시보드가 없는 환경은 null 을 준다.
+ * 호출자는 null 을 "관측 없음"으로 표시해야 한다 — K8s 대시보드로 대체하지 않는다.
+ */
+export const getGrafanaUrl = (
+  environment: EnvironmentId | null,
+  scope: string | null,
+): string | null => {
+  if (!environment) return null
+  const { dashboard } = ENVIRONMENT_OBSERVABILITY[environment]
+  if (!dashboard) return null
+  return (
+    `${GRAFANA_BASE_URL}/d/${dashboard.uid}/${dashboard.slug}` +
+    `?orgId=1&kiosk&refresh=5s` +
+    `&var-${dashboard.scopeVar}=${encodeURIComponent(scope || '.*')}`
+  )
+}
+
+/** readiness probe URL. 대시보드가 없으면 null — polling 자체를 하지 않게 한다. */
+export const getGrafanaDataProbeUrl = (
+  environment: EnvironmentId | null,
+  scope: string | null,
+): string | null => {
+  if (!environment) return null
+  const { readinessQueryTemplate } = ENVIRONMENT_OBSERVABILITY[environment]
+  if (!readinessQueryTemplate) return null
+  const query = readinessQueryTemplate.replace(
+    '{scope}',
+    escapePrometheusLabelValue(scope || '.*'),
+  )
+  return `${PROMETHEUS_BASE_URL}/api/v1/query?query=${encodeURIComponent(query)}`
+}
+
 /** 탭 노출 순서. 백엔드 SUPPORTED_ENVIRONMENTS 순서를 그대로 따른다. */
 export const ENVIRONMENT_ORDER: readonly EnvironmentId[] = ENVIRONMENT_IDS
 

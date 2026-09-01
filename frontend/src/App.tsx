@@ -7,7 +7,12 @@ import ProfileDetails from './components/Profile/ProfileDetails'
 import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
 import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
-import { getEnvironmentMeta, isSelectableStatus } from './config/environments'
+import {
+  getEnvironmentMeta,
+  getGrafanaDataProbeUrl,
+  getGrafanaUrl,
+  isSelectableStatus,
+} from './config/environments'
 import {
   ActiveAttemptSummary,
   DEFAULT_ENVIRONMENT,
@@ -30,9 +35,6 @@ type WorkspaceTab = 'missions' | 'terminal'
 /** 사용자별 마지막 선택 환경. 계획서에 정해진 키를 그대로 쓴다. */
 const ENVIRONMENT_STORAGE_KEY = 'afterfail:environment:v1'
 
-const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
-const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
-const DASHBOARD_UID = 'k8s-survival-overview'
 const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
 const GRAFANA_DATA_FALLBACK_FAILURES = 3
 const INTRO_TOUR_STORAGE_KEY = 'afterfail:introTour:v1'
@@ -101,9 +103,6 @@ const MISSION_TOUR_STEPS: TourStep[] = [
   },
 ]
 
-const getGrafanaUrl = (namespace: string | null) =>
-  `${GRAFANA_BASE_URL}/d/${DASHBOARD_UID}/afterfail-incident-triage?orgId=1&kiosk&refresh=5s&var-namespace=${encodeURIComponent(namespace || '.*')}`
-
 type PrometheusQueryResponse = {
   status: string
   data?: {
@@ -113,17 +112,8 @@ type PrometheusQueryResponse = {
   }
 }
 
-const escapePrometheusLabelValue = (value: string) =>
-  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-
 const hasPrometheusResponse = (payload: PrometheusQueryResponse) =>
   payload.status === 'success' && Array.isArray(payload.data?.result)
-
-const getGrafanaDataProbeUrl = (namespace: string | null) => {
-  const namespaceMatcher = escapePrometheusLabelValue(namespace || '.*')
-  const query = `sum(kube_pod_status_phase{namespace=~"${namespaceMatcher}"})`
-  return `${PROMETHEUS_BASE_URL}/api/v1/query?query=${encodeURIComponent(query)}`
-}
 
 function App() {
   const [token, setToken] = useState<string | null>(null)
@@ -146,6 +136,11 @@ function App() {
   const [activeAttempt, setActiveAttempt] = useState<ActiveAttemptSummary | null>(null)
   const [isGrafanaFrameReady, setIsGrafanaFrameReady] = useState(false)
   const [isGrafanaDataReady, setIsGrafanaDataReady] = useState(false)
+  /**
+   * Prometheus probe 가 계속 실패해 iframe load 만으로 ready 처리한 경우 (FE-08).
+   * 화면은 열어주되 "지표가 실제로 들어오는지 확인하지 못했다"는 사실을 숨기지 않는다.
+   */
+  const [isObservabilityDegraded, setIsObservabilityDegraded] = useState(false)
   const [activeTour, setActiveTour] = useState<'intro' | 'mission' | null>(null)
   const [hasSeenIntroTour, setHasSeenIntroTour] = useState(() => localStorage.getItem(INTRO_TOUR_STORAGE_KEY) === 'done')
   const [hasSeenMissionTour, setHasSeenMissionTour] = useState(() => localStorage.getItem(MISSION_TOUR_STORAGE_KEY) === 'done')
@@ -163,8 +158,18 @@ function App() {
   /** namespace 는 세션 응답에서만 온다. 세션을 지연 생성하므로 그 전에는 알 수 없다. */
   const namespace = activeSession?.namespace ?? null
   const accountStorageScope = profile?.id ?? null
-  const grafanaUrl = getGrafanaUrl(namespace)
-  const isGrafanaLoading = hasActiveAttempt && (!isGrafanaFrameReady || !isGrafanaDataReady)
+  /**
+   * 관측 URL 은 활성 attempt 의 환경으로 만든다 (FE-08).
+   * 대시보드가 없는 환경은 null 이 오고, 그때는 iframe 대신 안내를 띄운다 —
+   * K8s 대시보드로 대체하면 사용자는 남의 환경 지표를 자기 것으로 읽는다.
+   */
+  const grafanaUrl = getGrafanaUrl(sessionEnvironment, namespace)
+  const grafanaProbeUrl = getGrafanaDataProbeUrl(sessionEnvironment, namespace)
+  const hasObservability = grafanaUrl !== null
+  /** 관측 패널 문구에 쓰는 환경 이름. iframe title 에도 넣어 스크린리더가 구분할 수 있게 한다. */
+  const observabilityLabel = sessionEnvironment ? getEnvironmentMeta(sessionEnvironment).label : ''
+  const isGrafanaLoading =
+    hasActiveAttempt && hasObservability && (!isGrafanaFrameReady || !isGrafanaDataReady)
   const activeEnvironmentItem = environments?.find((item) => item.id === activeEnvironment) ?? null
   const isActiveEnvironmentDegraded = activeEnvironmentItem?.status === 'degraded'
   /**
@@ -317,24 +322,31 @@ function App() {
   useEffect(() => {
     setIsGrafanaFrameReady(false)
     setIsGrafanaDataReady(false)
+    setIsObservabilityDegraded(false)
   }, [grafanaUrl, hasActiveAttempt])
 
   useEffect(() => {
-    if (!hasActiveAttempt) return
+    /*
+     * 미션이 없거나 이 환경에 대시보드가 없으면 probe 자체를 시작하지 않는다 (FE-08).
+     * 예전에는 미션 종료 후에도 K8s 쿼리를 계속 던졌고, 대시보드가 없는 환경에서는
+     * 아무도 읽지 않는 실패 로그만 1초마다 쌓였다.
+     */
+    if (!hasActiveAttempt || !grafanaProbeUrl) return
 
     let cancelled = false
     let failures = 0
     let intervalId: number | undefined
 
-    const markDataReady = () => {
+    const markDataReady = (degraded = false) => {
       if (cancelled) return
       setIsGrafanaDataReady(true)
+      if (degraded) setIsObservabilityDegraded(true)
       if (intervalId) window.clearInterval(intervalId)
     }
 
     const probeGrafanaData = async () => {
       try {
-        const response = await fetch(getGrafanaDataProbeUrl(namespace), { cache: 'no-store' })
+        const response = await fetch(grafanaProbeUrl, { cache: 'no-store' })
         if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
 
         const payload = await response.json() as PrometheusQueryResponse
@@ -342,7 +354,8 @@ function App() {
       } catch (error) {
         failures += 1
         console.warn('Grafana data readiness probe failed:', error)
-        if (isGrafanaFrameReady && failures >= GRAFANA_DATA_FALLBACK_FAILURES) markDataReady()
+        // iframe 은 떴으니 화면은 열어준다. 다만 degraded 로 표시한다.
+        if (isGrafanaFrameReady && failures >= GRAFANA_DATA_FALLBACK_FAILURES) markDataReady(true)
       }
     }
 
@@ -353,7 +366,7 @@ function App() {
       cancelled = true
       if (intervalId) window.clearInterval(intervalId)
     }
-  }, [grafanaUrl, hasActiveAttempt, isGrafanaFrameReady, namespace])
+  }, [grafanaProbeUrl, hasActiveAttempt, isGrafanaFrameReady])
 
   const handleLoginSuccess = (newToken: string) => {
     setToken(newToken)
@@ -557,15 +570,25 @@ function App() {
                       )}
                       <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
                         <div className="grafana-panel-header">
-                          <span className="terminal-label">{hasActiveAttempt ? 'OBSERVABILITY / GRAFANA' : 'PROFILE / LEARNING DASHBOARD'}</span>
-                          {hasActiveAttempt && <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>}
+                          <span className="terminal-label">
+                            {hasActiveAttempt
+                              ? `OBSERVABILITY / ${observabilityLabel.toUpperCase()}`
+                              : 'PROFILE / LEARNING DASHBOARD'}
+                          </span>
+                          {hasActiveAttempt && grafanaUrl && (
+                            <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>
+                          )}
                         </div>
-                        {hasActiveAttempt ? (
+                        {!hasActiveAttempt ? (
+                          <div className="workspace-dashboard">
+                            <DashboardOverview token={token} />
+                          </div>
+                        ) : hasObservability && grafanaUrl ? (
                           <div className="grafana-frame-wrap">
                             <iframe
                               className="grafana-frame"
                               src={grafanaUrl}
-                              title="Grafana dashboard"
+                              title={`${observabilityLabel} Grafana dashboard`}
                               onLoad={() => setIsGrafanaFrameReady(true)}
                             />
                             {isGrafanaLoading && (
@@ -573,10 +596,25 @@ function App() {
                                 <strong>데이터 로딩중입니다..</strong>
                               </div>
                             )}
+                            {!isGrafanaLoading && isObservabilityDegraded && (
+                              <p className="grafana-degraded-note" role="status" aria-live="polite">
+                                Prometheus 지표 확인에 실패했습니다. 대시보드는 열려 있지만 값이 비어
+                                있을 수 있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
+                              </p>
+                            )}
                           </div>
                         ) : (
-                          <div className="workspace-dashboard">
-                            <DashboardOverview token={token} />
+                          /* 이 환경 전용 대시보드가 없다 (FE-08). 다른 환경 대시보드로 대체하지 않는다. */
+                          <div className="grafana-frame-wrap grafana-frame-empty">
+                            <section className="env-notice" role="status">
+                              <span className="env-notice-title">
+                                {observabilityLabel} 환경은 관측 대시보드가 아직 없습니다
+                              </span>
+                              <p>
+                                터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는
+                                영향이 없습니다.
+                              </p>
+                            </section>
                           </div>
                         )}
                       </section>
