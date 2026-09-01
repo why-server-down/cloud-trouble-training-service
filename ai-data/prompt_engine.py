@@ -36,6 +36,7 @@ class UserContext:
     user_id: str
     hint_count: int
     previous_questions: list[str]
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

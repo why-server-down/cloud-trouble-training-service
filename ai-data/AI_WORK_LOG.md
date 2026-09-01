@@ -486,3 +486,27 @@
 - 공유 계약:
   - `backend/app/schemas.py` ValidationJudgment에 evidence/error_code 추가 — FE·AI dev 재동기화 필요
 - 후속: AI-20 대화 memory와 보존
+
+## AI-20 대화 memory와 보존
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-19 PR #85~87 dev 반영 및 TutorMessage retention job 확인
+- 변경:
+  - 동일 attempt의 최근 user/assistant 완성 pair 최대 5개를 시간순으로 prompt에 전달
+  - 최근 10개 메시지만 DB에서 읽고 `attempt_id` exact filter로 다른 attempt/user 혼입 차단
+  - incomplete user와 orphan assistant 메시지는 memory에서 제외
+  - 대화 context 2,000자 예산과 pair별 500자 상한을 적용하고 최신 pair 우선 보존
+  - 기존 `previous_questions` 호환 필드는 비워 중복 token 사용 방지
+- 인수 조건 검증:
+  - 반복 질문과 직전 assistant 답변이 같은 prompt에 포함됨
+  - 다른 attempt 조회 조건 없음 및 exact attempt bind 확인
+  - 30일 retention 기본값, 진행 중 attempt 제외, batch cleanup/startup 연결 테스트 유지
+  - retention metric에는 원문 대신 삭제 count와 table label만 사용
+- 검증:
+  - AI pytest `169 passed, 3 deselected`
+  - backend pytest `515 passed, 4 deselected`
+- 후속: AI-21 latency 최적화
