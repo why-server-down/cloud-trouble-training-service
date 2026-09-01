@@ -101,10 +101,22 @@ class TestMechanicalValidationIsTheOnlyApproval:
     def test_judgment_is_stored_as_advisory(self):
         source = inspect.getsource(scenario_module.ScenarioService.check_and_complete)
         assert '"advisory_only": True' in source
+        assert '"evidence": ai_judgment.evidence or []' in source
+
+    def test_runtime_context_and_environment_are_passed_to_advisory(self):
+        source = inspect.getsource(scenario_module.ScenarioService.check_and_complete)
+        assert "get_runtime_context_collector().collect" in source
+        assert "runtime_context=runtime_context" in source
+        assert "environment=scenario.environment" in source
+        assert '"internal_summary"' not in source
 
     def test_validation_judgment_schema_is_advisory_by_default(self):
-        judgment = ValidationJudgment(resolved=True, reason="looks fixed", confidence=1.0)
+        judgment = ValidationJudgment(
+            resolved=True, reason="looks fixed", confidence=1.0,
+            evidence=["deployments.nginx.available=1/1"],
+        )
         assert judgment.advisory_only is True
+        assert judgment.evidence == ["deployments.nginx.available=1/1"]
 
 
 class TestValidationResultRecord:
