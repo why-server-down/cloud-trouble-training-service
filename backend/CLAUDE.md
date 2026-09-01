@@ -79,6 +79,7 @@ app/
 │   ├── promql_guard.py           # PromQL 안전성 검사 (namespace 격리, allowlist)
 │   ├── runtime_context.py        # 환경별 관측 수집 → 공통 스키마 (AI 계층 계약)
 │   ├── runtime_redaction.py      # AI 로 나가는 값에서 토큰·비밀번호 제거
+│   ├── reconciliation_service.py # 재시작 시 진행 중 attempt·장애 정리
 │   ├── scoring_service.py        # 점수 계산 (시간/힌트 감점)
 │   ├── analytics_service.py      # 대시보드/리더보드/업적/티어 계산
 │   ├── k8s_setup.py              # 사용자 K8s 네임스페이스 자동 생성
@@ -225,6 +226,32 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### 동시성과 재시작 복구 (BE-22)
+
+#### 시간 초과 정리가 status 조회에만 의존했다
+
+지금까지 timeout 처리는 **사용자가 status를 조회할 때만** 일어났다. 사용자가 브라우저를
+닫고 돌아오지 않으면 **주입된 장애가 클러스터에 그대로 남고**, 서버가 재시작되면 그
+사실조차 아무도 모른다.
+
+startup에서 `in_progress` attempt를 훑어 시간 초과된 것을 정리한다. BE-08에서 `chaos_id`를
+DB에 저장하도록 바꿨기 때문에 프로세스 메모리 없이도 되돌릴 수 있다.
+
+- 아직 시간이 남은 시도는 건드리지 않는다 (사용자가 계속 풀고 있다)
+- 되돌린 뒤 `chaos_id`를 비운다. 다음 정리에서 같은 작업을 반복하지 않는다
+- **정리에 실패해도 attempt는 종료 처리한다.** 열린 채로 두면 사용자가 새 미션을
+  시작할 수 없다
+- **하나가 실패해도 나머지는 계속 처리하고, 예외를 기동 밖으로 내보내지 않는다.**
+  기동 경로에서 예외가 나가면 서버가 뜨지 않는다
+
+#### 동시 시작은 사용자 오류로 돌려준다
+
+사용자당 `in_progress` attempt는 DB partial unique index로 1개다(BE-02). 동시 요청 두
+개가 앞의 조회를 모두 통과하면 커밋 시점에 하나가 걸린다. 이는 서버 오류가 아니라
+설명 가능한 상황이므로 `IntegrityError`를 **"이미 진행 중인 미션이 있습니다"**로 바꾼다.
+
+이때 **이미 주입된 장애를 되돌린다.** 기록이 실패했는데 장애가 남으면 고아가 된다.
 
 ### 환경별 분석 (BE-21)
 
