@@ -11,6 +11,12 @@ import {
   LearningCurveEntry,
 } from '../../services/api'
 import { ENVIRONMENT_META, ENVIRONMENT_ORDER } from '../../config/environments'
+import {
+  DASHBOARD_POLL_HIDDEN_MS,
+  DASHBOARD_POLL_INTERVAL_MS,
+  MAX_BACKOFF_MS,
+} from '../../config/polling'
+import { usePolling } from '../../hooks/usePolling'
 import { average, curvePolyline, formatDuration, radarPolygon } from '../../utils/dashboard'
 
 interface DashboardOverviewProps {
@@ -60,14 +66,15 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const [achievements, setAchievements] = useState<AchievementsResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  /** 진행 중인 조회. 15초 polling 과 필터 전환이 같은 시점에 겹치지 않게 한다 (FE-15). */
-  const inFlightRef = useRef(false)
+  /**
+   * 필터 전환 시 이전 요청을 끊기 위한 controller (FE-13).
+   * 중복 호출 자체는 usePolling 이 다음 실행을 직접 예약하는 구조로 막는다 (FE-16) —
+   * inFlight 플래그가 필요 없다.
+   */
+  const controllerRef = useRef<AbortController | null>(null)
 
   const load = useCallback(
     async (signal: AbortSignal) => {
-      if (inFlightRef.current) return
-      inFlightRef.current = true
-
       try {
         const [statsResult, curveResult, leaderboardResult, achievementsResult] =
           await Promise.allSettled([
@@ -109,7 +116,6 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
         setError(failed.length ? `일부 데이터를 불러오지 못했습니다: ${failed.join(', ')}` : null)
       } finally {
-        inFlightRef.current = false
         if (!signal.aborted) setIsLoading(false)
       }
     },
@@ -121,17 +127,29 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
    * 취소하지 않으면 늦게 도착한 전체 응답이 Docker 화면을 덮는다.
    */
   useEffect(() => {
-    const controller = new AbortController()
     setIsLoading(true)
-    void load(controller.signal)
-
-    const interval = window.setInterval(() => void load(controller.signal), 15000)
+    const controller = new AbortController()
+    controllerRef.current = controller
 
     return () => {
       controller.abort()
-      window.clearInterval(interval)
+      if (controllerRef.current === controller) controllerRef.current = null
     }
-  }, [load, refreshKey])
+  }, [filter, refreshKey, token])
+
+  const poll = useCallback(async () => {
+    const signal = controllerRef.current?.signal
+    if (!signal || signal.aborted) return 'continue' as const
+    await load(signal)
+    return 'continue' as const
+  }, [load])
+
+  usePolling(poll, {
+    intervalMs: DASHBOARD_POLL_INTERVAL_MS,
+    hiddenIntervalMs: DASHBOARD_POLL_HIDDEN_MS,
+    maxBackoffMs: MAX_BACKOFF_MS,
+    restartKey: `${token}:${filter}:${refreshKey}`,
+  })
 
   const skillValues = useMemo(
     () => (stats ? SKILL_AXES.map(([, key]) => stats.skill_scores[key]) : []),

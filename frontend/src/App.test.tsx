@@ -512,3 +512,25 @@ describe('환경별 field guide (FE-09)', () => {
     expect(commands.textContent).not.toContain('docker ')
   })
 })
+
+describe('모바일 탭 전환 (FE-17)', () => {
+  it('미션/터미널을 오가도 Terminal 을 unmount 하지 않아 연결이 유지된다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    const stub = await screen.findByTestId('terminal-stub')
+    const sessionId = stub.getAttribute('data-session-id')
+
+    // 미션 화면으로 전환 — CSS 로 숨기고 unmount 하지 않는다.
+    fireEvent.click(screen.getByRole('button', { name: '미션' }))
+    const afterMissions = screen.getByTestId('terminal-stub')
+    expect(afterMissions.getAttribute('data-session-id')).toBe(sessionId)
+
+    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+    expect(screen.getByTestId('terminal-stub').getAttribute('data-session-id')).toBe(sessionId)
+
+    // 다시 마운트됐다면 세션을 또 만들었을 것이다.
+    expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
+  })
+})
