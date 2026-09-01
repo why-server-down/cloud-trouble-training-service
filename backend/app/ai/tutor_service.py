@@ -87,8 +87,8 @@ class TutorService:
 
         self._init_engine()
 
-        # DB에서 이전 질문 이력 로드 (세션 간 연속성)
-        previous_questions = await self._load_previous_questions(attempt_id, db)
+        # 같은 attempt의 최근 user/assistant 대화쌍 로드 (세션 간 연속성)
+        conversation_history = await self._load_conversation(attempt_id, db)
 
         # DB attempt가 결정한 환경과 sandbox 범위에서 RuntimeContext 수집
         runtime_ctx: dict | None = None
@@ -149,7 +149,7 @@ class TutorService:
                 mission_level=mission_level,
                 chaos_type=chaos_type,
                 namespace=namespace,
-                previous_questions=previous_questions,
+                conversation_history=conversation_history,
                 attempt_id=str(attempt_id),
                 runtime_ctx=runtime_ctx,
                 fault_type=chaos_type,
@@ -162,26 +162,56 @@ class TutorService:
 
         return response
 
-    async def _load_previous_questions(
+    async def _load_conversation(
         self, attempt_id: uuid.UUID, db: AsyncSession | None
-    ) -> list[str]:
+    ) -> list[dict]:
         if db is None:
             return []
         try:
             from app.models import TutorMessage
             result = await db.execute(
                 select(TutorMessage)
-                .where(
-                    TutorMessage.attempt_id == attempt_id,
-                    TutorMessage.role == "user",
-                )
+                .where(TutorMessage.attempt_id == attempt_id)
                 .order_by(TutorMessage.created_at.desc())
-                .limit(5)
+                .limit(10)
             )
             msgs = result.scalars().all()
-            return [m.message for m in reversed(msgs)]
+            return self._conversation_pairs(list(reversed(msgs)))
         except Exception:
             return []
+
+    @staticmethod
+    def _conversation_pairs(messages, max_pairs: int = 5, max_chars: int = 2_000) -> list[dict]:
+        """시간순 user/assistant pair만 유지하고 최신 pair부터 예산에 맞춘다."""
+        pairs = []
+        pending_user = None
+        for message in messages:
+            if message.role == "user":
+                pending_user = message
+            elif message.role == "assistant" and pending_user is not None:
+                pairs.append({
+                    "user": str(pending_user.message)[:500],
+                    "assistant": str(message.message)[:500],
+                    "hint_level": message.hint_level,
+                })
+                pending_user = None
+
+        selected = []
+        used = 0
+        for pair in reversed(pairs[-max_pairs:]):
+            size = len(pair["user"]) + len(pair["assistant"])
+            if selected and used + size > max_chars:
+                break
+            if size > max_chars:
+                pair = {
+                    **pair,
+                    "user": pair["user"][: max_chars // 2],
+                    "assistant": pair["assistant"][: max_chars // 2],
+                }
+                size = len(pair["user"]) + len(pair["assistant"])
+            selected.append(pair)
+            used += size
+        return list(reversed(selected))
 
     async def _save_messages(
         self,
@@ -218,7 +248,7 @@ class TutorService:
         mission_level: int,
         chaos_type: str,
         namespace: str,
-        previous_questions: list[str],
+        conversation_history: list[dict],
         attempt_id: str,
         runtime_ctx: dict | None,
         fault_type: str | None = None,
@@ -240,7 +270,8 @@ class TutorService:
             user_ctx = UserContext(
                 user_id=attempt_id,
                 hint_count=hint_level,
-                previous_questions=previous_questions,
+                previous_questions=[],
+                conversation_history=conversation_history,
             )
             runtime_ctx = runtime_ctx or {
                 "environment": environment, "scope": {"namespace": namespace},
