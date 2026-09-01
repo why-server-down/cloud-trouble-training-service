@@ -419,9 +419,93 @@
 }
 
 .chat-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-top: 0.45rem;
   color: var(--danger);
   font-size: 0.72rem;
+}
+
+/* 실패한 질문을 다시 보낸다 (FE-11). */
+.chat-retry-btn,
+.chat-cancel-btn {
+  padding: 0.22rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: inherit;
+  font-size: 0.68rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chat-retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-cancel-btn {
+  margin-left: 0.4rem;
+  color: var(--faint);
+}
+
+/* 환경 배지 (FE-11). 색만으로 구분하지 않으므로 텍스트를 그대로 노출한다. */
+.tutor-environment-badge {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--faint);
+  border-radius: 3px;
+  color: var(--faint);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* 답변 근거 접기 영역 (FE-11). 없으면 렌더되지 않으므로 레이아웃이 흔들리지 않는다. */
+.chat-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.chat-evidence-group summary {
+  color: var(--faint);
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+
+.chat-evidence-group ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.68rem;
+}
+
+.chat-evidence-group li {
+  margin-bottom: 0.15rem;
+}
+
+.chat-source-path {
+  margin-left: 0.35rem;
+  color: var(--faint);
+  font-size: 0.62rem;
+}
+
+.chat-fallback-note {
+  margin: 0.35rem 0 0;
+  color: var(--warning, #d9b45b);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+/* 시각적으로는 숨기고 스크린리더에는 남긴다. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .chat-form {
