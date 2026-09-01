@@ -189,6 +189,21 @@ export interface TierInfo {
   next_tier: string | null
 }
 
+/**
+ * 한 환경의 집계 (FE-13).
+ *
+ * `competency` 가 null 이면 **아직 시도가 없다**는 뜻이다. 0 과 구분해야 한다 —
+ * 0 은 "해봤는데 못했다"이고 null 은 "아직 안 했다"다
+ * (`analytics_service._environment_stats`).
+ */
+export interface EnvironmentStatEntry {
+  completed: number
+  average_score: number
+  average_mttr: number
+  hints_used: number
+  competency: number | null
+}
+
 export interface DashboardStatsResponse {
   username: string
   total_score: number
@@ -197,12 +212,21 @@ export interface DashboardStatsResponse {
   hints_used: number
   current_tier: TierInfo
   skill_scores: Record<'troubleshooting' | 'resource' | 'network' | 'ops', number>
+  /** 이 응답이 어느 환경으로 필터된 것인가. null 이면 전체 합계다. */
+  environment?: string | null
+  /**
+   * 환경별 분해. 백엔드는 **전체 조회(`environment=all`)일 때만** 채운다.
+   * 필터를 건 조회에서는 빈 객체다 — 없는 값을 0 으로 읽지 않도록 주의한다.
+   */
+  environment_stats?: Record<string, EnvironmentStatEntry>
 }
 
 export interface LearningCurveEntry {
   attempt_id: string
   mission_id: string
   mission_name: string
+  /** 이 시도가 어느 환경이었는지. 전체 보기에서 곡선을 구분하는 데 쓴다. */
+  environment?: string
   attempt_number: number
   completion_time: number
   score: number
@@ -462,11 +486,17 @@ export const askTutor = async (
   return response.json()
 }
 
-const getAuthorizedJson = async <T>(token: string, path: string, fallback: string): Promise<T> => {
+const getAuthorizedJson = async <T>(
+  token: string,
+  path: string,
+  fallback: string,
+  signal?: AbortSignal,
+): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    signal,
   })
 
   if (!response.ok) {
@@ -476,11 +506,35 @@ const getAuthorizedJson = async <T>(token: string, path: string, fallback: strin
   return response.json()
 }
 
-export const getDashboardStats = (token: string) =>
-  getAuthorizedJson<DashboardStatsResponse>(token, '/api/dashboard/stats', 'Failed to load dashboard stats.')
+/**
+ * 대시보드 환경 필터 (FE-13). 백엔드 `EnvironmentFilter` 와 같은 값이다.
+ * 'all' 은 전체 합계 + 환경별 분해를 뜻한다.
+ */
+export type DashboardEnvironmentFilter = EnvironmentId | 'all'
 
-export const getLearningCurve = (token: string) =>
-  getAuthorizedJson<LearningCurveEntry[]>(token, '/api/dashboard/learning-curve', 'Failed to load learning curve.')
+export const getDashboardStats = (
+  token: string,
+  environment: DashboardEnvironmentFilter = 'all',
+  signal?: AbortSignal,
+) =>
+  getAuthorizedJson<DashboardStatsResponse>(
+    token,
+    `/api/dashboard/stats?environment=${environment}`,
+    '통계를 불러오지 못했습니다',
+    signal,
+  )
+
+export const getLearningCurve = (
+  token: string,
+  environment: DashboardEnvironmentFilter = 'all',
+  signal?: AbortSignal,
+) =>
+  getAuthorizedJson<LearningCurveEntry[]>(
+    token,
+    `/api/dashboard/learning-curve?environment=${environment}`,
+    '학습 곡선을 불러오지 못했습니다',
+    signal,
+  )
 
 export const getLeaderboard = (token: string) =>
   getAuthorizedJson<LeaderboardEntry[]>(token, '/api/leaderboard?limit=10', 'Failed to load leaderboard.')

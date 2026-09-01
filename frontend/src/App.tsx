@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
@@ -142,6 +142,12 @@ function App() {
    * 화면은 열어주되 "지표가 실제로 들어오는지 확인하지 못했다"는 사실을 숨기지 않는다.
    */
   const [isObservabilityDegraded, setIsObservabilityDegraded] = useState(false)
+  /**
+   * 대시보드 갱신 키 (FE-15). 미션 완료 때만 단조 증가한다.
+   * 같은 attempt 의 완료 이벤트가 두 번 와도 한 번만 올린다.
+   */
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
+  const lastCompletedAttemptRef = useRef<string | null>(null)
   const [activeTour, setActiveTour] = useState<'intro' | 'mission' | null>(null)
   const [hasSeenIntroTour, setHasSeenIntroTour] = useState(() => localStorage.getItem(INTRO_TOUR_STORAGE_KEY) === 'done')
   const [hasSeenMissionTour, setHasSeenMissionTour] = useState(() => localStorage.getItem(MISSION_TOUR_STORAGE_KEY) === 'done')
@@ -196,6 +202,13 @@ function App() {
    */
   const isEnvironmentSettled = isAccountScopeResolved && environmentScope === accountStorageScope
   const needsWorkspace = hasActiveAttempt || (activeTab === 'terminal' && isEnvironmentSettled)
+
+  /** 완료 직후 profile 과 dashboard 를 한 번 갱신한다 (FE-15). */
+  const handleAttemptCompleted = useCallback((attemptId: string) => {
+    if (lastCompletedAttemptRef.current === attemptId) return
+    lastCompletedAttemptRef.current = attemptId
+    setDashboardRefreshKey((key) => key + 1)
+  }, [])
 
   const clearAuthState = useCallback(() => {
     setToken(null)
@@ -509,7 +522,7 @@ function App() {
                   role="tabpanel"
                   aria-labelledby={`env-tab-${activeEnvironment}`}
                 >
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} onActiveAttemptChange={handleActiveAttemptChange} /></div>
+                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} onActiveAttemptChange={handleActiveAttemptChange} onAttemptCompleted={handleAttemptCompleted} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
                       {activeAttempt ? (
@@ -597,7 +610,7 @@ function App() {
                         </div>
                         {!hasActiveAttempt ? (
                           <div className="workspace-dashboard">
-                            <DashboardOverview token={token} />
+                            <DashboardOverview token={token} refreshKey={dashboardRefreshKey} />
                           </div>
                         ) : hasObservability && grafanaUrl ? (
                           <div className="grafana-frame-wrap">
