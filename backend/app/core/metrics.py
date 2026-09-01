@@ -101,6 +101,12 @@ ACTIVE_ATTEMPTS = Gauge(
     "Mission attempts in progress.",
     ["environment"],
 )
+RETENTION_DELETIONS = Counter(
+    "retention_deleted_total",
+    "Records deleted by the retention policy.",
+    # 테이블 이름만 label 로 쓴다. 사용자·attempt 식별자는 넣지 않는다.
+    ["table"],
+)
 CLEANUP_FAILURES = Counter(
     "cleanup_failure_total",
     "Cleanup operations that did not complete.",

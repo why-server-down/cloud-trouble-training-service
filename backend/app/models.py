@@ -209,7 +209,10 @@ class ValidationRule(Base):
 
 class TutorMessage(Base):
     __tablename__ = "tutor_messages"
-    # TODO(phase7): created_at 기준 30일 경과 레코드 자동 삭제 배치 추가 예정
+    # 보존 정책은 retention_service.purge_expired_tutor_messages 가 집행한다(BE-29).
+    # created_at 에 인덱스를 두는 이유: 정리 작업이 기간 조건으로 훑는 컬럼이라
+    # 인덱스가 없으면 대화가 쌓일수록 전체 스캔이 된다.
+    __table_args__ = (Index("ix_tutor_messages_created_at", "created_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     attempt_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mission_attempts.id"), nullable=False)
