@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from dataclasses import dataclass
 
 from app.core.config import settings
@@ -18,6 +19,7 @@ class ScenarioGenerationInput:
     namespace: str
     recent_fault_types: list[str]
     allowed_fault_types: list[str]
+    environment: str = "kubernetes"
 
 
 @dataclass
@@ -735,6 +737,59 @@ _MOCK_FIXTURES: dict[str, list[dict]] = {
 }
 
 
+def _sandbox_fixture(environment: str, difficulty: str, fault_type: str) -> dict:
+    labels = {
+        "docker_network_disconnect": ("컨테이너 네트워크 단절", "training-net 연결 상태"),
+        "docker_container_stopped": ("컨테이너 예기치 않은 중지", "training-app 실행 상태"),
+        "docker_cpu_throttle": ("컨테이너 CPU 제한", "CPU 사용률과 제한값"),
+        "linux_disk_pressure": ("Linux 디스크 압박", "작업 경로 사용률"),
+        "linux_cpu_saturation": ("Linux CPU 포화", "load와 CPU 사용률"),
+        "linux_process_flood": ("Linux 프로세스 급증", "프로세스 개수와 상태"),
+    }
+    title, observation = labels[fault_type]
+    score = {"beginner": 80, "intermediate": 110, "advanced": 150, "expert": 200}.get(
+        difficulty, 80
+    )
+    return {
+        "environment": environment,
+        "title": title,
+        "difficulty": difficulty,
+        "learning_objectives": [f"{environment} 환경에서 {observation}을 관찰하고 복구할 수 있다"],
+        "student_brief": f"훈련 환경에 장애가 발생했습니다. {observation}을 확인하고 정상화하세요.",
+        "internal_summary": f"{fault_type} fixture 장애",
+        "fault": {"type": fault_type, "parameters": {}},
+        "expected_solution": {"summary": "허용된 환경 명령으로 정상 상태를 복구한다", "allowed_fix_patterns": []},
+        "observability": {"symptoms": [observation], "suggested_queries": [], "log_signals": []},
+        "validation": {
+            "rules": [{
+                "name": f"{fault_type}_resolved", "type": "mock",
+                "query": f"{environment}:{fault_type}:resolved", "stability_seconds": 5,
+            }],
+            "all_required": True,
+        },
+        "scoring": {"base_score": score, "hint_penalty": 7, "time_limit_seconds": 1200},
+    }
+
+
+_SANDBOX_FAULTS = {
+    "docker": ("docker_network_disconnect", "docker_container_stopped", "docker_cpu_throttle"),
+    "linux": ("linux_disk_pressure", "linux_cpu_saturation", "linux_process_flood"),
+}
+_MOCK_FIXTURES_BY_ENVIRONMENT: dict[str, dict[str, list[dict]]] = {
+    "kubernetes": _MOCK_FIXTURES,
+    **{
+        environment: {
+            difficulty: [
+                _sandbox_fixture(environment, difficulty, fault_type)
+                for fault_type in fault_types
+            ]
+            for difficulty in ("beginner", "intermediate", "advanced", "expert")
+        }
+        for environment, fault_types in _SANDBOX_FAULTS.items()
+    },
+}
+
+
 def _score_candidate(candidate: dict, gen_input: ScenarioGenerationInput) -> float:
     score = 50.0
     fault_type = candidate.get("fault", {}).get("type", "")
@@ -758,25 +813,31 @@ class MockScenarioAgent:
     """개발/테스트용 Mock 에이전트 (fixture 기반, OpenAI 불필요)."""
 
     def generate(self, gen_input: ScenarioGenerationInput) -> list[ScenarioCandidate]:
-        fixtures = _MOCK_FIXTURES.get(gen_input.difficulty, _MOCK_FIXTURES["beginner"])
+        environment_fixtures = _MOCK_FIXTURES_BY_ENVIRONMENT.get(gen_input.environment)
+        if environment_fixtures is None:
+            raise ValueError(f"지원하지 않는 시나리오 환경입니다: {gen_input.environment}")
+        if not gen_input.allowed_fault_types:
+            raise ValueError(f"'{gen_input.environment}' 환경의 허용 fault type 목록이 비어 있습니다")
+        fixtures = environment_fixtures.get(
+            gen_input.difficulty, environment_fixtures["beginner"]
+        )
 
         # allowed_fault_types 필터링
         valid = [
             f for f in fixtures
-            if not gen_input.allowed_fault_types
-            or f.get("fault", {}).get("type") in gen_input.allowed_fault_types
+            if f.get("fault", {}).get("type") in gen_input.allowed_fault_types
         ]
         if not valid:
-            valid = fixtures
+            raise ValueError(
+                f"'{gen_input.environment}' 환경에서 허용된 fixture를 찾을 수 없습니다"
+            )
 
         candidates = []
-        for scenario in valid[:3]:
+        for fixture in valid[:3]:
+            scenario = deepcopy(fixture)
+            scenario["environment"] = gen_input.environment
             score = _score_candidate(scenario, gen_input)
             candidates.append(ScenarioCandidate(scenario=scenario, score=score))
-
-        if not candidates:
-            fallback = _MOCK_FIXTURES["beginner"][0]
-            candidates = [ScenarioCandidate(scenario=fallback, score=30.0)]
 
         return candidates
 
@@ -802,7 +863,7 @@ class OpenAIScenarioAgent:
             with open(self._SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
-            return "You are a Kubernetes chaos scenario generator. Return JSON array of 3 scenario candidates."
+            return "You are a multi-environment chaos scenario generator. Return JSON scenario candidates."
 
     def generate(self, gen_input: ScenarioGenerationInput) -> list[ScenarioCandidate]:
         try:
@@ -837,11 +898,12 @@ class OpenAIScenarioAgent:
         recent = ", ".join(gen_input.recent_fault_types) if gen_input.recent_fault_types else "없음"
         allowed = ", ".join(gen_input.allowed_fault_types)
         return (
+            f"환경: {gen_input.environment}\n"
             f"난이도: {gen_input.difficulty}\n"
             f"사용자 namespace: {gen_input.namespace}\n"
             f"최근 풀었던 fault type (중복 피할 것): {recent}\n"
             f"허용된 fault type 목록: {allowed}\n\n"
-            f"위 조건에 맞는 Kubernetes 장애 시나리오 후보 3개를 JSON으로 생성해주세요.\n"
+            f"위 조건과 동일한 환경의 장애 시나리오 후보 3개를 JSON으로 생성해주세요.\n"
             f"반드시 JSON 객체 형태로 응답하세요: {{\"scenarios\": [...]}}"
         )
 
@@ -872,9 +934,11 @@ class OpenAIScenarioAgent:
             # 필수 필드 검증
             if not all(k in s for k in ("title", "student_brief", "fault", "validation")):
                 continue
+            if s.get("environment") != gen_input.environment:
+                continue
             # namespace placeholder 확인
             fault_str = json.dumps(s.get("fault", {}))
-            if "{{namespace}}" not in fault_str and "namespace" not in fault_str:
+            if gen_input.environment == "kubernetes" and "{{namespace}}" not in fault_str and "namespace" not in fault_str:
                 continue
 
             score = _score_candidate(s, gen_input)
