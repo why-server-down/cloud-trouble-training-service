@@ -1,6 +1,5 @@
 """
-ValidationAgent - LLM 기반 AI 시나리오 완료 판정.
-K8s 현재 상태를 직접 수집하여 LLM에게 해결 여부 판단 요청.
+ValidationAgent - RuntimeContext 기반 AI 시나리오 advisory 판정.
 
 검증 3단계 중 마지막:
   1. ValidationRuleService.check_rules() - DB 저장 k8s 룰
@@ -9,34 +8,38 @@ K8s 현재 상태를 직접 수집하여 LLM에게 해결 여부 판단 요청.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.config import settings
 from app.ai.observability import record_ai_call
+from app.services.runtime_redaction import redact, redact_text
 
 logger = logging.getLogger(__name__)
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 _VALIDATION_SYSTEM_PROMPT = """\
-You are a Kubernetes incident validator. Determine if a user has successfully resolved a Kubernetes failure scenario.
+You are a multi-environment incident validation advisor. Your result is advisory only;
+mechanical validation is the sole authority for completion and scoring.
 
 You will receive:
 1. Scenario context: title, fault type, what was broken, expected solution
-2. Current Kubernetes state: deployments, pods, services, endpoints, recent warning events
+2. Redacted RuntimeContext observations for Kubernetes, Docker, or Linux
 
 Respond ONLY with a JSON object:
-{"resolved": true|false, "reason": "한국어로 1-2문장 설명", "confidence": 0.0~1.0}
+{"resolved": true|false, "reason": "한국어 관측 설명", "confidence": 0.0~1.0,
+ "evidence": ["실제로 관측된 key와 요약"]}
 
 Decision rules:
-- resolved=true: primary fault clearly fixed (pods running & ready, services have ready endpoints, no crash loops)
-- resolved=false: pods still in error state OR restart count high OR service has 0 endpoints when it should have some
+- Use only supplied observations and fault-specific target evidence.
+- An unrelated healthy resource is never proof that the target fault is resolved.
 - Be strict: partial fixes do not count
 - confidence: how certain you are given the available state (lower if state info is incomplete)
+- Never expose an internal summary, expected answer, injection method, or recovery command in reason.
 """
 
 
@@ -45,133 +48,67 @@ class ValidationJudgment:
     resolved: bool
     reason: str
     confidence: float = 1.0
+    evidence: list[str] | None = None
+    advisory_only: bool = True
+    error_code: str | None = None
 
 
-def _collect_k8s_state(namespace: str) -> dict:
-    """namespace의 K8s 현재 상태 수집 (동기, executor에서 실행)."""
+def _target_name(context: dict) -> str:
+    return str(
+        context.get("target_name")
+        or context.get("scenario_json", {}).get("fault", {}).get("target", {}).get("name")
+        or ""
+    )
+
+
+def _safe_reason(value: Any) -> str:
+    reason = redact_text(str(value or "")).strip()
+    return reason[:300] if reason else "수집된 근거만으로 해결 여부를 확인할 수 없습니다."
+
+
+def _clamp_confidence(value: Any) -> float:
     try:
-        from kubernetes import client, config as k8s_config
-        try:
-            k8s_config.load_incluster_config()
-        except Exception:
-            k8s_config.load_kube_config()
-
-        apps_api = client.AppsV1Api()
-        core_api = client.CoreV1Api()
-
-        deployments = []
-        try:
-            for dep in apps_api.list_namespaced_deployment(namespace=namespace).items:
-                deployments.append({
-                    "name": dep.metadata.name,
-                    "desired": dep.spec.replicas,
-                    "ready": dep.status.ready_replicas or 0,
-                    "available": dep.status.available_replicas or 0,
-                })
-        except Exception:
-            pass
-
-        pods = []
-        try:
-            for pod in core_api.list_namespaced_pod(namespace=namespace).items:
-                containers = []
-                for cs in (pod.status.container_statuses or []):
-                    if cs.state.running:
-                        state = "running"
-                    elif cs.state.waiting:
-                        state = f"waiting:{cs.state.waiting.reason}"
-                    elif cs.state.terminated:
-                        state = f"terminated:{cs.state.terminated.reason}"
-                    else:
-                        state = "unknown"
-                    containers.append({
-                        "name": cs.name,
-                        "ready": cs.ready,
-                        "restart_count": cs.restart_count,
-                        "state": state,
-                    })
-                pods.append({
-                    "name": pod.metadata.name,
-                    "phase": pod.status.phase,
-                    "ready": all(c["ready"] for c in containers),
-                    "containers": containers,
-                })
-        except Exception:
-            pass
-
-        services = []
-        try:
-            for svc in core_api.list_namespaced_service(namespace=namespace).items:
-                ep_ready = 0
-                try:
-                    ep = core_api.read_namespaced_endpoints(name=svc.metadata.name, namespace=namespace)
-                    ep_ready = sum(len(s.addresses or []) for s in (ep.subsets or []))
-                except Exception:
-                    pass
-                services.append({
-                    "name": svc.metadata.name,
-                    "selector": svc.spec.selector or {},
-                    "endpoint_ready_count": ep_ready,
-                })
-        except Exception:
-            pass
-
-        events = []
-        try:
-            ev_list = core_api.list_namespaced_event(
-                namespace=namespace, field_selector="type=Warning"
-            )
-            for ev in sorted(
-                ev_list.items,
-                key=lambda e: e.last_timestamp or "",
-                reverse=True,
-            )[:5]:
-                events.append({
-                    "reason": ev.reason,
-                    "message": (ev.message or "")[:120],
-                    "count": ev.count,
-                })
-        except Exception:
-            pass
-
-        return {
-            "deployments": deployments,
-            "pods": pods,
-            "services": services,
-            "recent_warning_events": events,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 class MockValidationAgent:
-    """Mock 모드: K8s 상태 직접 파싱으로 단순 판정 (LLM 없이)."""
+    """Mock 모드: target/fault와 직접 연결된 관측만 근거로 삼는다."""
 
-    async def judge(self, scenario_context: dict, namespace: str) -> ValidationJudgment:
-        state = await asyncio.get_event_loop().run_in_executor(
-            None, _collect_k8s_state, namespace
-        )
+    async def judge(
+        self, scenario_context: dict, namespace: str,
+        runtime_context: dict | None = None, environment: str = "kubernetes",
+    ) -> ValidationJudgment:
+        observations = (runtime_context or {}).get("observations", {})
+        target = _target_name(scenario_context)
+        fault_type = scenario_context.get("fault_type", "")
+        if not target:
+            return ValidationJudgment(False, "검증 대상 식별자가 없어 advisory 판정을 보류합니다.", 0.0, [], error_code="missing_target")
 
-        for dep in state.get("deployments", []):
-            if dep.get("available", 0) > 0:
-                return ValidationJudgment(
-                    resolved=True,
-                    reason="Deployment가 정상 가용 상태입니다.",
-                    confidence=0.8,
-                )
-
-        for svc in state.get("services", []):
-            if svc.get("endpoint_ready_count", 0) > 0:
-                return ValidationJudgment(
-                    resolved=True,
-                    reason="서비스 엔드포인트가 정상 연결되어 있습니다.",
-                    confidence=0.8,
-                )
-
+        if environment == "kubernetes":
+            if "service" in fault_type:
+                for service in observations.get("services", []):
+                    endpoints = service.get("ready_endpoints", service.get("endpoint_ready_count", 0))
+                    if service.get("name") == target and endpoints > 0:
+                        evidence = [f"services.{target}.ready_endpoints={endpoints}"]
+                        return ValidationJudgment(True, "검증 대상 서비스의 ready endpoint가 관측되었습니다.", 0.8, evidence)
+            else:
+                for deployment in observations.get("deployments", []):
+                    desired = deployment.get("desired", 0)
+                    available = deployment.get("available", deployment.get("ready", 0))
+                    if deployment.get("name") == target and desired > 0 and available >= desired:
+                        evidence = [f"deployments.{target}.available={available}/{desired}"]
+                        return ValidationJudgment(True, "검증 대상 workload의 가용 상태가 관측되었습니다.", 0.8, evidence)
+        elif environment == "docker":
+            container_state = str(observations.get("containers", ""))
+            if target in container_state and any(word in container_state.casefold() for word in ("running", " up ")):
+                return ValidationJudgment(True, "검증 대상 컨테이너의 실행 상태가 관측되었습니다.", 0.7, ["containers"])
         return ValidationJudgment(
             resolved=False,
-            reason="아직 정상화 조건을 만족하지 못했습니다.",
-            confidence=0.7,
+            reason="검증 대상 장애와 직접 연결된 정상화 근거가 부족합니다.",
+            confidence=0.5,
+            evidence=[],
         )
 
 
@@ -185,11 +122,11 @@ class LLMValidationAgent:
         self._base_url = base_url
         self._provider = provider
 
-    async def judge(self, scenario_context: dict, namespace: str) -> ValidationJudgment:
-        state = await asyncio.get_event_loop().run_in_executor(
-            None, _collect_k8s_state, namespace
-        )
-
+    async def judge(
+        self, scenario_context: dict, namespace: str,
+        runtime_context: dict | None = None, environment: str = "kubernetes",
+    ) -> ValidationJudgment:
+        runtime_context = redact(runtime_context or {})
         started = time.perf_counter()
         try:
             import openai
@@ -203,7 +140,9 @@ class LLMValidationAgent:
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": _VALIDATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": self._build_prompt(scenario_context, state)},
+                    {"role": "user", "content": self._build_prompt(
+                        scenario_context, runtime_context, environment
+                    )},
                 ],
                 max_tokens=300,
                 temperature=0.1,
@@ -211,6 +150,11 @@ class LLMValidationAgent:
             )
 
             data = json.loads(response.choices[0].message.content)
+            if not isinstance(data, dict) or not isinstance(data.get("resolved"), bool):
+                raise ValueError("validation response resolved must be boolean")
+            evidence = data.get("evidence", [])
+            if not isinstance(evidence, list):
+                evidence = []
             record_ai_call(
                 provider=self._provider, purpose="validation", result="success",
                 duration_seconds=time.perf_counter() - started,
@@ -218,28 +162,48 @@ class LLMValidationAgent:
             )
             return ValidationJudgment(
                 resolved=bool(data.get("resolved", False)),
-                reason=str(data.get("reason", "")),
-                confidence=float(data.get("confidence", 0.5)),
+                reason=_safe_reason(data.get("reason")),
+                confidence=_clamp_confidence(data.get("confidence")),
+                evidence=[_safe_reason(item) for item in evidence[:5]],
             )
 
+        except (json.JSONDecodeError, TypeError, ValueError):
+            record_ai_call(
+                provider=self._provider, purpose="validation", result="fallback",
+                duration_seconds=time.perf_counter() - started,
+            )
+            logger.warning("validation LLM returned invalid advisory response")
+            return ValidationJudgment(
+                resolved=False,
+                reason="AI advisory 응답 형식이 올바르지 않아 판정을 보류합니다.",
+                confidence=0.0,
+                evidence=[],
+                error_code="invalid_response",
+            )
         except Exception:
             record_ai_call(
                 provider=self._provider, purpose="validation", result="fallback",
                 duration_seconds=time.perf_counter() - started,
             )
-            logger.exception("validation LLM call failed; using mechanical-state fallback")
-            return await MockValidationAgent().judge(scenario_context, namespace)
+            logger.exception("validation LLM call failed; returning safe advisory failure")
+            return ValidationJudgment(
+                resolved=False,
+                reason="AI advisory 판정을 사용할 수 없습니다.",
+                confidence=0.0,
+                evidence=[],
+                error_code="provider_failed",
+            )
 
-    def _build_prompt(self, scenario_context: dict, k8s_state: dict) -> str:
+    def _build_prompt(self, scenario_context: dict, runtime_context: dict, environment: str) -> str:
         return (
             f"## 시나리오 컨텍스트\n"
             f"제목: {scenario_context.get('title', '알 수 없음')}\n"
             f"장애 유형: {scenario_context.get('fault_type', '알 수 없음')}\n"
-            f"시나리오 설명: {scenario_context.get('student_brief', '')}\n"
-            f"내부 요약: {scenario_context.get('internal_summary', '')}\n\n"
-            f"## 현재 Kubernetes 상태 (namespace: {scenario_context.get('namespace', '')})\n"
-            f"```json\n{json.dumps(k8s_state, ensure_ascii=False, indent=2)}\n```\n\n"
-            f"이 사용자가 장애를 성공적으로 해결했는지 판단해주세요."
+            f"검증 대상: {_target_name(scenario_context) or '미지정'}\n"
+            f"환경: {environment}\n\n"
+            f"## 현재 RuntimeContext 관측값\n"
+            f"```json\n{json.dumps(runtime_context, ensure_ascii=False, indent=2)}\n```\n\n"
+            f"관측 근거만으로 advisory 판정을 반환하세요."
         )
 
 
