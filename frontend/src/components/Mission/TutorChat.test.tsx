@@ -249,3 +249,107 @@ describe('근거 링크 안전성 (FE-11)', () => {
     expect(getSafeSourceHref('')).toBeNull()
   })
 })
+
+describe('호출 제한(429) 처리', () => {
+  const rateLimited = (retryAfterSeconds: number | null) =>
+    new api.ApiError('요청이 너무 잦습니다. 8초 후 다시 시도해 주세요.', 429, retryAfterSeconds)
+
+  it('429 를 받으면 남은 시간을 안내하고 재시도를 잠근다', async () => {
+    mocked.askTutor.mockRejectedValue(rateLimited(8))
+    renderChat()
+    await askOnce()
+
+    expect(await screen.findByText(/8초 후 다시 질문할 수 있습니다/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '8초 후 재시도' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(true)
+  })
+
+  it('제한 중에는 재시도 버튼을 눌러도 chat API 를 부르지 않는다', async () => {
+    mocked.askTutor.mockRejectedValue(rateLimited(8))
+    renderChat()
+    await askOnce()
+
+    await screen.findByText(/8초 후 다시 질문할 수 있습니다/)
+    fireEvent.click(screen.getByRole('button', { name: '8초 후 재시도' }))
+
+    // 질문 1회 + 재시도 시도 0회 = 1회
+    expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+  })
+
+  it('남은 시간이 지나면 다시 질문할 수 있다', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mocked.askTutor.mockRejectedValue(rateLimited(2))
+    renderChat()
+    await askOnce()
+
+    await screen.findByText(/2초 후 다시 질문할 수 있습니다/)
+
+    await act(async () => {
+      vi.advanceTimersByTime(2100)
+    })
+
+    expect(screen.queryByText(/다시 질문할 수 있습니다/)).toBeNull()
+    expect(screen.getByRole('button', { name: '다시 질문' }).hasAttribute('disabled')).toBe(false)
+  })
+
+  it('Retry-After 를 읽지 못하면 초를 만들어 표시하지 않는다', async () => {
+    // cross-origin 에서 expose_headers 가 없으면 헤더가 가려져 null 로 온다.
+    mocked.askTutor.mockRejectedValue(rateLimited(null))
+    renderChat()
+    await askOnce()
+
+    expect(await screen.findByText(/잠시 후 다시 질문할 수 있습니다/)).toBeTruthy()
+    expect(screen.queryByText(/초 후 다시 질문할 수 있습니다/)).toBeNull()
+    // 그래도 재시도는 잠근다 — 열어두면 429 만 계속 받는다.
+    expect(screen.getByRole('button', { name: '잠시 후 재시도' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('429 가 아닌 실패는 즉시 재시도할 수 있다', async () => {
+    mocked.askTutor.mockRejectedValue(new api.ApiError('서버 오류', 500))
+    renderChat()
+    await askOnce()
+
+    const retry = await screen.findByRole('button', { name: '다시 질문' })
+    expect(retry.hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByText(/질문 횟수 제한/)).toBeNull()
+  })
+
+  it('환경이 바뀌면 제한 상태도 초기화된다', async () => {
+    mocked.askTutor.mockRejectedValue(rateLimited(30))
+    const { rerender } = renderChat({ environment: 'docker' })
+    await askOnce()
+    await screen.findByText(/30초 후 다시 질문할 수 있습니다/)
+
+    rerender(<TutorChat token="t" missionId="mission-1" environment="linux" hintsUsed={0} />)
+
+    expect(screen.queryByText(/질문 횟수 제한/)).toBeNull()
+    expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false)
+  })
+})
+
+describe('Retry-After 파싱', () => {
+  it('초 형식을 그대로 읽는다', () => {
+    expect(api.parseRetryAfter('8')).toBe(8)
+    expect(api.parseRetryAfter(' 12 ')).toBe(12)
+    expect(api.parseRetryAfter('0')).toBe(0)
+  })
+
+  it('HTTP-date 형식은 남은 초로 환산한다', () => {
+    const future = new Date(Date.now() + 30_000).toUTCString()
+    const seconds = api.parseRetryAfter(future)
+    expect(seconds).not.toBeNull()
+    expect(seconds as number).toBeGreaterThan(25)
+    expect(seconds as number).toBeLessThanOrEqual(31)
+  })
+
+  it('이미 지난 시각은 0 으로 접는다', () => {
+    expect(api.parseRetryAfter(new Date(Date.now() - 60_000).toUTCString())).toBe(0)
+  })
+
+  it('헤더가 없거나 해석할 수 없으면 null 이다', () => {
+    expect(api.parseRetryAfter(null)).toBeNull()
+    expect(api.parseRetryAfter(undefined)).toBeNull()
+    expect(api.parseRetryAfter('')).toBeNull()
+    expect(api.parseRetryAfter('나중에')).toBeNull()
+  })
+})

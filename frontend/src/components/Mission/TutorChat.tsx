@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { askTutor, TutorSource } from '../../services/api'
+import { ApiError, askTutor, TutorSource } from '../../services/api'
 import { getEnvironmentMeta } from '../../config/environments'
 import { getSafeSourceHref } from '../../utils/tutorSources'
 import { EnvironmentId } from '../../types/training'
@@ -39,6 +39,14 @@ const FLOATING_TUTOR_QUERY = '(max-width: 980px), (max-height: 760px)'
 const SLOW_RESPONSE_HINT_MS = 1500
 /** 이 시간이 지나면 취소 버튼을 준다. 자동 실패 처리는 하지 않는다 (FE-12). */
 const CANCELLABLE_AFTER_MS = 15000
+/**
+ * 429 인데 Retry-After 를 읽지 못했을 때 쓸 최소 대기 (초).
+ *
+ * cross-origin 호출에서는 백엔드가 expose_headers 를 주지 않으면 헤더가 가려진다.
+ * 그때 재시도를 열어두면 사용자가 버튼을 두드려 429 만 계속 받는다. 서버가 준
+ * 숫자를 모르므로 화면에는 초를 표시하지 않고 "잠시 후"로만 안내한다.
+ */
+const RATE_LIMIT_FALLBACK_COOLDOWN_SEC = 5
 
 
 const renderInlineText = (text: string) => {
@@ -155,6 +163,13 @@ const TutorChat: React.FC<TutorChatProps> = ({
   const [isSlow, setIsSlow] = useState(false)
   /** 오래 걸리면 취소 버튼을 준다. 자동 실패 처리는 하지 않는다 (FE-12). */
   const [isCancellable, setIsCancellable] = useState(false)
+  /**
+   * 429 로 막힌 동안 남은 초. 0 이면 제한이 풀렸다.
+   * 서버가 준 Retry-After 를 못 읽었을 때는 `isCooldownExact` 가 false 다 —
+   * 그때는 초를 표시하지 않는다(모르는 숫자를 만들어 보여주지 않는다).
+   */
+  const [cooldown, setCooldown] = useState(0)
+  const [isCooldownExact, setIsCooldownExact] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   /** 진행 중인 질문의 controller. unmount·attempt 종료·환경 변경에서 취소한다 (FE-11). */
   const requestRef = useRef<AbortController | null>(null)
@@ -162,8 +177,9 @@ const TutorChat: React.FC<TutorChatProps> = ({
     typeof window === 'undefined' || !window.matchMedia ? false : window.matchMedia(FLOATING_TUTOR_QUERY).matches,
   )
   const hintLevel = Math.min(hintsUsed, 3)
-  const isChatDisabled = loading || !missionId || disabled
+  const isChatDisabled = loading || !missionId || disabled || cooldown > 0
   const environmentLabel = getEnvironmentMeta(environment).label
+  const isRateLimited = cooldown > 0
   const panelClassName = [
     'tutor-panel',
     floating ? 'tutor-floating' : '',
@@ -185,10 +201,23 @@ const TutorChat: React.FC<TutorChatProps> = ({
     setLoading(false)
     setIsSlow(false)
     setIsCancellable(false)
+    setCooldown(0)
+    setIsCooldownExact(false)
   }, [missionId, environment])
 
   /** unmount 에서도 진행 중인 질문을 남기지 않는다. */
   useEffect(() => () => requestRef.current?.abort(), [])
+
+  /** 호출 제한 남은 시간 카운트다운. 0 이 되면 다시 질문할 수 있다. */
+  useEffect(() => {
+    if (cooldown <= 0) return undefined
+
+    const timer = window.setInterval(() => {
+      setCooldown((remaining) => (remaining <= 1 ? 0 : remaining - 1))
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [cooldown])
 
   /** 지연 단계 타이머. loading 이 끝나면 함께 사라진다 (FE-12). */
   useEffect(() => {
@@ -229,7 +258,8 @@ const TutorChat: React.FC<TutorChatProps> = ({
    * controller 가 남아 있으면 그것도 방어선으로 쓴다.
    */
   const ask = useCallback(async (question: string) => {
-    if (!question || !missionId || disabled || requestRef.current) return
+    // 호출 제한 중에는 요청 자체를 보내지 않는다. 보내도 429 만 하나 더 받는다.
+    if (!question || !missionId || disabled || requestRef.current || cooldown > 0) return
 
     const controller = new AbortController()
     requestRef.current = controller
@@ -262,6 +292,17 @@ const TutorChat: React.FC<TutorChatProps> = ({
     } catch (err) {
       // 사용자가 취소한 것은 오류가 아니다.
       if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return
+
+      /*
+       * 429 는 "다시 누르면 되는 실패"가 아니다. 서버가 알려준 시간만큼 입력과
+       * 재전송을 잠근다. Retry-After 를 못 읽으면 최소 대기만 걸고 초는 감춘다.
+       */
+      if (err instanceof ApiError && err.status === 429) {
+        const exact = err.retryAfterSeconds !== null && err.retryAfterSeconds > 0
+        setCooldown(exact ? (err.retryAfterSeconds as number) : RATE_LIMIT_FALLBACK_COOLDOWN_SEC)
+        setIsCooldownExact(exact)
+      }
+
       setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다.')
       setRetryQuestion(question)
     } finally {
@@ -270,7 +311,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
         setLoading(false)
       }
     }
-  }, [disabled, environment, hintLevel, missionId, token])
+  }, [cooldown, disabled, environment, hintLevel, missionId, token])
 
   const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()
@@ -354,10 +395,21 @@ const TutorChat: React.FC<TutorChatProps> = ({
                 disabled={isChatDisabled}
                 onClick={() => void ask(retryQuestion)}
               >
-                다시 질문
+                {isRateLimited
+                  ? isCooldownExact
+                    ? `${cooldown}초 후 재시도`
+                    : '잠시 후 재시도'
+                  : '다시 질문'}
               </button>
             )}
           </div>
+        )}
+        {isRateLimited && (
+          <p className="chat-rate-limit-note" role="status" aria-live="polite">
+            {isCooldownExact
+              ? `질문 횟수 제한에 걸렸습니다. ${cooldown}초 후 다시 질문할 수 있습니다.`
+              : '질문 횟수 제한에 걸렸습니다. 잠시 후 다시 질문할 수 있습니다.'}
+          </p>
         )}
         <form className="chat-form" onSubmit={submitQuestion}>
           {/* label 이 없으면 스크린리더가 이 입력을 읽지 못한다 (FE-11 인수 조건). */}
@@ -368,7 +420,13 @@ const TutorChat: React.FC<TutorChatProps> = ({
             id={`tutor-input-${missionId}`}
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={isChatDisabled ? '질문할 수 없는 상태입니다' : '어떤 명령으로 원인을 찾아야 하나요?'}
+            placeholder={
+              isRateLimited
+                ? '질문 횟수 제한 중입니다'
+                : isChatDisabled
+                  ? '질문할 수 없는 상태입니다'
+                  : '어떤 명령으로 원인을 찾아야 하나요?'
+            }
             disabled={isChatDisabled}
           />
           <button type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
