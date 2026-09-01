@@ -27,6 +27,7 @@ import {
   MISSION_POLL_INTERVAL_MS,
 } from '../../config/polling'
 import { usePolling } from '../../hooks/usePolling'
+import { markStart, measureSince, nextFrame, PERF } from '../../utils/perf'
 import { ActiveAttemptSummary, AttemptType, EnvironmentId } from '../../types/training'
 import MissionCard from './MissionCard'
 import MissionStatus, { MissionAction } from './MissionStatus'
@@ -339,11 +340,18 @@ const MissionList: React.FC<MissionListProps> = ({
 
   const handleCheckMission = async () => {
     if (loading) return
+    /*
+     * 자동 채점 300ms 목표는 API 응답과 화면 반영을 구분해 재야 한다 (FE-20).
+     * 둘을 합쳐 재면 어느 쪽이 느린지 알 수 없다.
+     */
+    markStart(PERF.MISSION_CHECK_API)
+    markStart(PERF.MISSION_CHECK_COMMIT)
     setLoading(true)
     setPendingAction('check')
     setError(null)
     try {
       const result = await checkMission(token)
+      measureSince(PERF.MISSION_CHECK_API)
       showToast(
         result.attempt.status === 'completed' ? 'success' : 'info',
         result.attempt.status === 'completed'
@@ -360,6 +368,9 @@ const MissionList: React.FC<MissionListProps> = ({
         onAttemptCompleted?.(result.attempt.id)
         await fetchMissions()
       }
+      // 화면 반영까지 포함한 시간. 다음 frame 이 그려진 뒤 찍는다.
+      await nextFrame()
+      measureSince(PERF.MISSION_CHECK_COMMIT)
     } catch (err) {
       const msg = err instanceof Error ? err.message : '미션 확인에 실패했습니다.'
       setError(msg)

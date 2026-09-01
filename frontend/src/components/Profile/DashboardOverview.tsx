@@ -17,6 +17,7 @@ import {
   MAX_BACKOFF_MS,
 } from '../../config/polling'
 import { usePolling } from '../../hooks/usePolling'
+import { markStart, measureSince, nextFrame, PERF } from '../../utils/perf'
 import { average, curvePolyline, formatDuration, radarPolygon } from '../../utils/dashboard'
 
 interface DashboardOverviewProps {
@@ -68,8 +69,8 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const [isLoading, setIsLoading] = useState(true)
   /**
    * 필터 전환 시 이전 요청을 끊기 위한 controller (FE-13).
-   * 중복 호출 자체는 usePolling 이 다음 실행을 직접 예약하는 구조로 막는다 (FE-16) —
-   * inFlight 플래그가 필요 없다.
+   * 중복 호출은 usePolling 이 인스턴스 단위 in-flight 가드로 막는다 (FE-16) —
+   * StrictMode 이중 마운트까지 여기서 걸린다.
    */
   const controllerRef = useRef<AbortController | null>(null)
 
@@ -128,6 +129,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
    */
   useEffect(() => {
     setIsLoading(true)
+    void nextFrame().then(() => measureSince(PERF.DASHBOARD_FILTER_LOADING))
     const controller = new AbortController()
     controllerRef.current = controller
 
@@ -224,7 +226,11 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             type="button"
             className={option === filter ? 'active' : ''}
             aria-pressed={option === filter}
-            onClick={() => setFilter(option)}
+            onClick={() => {
+              // 프론트 자체 목표: 클릭 후 로딩 상태 표시 100ms 이내 (FE-20).
+              markStart(PERF.DASHBOARD_FILTER_LOADING)
+              setFilter(option)
+            }}
           >
             {filterLabel(option)}
           </button>

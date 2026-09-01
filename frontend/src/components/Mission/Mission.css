@@ -510,6 +510,13 @@
   font-size: 0.62rem;
 }
 
+/* 응답 시간 (FE-20). 숨기지 않되 답변을 가리지 않게 작게 둔다. */
+.chat-latency {
+  color: var(--faint);
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+}
+
 .chat-fallback-note {
   margin: 0.35rem 0 0;
   color: var(--warning, #d9b45b);

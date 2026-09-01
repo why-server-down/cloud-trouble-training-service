@@ -193,6 +193,68 @@ describe('usePolling (FE-16)', () => {
     expect(task).toHaveBeenCalledTimes(2)
   })
 
+  it('이중 시작(StrictMode)에서도 폴링 루프가 계속 돈다', async () => {
+    /*
+     * 건너뛰기로 막으면 취소된 첫 인스턴스가 실행을 잡고 살아남은 인스턴스가
+     * 건너뛰어 아무도 다음 주기를 예약하지 않는다. 라이브에서 대시보드가
+     * 영구 로딩 상태가 됐던 회귀다.
+     */
+    const task = vi.fn<() => Promise<PollResult>>().mockResolvedValue('continue')
+    const { rerender } = renderHook(() =>
+      usePolling(task, { intervalMs: 1000, hiddenIntervalMs: 15000 }),
+    )
+    rerender()
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    // 루프가 죽지 않았는지 — 다음 주기에 반드시 한 번 더 돈다.
+    const first = task.mock.calls.length
+    await advance(1001)
+    expect(task.mock.calls.length).toBeGreaterThan(first)
+    await advance(1001)
+    expect(task.mock.calls.length).toBeGreaterThan(first + 1)
+  })
+
+  it('같은 인스턴스에서 task 가 돌고 있으면 요청을 겹치지 않는다', async () => {
+    /*
+     * StrictMode 는 마운트 시 effect 를 두 번 실행하고 두 실행이 각각 즉시 1회
+     * task 를 호출한다. 라이브 확인에서 대시보드 요청이 마운트마다 2회 나갔다.
+     */
+    let resolveTask: ((value: PollResult) => void) | null = null
+    const task = vi.fn<() => Promise<PollResult>>().mockImplementation(
+      () =>
+        new Promise<PollResult>((resolve) => {
+          resolveTask = resolve
+        }),
+    )
+
+    const { rerender } = renderHook(() =>
+      usePolling(task, { intervalMs: 1000, hiddenIntervalMs: 15000 }),
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(task).toHaveBeenCalledTimes(1)
+
+    // 진행 중에 visibilitychange 로 즉시 갱신이 시도돼도 겹치지 않는다.
+    await act(async () => {
+      setVisibility('hidden')
+      setVisibility('visible')
+      await Promise.resolve()
+    })
+    expect(task).toHaveBeenCalledTimes(1)
+
+    rerender()
+    await act(async () => {
+      resolveTask?.('continue')
+      await Promise.resolve()
+    })
+    await advance(1001)
+    expect(task).toHaveBeenCalledTimes(2)
+  })
+
   it('enabled 가 false 면 시작하지 않는다', async () => {
     const task = vi.fn<() => Promise<PollResult>>().mockResolvedValue('continue')
     renderHook(() =>

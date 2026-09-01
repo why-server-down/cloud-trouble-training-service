@@ -57,6 +57,20 @@ export const usePolling = (
   const taskRef = useRef(task)
   taskRef.current = task
 
+  /**
+   * 진행 중인 task 의 프라미스. 없으면 null.
+   *
+   * 한 effect 안에서는 다음 실행을 직접 예약하므로 겹칠 수 없다. 그런데
+   * StrictMode 는 마운트 시 effect 를 두 번 실행하고 **두 실행이 각각 즉시 1회
+   * task 를 호출한다.** 그래서 마운트마다 요청이 두 번 나갔다(라이브 확인).
+   *
+   * 건너뛰기(early return)로 막으면 안 된다 — 취소된 첫 인스턴스가 실행을 잡고
+   * 살아남은 인스턴스가 건너뛰면 아무도 다음 주기를 예약하지 않아 폴링이 멈춘다.
+   * 그래서 **진행 중 프라미스를 공유**한다: 요청은 한 번만 나가고, 살아남은
+   * 인스턴스는 그 결과를 받아 정상적으로 다음 주기를 잡는다.
+   */
+  const runningRef = useRef<Promise<PollResult> | null>(null)
+
   useEffect(() => {
     if (!enabled) return undefined
 
@@ -78,12 +92,28 @@ export const usePolling = (
       timerId = window.setTimeout(run, delay)
     }
 
+    /** 진행 중이면 그 프라미스를 그대로 돌려준다. 요청은 한 번만 나간다. */
+    const invoke = (): Promise<PollResult> => {
+      if (runningRef.current) return runningRef.current
+
+      const pending = taskRef.current()
+      runningRef.current = pending
+
+      const release = () => {
+        if (runningRef.current === pending) runningRef.current = null
+      }
+      // 거부도 여기서 받아 둔다. 안 받으면 unhandled rejection 으로 새어 나간다.
+      void pending.then(release, release)
+
+      return pending
+    }
+
     const run = async () => {
       if (cancelled) return
 
       let result: PollResult = 'continue'
       try {
-        result = await taskRef.current()
+        result = await invoke()
         failures = 0
       } catch {
         // task 가 스스로 처리하지 못한 예외는 실패로 센다.
