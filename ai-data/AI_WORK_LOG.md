@@ -458,3 +458,31 @@
   - AI pytest `157 passed, 3 deselected`
   - backend pytest `514 passed, 4 deselected`
 - 후속: AI-19 ValidationAgent advisory 전환
+
+## AI-19 ValidationAgent advisory 전환
+
+- 상태: 완료 — AI PR #85 + backend 경계 PR #86
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`, `feature/be-validation-advisory-contract`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-18 RuntimeContext grounding 및 backend observation 계약 dev 반영 확인
+- 변경:
+  - ValidationAgent의 Kubernetes 직접 조회 중복을 제거하고 환경별 RuntimeContext 입력으로 전환
+  - output에 evidence, advisory_only, error_code 추가
+  - mock 판정은 fault type과 target에 직접 연결된 정상화 근거만 인정
+  - unrelated healthy resource는 resolved 근거에서 제외
+  - confidence를 0~1로 clamp하고 invalid JSON/provider 실패는 safe false advisory 반환
+  - prompt에서 internal summary·정답·주입/복구 방법을 제외하고 reason 길이·secret 제한
+  - ScenarioService가 environment와 RuntimeContext를 전달하고 evidence/error를 저장
+  - AI advisory 실패가 mechanical validation과 점수 처리를 막거나 override하지 않도록 격리
+- 인수 조건 검증:
+  - unrelated healthy deployment 판정 false
+  - LLM resolved=true가 mechanical 결과를 덮어쓰는 경로 없음
+  - internal summary와 복구 명령이 validation prompt/reason에 포함되지 않음
+- 검증:
+  - AI pytest `164 passed, 3 deselected`
+  - backend pytest `515 passed, 4 deselected`
+- 공유 계약:
+  - `backend/app/schemas.py` ValidationJudgment에 evidence/error_code 추가 — FE·AI dev 재동기화 필요
+- 후속: AI-20 대화 memory와 보존
