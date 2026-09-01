@@ -34,6 +34,11 @@ interface MissionListProps {
   environment: EnvironmentId
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
+  /**
+   * 시도가 완료된 순간 (FE-15). App 이 이걸 받아 대시보드를 한 번 갱신한다.
+   * attemptId 를 함께 주므로 같은 완료 이벤트가 두 번 반영되지 않는다.
+   */
+  onAttemptCompleted?: (attemptId: string) => void
 }
 
 interface Confirmation {
@@ -57,7 +62,13 @@ const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
 const DEMO_AI_UNLOCK_STORAGE_KEY = 'demoAiScenarioUnlocked'
 const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
-const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environment, onActiveAttemptChange }) => {
+const MissionList: React.FC<MissionListProps> = ({
+  token,
+  storageScope,
+  environment,
+  onActiveAttemptChange,
+  onAttemptCompleted,
+}) => {
   const [missions, setMissions] = useState<MissionResponse[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
   /**
@@ -304,8 +315,11 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
       if (result.attempt.status === 'completed') {
         forgetActiveAttempt()
         setActiveMissionId(null)
+        setActiveMissionEnvironment(null)
         setHintsUsed(0)
         onActiveAttemptChange(null)
+        // 점수·MTTR 을 프론트에서 더하지 않고 서버 값을 다시 읽게 한다 (FE-15).
+        onAttemptCompleted?.(result.attempt.id)
         await fetchMissions()
       }
     } catch (err) {
@@ -418,10 +432,13 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           : '아직 정상화 조건을 만족하지 못했습니다. 상태를 다시 확인해 주세요.',
       )
       if (result.resolved) {
+        // 상태를 비우기 전에 attemptId 를 잡아둔다 — 완료 이벤트 중복 판정에 쓰인다.
+        const completedAttemptId = activeScenario?.attempt_id ?? null
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
         onActiveAttemptChange(null)
+        if (completedAttemptId) onAttemptCompleted?.(completedAttemptId)
         await fetchMissions()
       }
     } catch (err) {

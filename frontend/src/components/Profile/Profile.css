@@ -64,6 +64,63 @@
   background: var(--accent);
 }
 
+/* 환경 필터 (FE-13). 색만으로 상태를 알리지 않고 aria-pressed 와 함께 쓴다. */
+.dashboard-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.dashboard-filter button {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dashboard-filter button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 핵심 지표 카드 줄 (FE-13). */
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.dashboard-metrics article {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.dashboard-metrics span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+}
+
+.dashboard-metrics strong {
+  font-family: var(--mono);
+  font-size: 1rem;
+}
+
+/* 조회 실패·미완료를 0 으로 위조하지 않고 그대로 드러낸다 (FE-13). */
+.metric-empty {
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-style: italic;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
