@@ -433,3 +433,28 @@
   - AI pytest `151 passed, 3 deselected`
   - backend pytest `512 passed, 4 deselected`
 - 후속: AI-18 환경별 runtime observation 사용
+
+## AI-18 환경별 runtime observation 사용
+
+- 상태: 완료 — AI PR #82 + backend 경계 PR #83
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`, `feature/be-runtime-observation-contract`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-17 PR #81 및 `TutorResult`/`ValidationJudgment` backend 계약 dev 반영 확인
+- 변경:
+  - Kubernetes/Docker/Linux 관측값을 환경별 common observation schema로 정규화
+  - 질문과 관련된 summary key만 최대 5개 선택해 prompt 크기와 무관한 raw 상태 전달 제한
+  - 실제 prompt에 포함한 값만 `observations_used`에 기록
+  - 수집 상태를 complete/partial/unavailable과 available/missing key로 명시
+  - observation unavailable 시 없는 값을 추측하지 않도록 prompt 계약 추가
+  - command output과 log summary를 provider 전달 전에 재차 secret redaction
+  - backend collector에 환경별 최소 관측 probe와 collection status 연결
+- 인수 조건 검증:
+  - 세 환경별 질문 관련 grounding test 통과
+  - observation unavailable 상태와 추측 금지 문구 확인
+  - command/log의 token, password, bearer 값 비노출 확인
+- 검증:
+  - AI pytest `157 passed, 3 deselected`
+  - backend pytest `514 passed, 4 deselected`
+- 후속: AI-19 ValidationAgent advisory 전환
