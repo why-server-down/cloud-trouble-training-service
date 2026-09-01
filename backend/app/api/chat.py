@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import RateLimiter
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.schemas import ChatRequest, ChatResponse, TutorResult
 from app.ai.tutor_service import get_tutor_service
@@ -35,12 +37,26 @@ _FAULT_TO_CHAOS: dict[str, str] = {
 }
 
 
+# 사용자당 호출 빈도 제한. chat 은 호출마다 LLM 비용이 나가므로,
+# 제한이 없으면 한 사용자가 반복 요청만으로 전체 예산을 소진할 수 있다.
+_rate_limiter = RateLimiter(settings.CHAT_RATE_LIMIT_PER_MINUTE)
+
+
 @router.post("/", response_model=ChatResponse)
 async def chat_with_tutor(
     body: ChatRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    retry_after = _rate_limiter.check(str(current_user.id))
+    if retry_after is not None:
+        # 언제 다시 시도할 수 있는지 함께 알린다. 프론트가 화면에 표시할 수 있어야 한다.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"요청이 너무 잦습니다. {retry_after}초 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(int(retry_after) + 1)},
+        )
     """
     AI 튜터에게 질문 (소크라테스식 힌트).
     정적 미션과 AI 시나리오 attempt 모두 지원.

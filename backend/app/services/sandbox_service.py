@@ -12,6 +12,7 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
 from app.core.config import settings
+from app.core.metrics import SANDBOX_PROVISION, SANDBOX_PROVISION_DURATION
 from app.core.environments import DOCKER, LINUX, EnvironmentId, KUBERNETES
 from app.services.k8s_setup import K8sSetupService, get_k8s_setup_service
 
@@ -84,17 +85,25 @@ class SandboxService:
         sandbox_id = self.stable_identifier(user_id, environment)
         await self._k8s_setup.setup_user_namespace(namespace)
         loop = asyncio.get_running_loop()
+        started = time.perf_counter()
         try:
-            return await loop.run_in_executor(
+            reference = await loop.run_in_executor(
                 None,
                 lambda: self._ensure_sync(namespace, sandbox_id, environment),
             )
         except Exception:
+            SANDBOX_PROVISION.labels(environment, "error").inc()
             await loop.run_in_executor(
                 None,
                 lambda: self._cleanup_sync(namespace, sandbox_id),
             )
             raise
+
+        SANDBOX_PROVISION.labels(environment, "ok").inc()
+        SANDBOX_PROVISION_DURATION.labels(environment).observe(
+            time.perf_counter() - started
+        )
+        return reference
 
     async def cleanup(self, sandbox: SandboxRef) -> None:
         """네임스페이스는 보존하고 해당 샌드박스 리소스만 제거한다."""
