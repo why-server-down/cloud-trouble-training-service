@@ -21,9 +21,15 @@ import {
   UnlockStatusResponse,
 } from '../../services/api'
 import { getEnvironmentMeta } from '../../config/environments'
+import {
+  MAX_BACKOFF_MS,
+  MISSION_POLL_HIDDEN_MS,
+  MISSION_POLL_INTERVAL_MS,
+} from '../../config/polling'
+import { usePolling } from '../../hooks/usePolling'
 import { ActiveAttemptSummary, AttemptType, EnvironmentId } from '../../types/training'
 import MissionCard from './MissionCard'
-import MissionStatus from './MissionStatus'
+import MissionStatus, { MissionAction } from './MissionStatus'
 import TutorChat from './TutorChat'
 import './Mission.css'
 
@@ -46,6 +52,8 @@ interface Confirmation {
   message: string
   confirmLabel: string
   danger?: boolean
+  /** 어떤 액션인지. 실행 중 버튼 문구를 액션별로 바꾸기 위한 것이다 (FE-16). */
+  kind?: MissionAction
   action: () => Promise<void>
 }
 
@@ -80,6 +88,11 @@ const MissionList: React.FC<MissionListProps> = ({
   const [hintsUsed, setHintsUsed] = useState(0)
   const [statusRefreshKey, setStatusRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
+  /**
+   * 진행 중인 액션 (FE-16). loading 하나로는 어떤 버튼이 도는지 알 수 없어
+   * 세 버튼 모두 같은 문구로 잠겼다.
+   */
+  const [pendingAction, setPendingAction] = useState<MissionAction | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** 목록이 비었을 때 "준비 중"과 "조회 실패"를 구분하기 위한 상태 (FE-06). */
   const [missionsStatus, setMissionsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -231,41 +244,65 @@ const MissionList: React.FC<MissionListProps> = ({
     }
   }, [hasTutor])
 
-  // AI 시나리오 진행 중일 때 1초마다 상태 갱신
-  useEffect(() => {
-    if (!activeScenario || activeScenario.status !== 'in_progress') return
-    const interval = window.setInterval(async () => {
-      try {
-        const status = await getScenarioStatus(token)
-        setActiveScenario(status)
-        setScenarioHintsUsed(status.hints_used)
-        if (status.status !== 'in_progress') {
-          forgetActiveAttempt()
-          setActiveScenario(null)
-          setScenarioHintsUsed(0)
-          onActiveAttemptChange(null)
-          await fetchMissions()
-        }
-      } catch {
-        // 시나리오 종료 시 404 발생 → 정리
+  /*
+   * AI 시나리오 진행 상태 폴링 (FE-16).
+   *
+   * 예전에는 1초 setInterval 이었고 activeScenario 를 의존성으로 물고 있어서
+   * 폴링이 setActiveScenario 를 부를 때마다 interval 을 새로 만들었다.
+   * 이제 시나리오 id 를 restartKey 로 쓰고 남은 시간 표시는 서버 값으로만 갱신한다.
+   */
+  const pollScenario = useCallback(async () => {
+    try {
+      const status = await getScenarioStatus(token)
+      setActiveScenario(status)
+      setScenarioHintsUsed(status.hints_used)
+
+      if (status.status !== 'in_progress') {
         forgetActiveAttempt()
         setActiveScenario(null)
+        setScenarioHintsUsed(0)
         onActiveAttemptChange(null)
+        await fetchMissions()
+        return 'stop' as const
       }
-    }, 1000)
-    return () => window.clearInterval(interval)
-  }, [activeScenario, token, onActiveAttemptChange, fetchMissions, forgetActiveAttempt])
+      return 'continue' as const
+    } catch (err) {
+      // 404 는 시나리오가 끝난 것이다. 정리하고 멈춘다.
+      if (err instanceof ApiError && err.status === 404) {
+        forgetActiveAttempt()
+        setActiveScenario(null)
+        setScenarioHintsUsed(0)
+        onActiveAttemptChange(null)
+        return 'stop' as const
+      }
+      // 그 밖의 실패는 진행 중인 시나리오를 지우지 않는다 — 일시적 네트워크
+      // 장애로 화면을 비우면 사용자는 훈련이 사라진 줄 안다. backoff 로 재시도한다.
+      throw err
+    }
+  }, [fetchMissions, forgetActiveAttempt, onActiveAttemptChange, token])
+
+  usePolling(pollScenario, {
+    intervalMs: MISSION_POLL_INTERVAL_MS,
+    hiddenIntervalMs: MISSION_POLL_HIDDEN_MS,
+    maxBackoffMs: MAX_BACKOFF_MS,
+    enabled: activeScenario?.status === 'in_progress',
+    restartKey: activeScenario?.scenario_id ?? '',
+  })
 
   const runConfirmedAction = async () => {
     const action = confirmation?.action
+    const kind = confirmation?.kind ?? null
     setConfirmation(null)
+    // 요청 중 중복 실행을 막는다. 확인 모달을 두 번 눌러도 요청은 한 번만 나간다.
     if (!action || loading) return
     setLoading(true)
+    setPendingAction(kind)
     setError(null)
     try {
       await action()
     } finally {
       setLoading(false)
+      setPendingAction(null)
     }
   }
 
@@ -303,6 +340,7 @@ const MissionList: React.FC<MissionListProps> = ({
   const handleCheckMission = async () => {
     if (loading) return
     setLoading(true)
+    setPendingAction('check')
     setError(null)
     try {
       const result = await checkMission(token)
@@ -328,6 +366,7 @@ const MissionList: React.FC<MissionListProps> = ({
       showToast('error', msg)
     } finally {
       setLoading(false)
+      setPendingAction(null)
     }
   }
 
@@ -337,6 +376,7 @@ const MissionList: React.FC<MissionListProps> = ({
       message: '진행 중인 미션을 포기하시겠습니까? 점수는 0점으로 처리됩니다.',
       confirmLabel: '포기',
       danger: true,
+      kind: 'abandon',
       action: async () => {
         try {
           await abandonMission(token)
@@ -360,6 +400,7 @@ const MissionList: React.FC<MissionListProps> = ({
       title: '힌트 사용',
       message: '힌트를 사용하시겠습니까? 현재 미션 점수가 차감됩니다.',
       confirmLabel: '힌트 사용',
+      kind: 'hint',
       action: async () => {
         try {
           const attempt = await requestHint(token)
@@ -562,7 +603,7 @@ const MissionList: React.FC<MissionListProps> = ({
           <MissionStatus
             token={token}
             refreshKey={statusRefreshKey}
-            loading={loading}
+            pendingAction={pendingAction}
             onStatusChange={handleStatusChange}
             onMissionEnd={handleMissionEnd}
             onCheck={handleCheckMission}

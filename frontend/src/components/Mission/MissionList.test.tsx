@@ -195,6 +195,26 @@ describe('환경별 미션 (FE-06)', () => {
     )
   })
 
+  it('환경이 바뀌면 이전 미션 조회를 실제로 취소한다 (FE-18)', async () => {
+    const { switchTo } = renderList('kubernetes')
+
+    await waitFor(() => expect(mocked.listMissions).toHaveBeenCalledTimes(1))
+    const firstSignal = mocked.listMissions.mock.calls[0][2] as AbortSignal
+    expect(firstSignal.aborted).toBe(false)
+
+    switchTo('docker')
+
+    // signal 을 넘기는 것만으로는 부족하다. 실제로 끊겨야 늦게 온 응답이 버려진다.
+    await waitFor(() => expect(firstSignal.aborted).toBe(true))
+    await waitFor(() =>
+      expect(mocked.listMissions).toHaveBeenCalledWith(
+        'test-token',
+        'docker',
+        expect.any(AbortSignal),
+      ),
+    )
+  })
+
   it('카드에 환경을 글자로 표시한다', async () => {
     mocked.listMissions.mockResolvedValue([dockerMission])
     renderList('docker')

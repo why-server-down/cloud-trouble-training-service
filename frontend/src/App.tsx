@@ -15,6 +15,15 @@ import {
   isSelectableStatus,
 } from './config/environments'
 import {
+  GRAFANA_PROBE_HIDDEN_MS,
+  GRAFANA_PROBE_INTERVAL_MS,
+  GRAFANA_PROBE_MAX_ATTEMPTS,
+  MAX_BACKOFF_MS,
+  PROFILE_POLL_HIDDEN_MS,
+  PROFILE_POLL_INTERVAL_MS,
+} from './config/polling'
+import { usePolling } from './hooks/usePolling'
+import {
   ActiveAttemptSummary,
   DEFAULT_ENVIRONMENT,
   EnvironmentId,
@@ -36,7 +45,6 @@ type WorkspaceTab = 'missions' | 'terminal'
 /** 사용자별 마지막 선택 환경. 계획서에 정해진 키를 그대로 쓴다. */
 const ENVIRONMENT_STORAGE_KEY = 'afterfail:environment:v1'
 
-const GRAFANA_DATA_POLL_INTERVAL_MS = 1000
 const GRAFANA_DATA_FALLBACK_FAILURES = 3
 const INTRO_TOUR_STORAGE_KEY = 'afterfail:introTour:v1'
 const MISSION_TOUR_STORAGE_KEY = 'afterfail:missionTour:v1'
@@ -259,12 +267,24 @@ function App() {
     }
   }, [token])
 
-  useEffect(() => {
-    if (!token) return
-    void loadProfile()
-    const interval = window.setInterval(loadProfile, 15000)
-    return () => window.clearInterval(interval)
-  }, [loadProfile, token])
+  /*
+   * 프로필 폴링 (FE-16).
+   *
+   * setInterval 이던 것을 usePolling 으로 바꿨다. 응답이 15초보다 오래 걸리면
+   * setInterval 은 요청을 겹쳐 쌓았고, 탭이 백그라운드일 때도 같은 빈도로 돌았다.
+   */
+  const pollProfile = useCallback(async () => {
+    await loadProfile()
+    return 'continue' as const
+  }, [loadProfile])
+
+  usePolling(pollProfile, {
+    intervalMs: PROFILE_POLL_INTERVAL_MS,
+    hiddenIntervalMs: PROFILE_POLL_HIDDEN_MS,
+    maxBackoffMs: MAX_BACKOFF_MS,
+    enabled: Boolean(token),
+    restartKey: token ?? '',
+  })
 
   const loadEnvironments = useCallback(async () => {
     if (!token) return
@@ -350,48 +370,68 @@ function App() {
     setIsObservabilityDegraded(false)
   }, [grafanaUrl, hasActiveAttempt])
 
+  /*
+   * Grafana 데이터 준비 확인 (FE-08 / FE-16).
+   *
+   * 미션이 없거나 이 환경에 대시보드가 없으면 시작하지 않는다 — 예전에는 미션
+   * 종료 후에도 K8s 쿼리를 계속 던졌다. Prometheus 가 영구히 죽어 있어도
+   * 1초마다 무한히 두드리지 않도록 시도 상한과 backoff 를 둔다 (FE-16).
+   */
+  const probeAttemptsRef = useRef(0)
+  const probeFailuresRef = useRef(0)
+
   useEffect(() => {
-    /*
-     * 미션이 없거나 이 환경에 대시보드가 없으면 probe 자체를 시작하지 않는다 (FE-08).
-     * 예전에는 미션 종료 후에도 K8s 쿼리를 계속 던졌고, 대시보드가 없는 환경에서는
-     * 아무도 읽지 않는 실패 로그만 1초마다 쌓였다.
-     */
-    if (!hasActiveAttempt || !grafanaProbeUrl) return
+    probeAttemptsRef.current = 0
+    probeFailuresRef.current = 0
+  }, [grafanaProbeUrl, hasActiveAttempt])
 
-    let cancelled = false
-    let failures = 0
-    let intervalId: number | undefined
+  const probeGrafanaData = useCallback(async () => {
+    probeAttemptsRef.current += 1
 
-    const markDataReady = (degraded = false) => {
-      if (cancelled) return
+    const markReady = (degraded: boolean) => {
       setIsGrafanaDataReady(true)
       if (degraded) setIsObservabilityDegraded(true)
-      if (intervalId) window.clearInterval(intervalId)
+      return 'stop' as const
     }
 
-    const probeGrafanaData = async () => {
-      try {
-        const response = await fetch(grafanaProbeUrl, { cache: 'no-store' })
-        if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
+    try {
+      const response = await fetch(grafanaProbeUrl as string, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Prometheus responded with ${response.status}`)
 
-        const payload = await response.json() as PrometheusQueryResponse
-        if (hasPrometheusResponse(payload)) markDataReady()
-      } catch (error) {
-        failures += 1
-        console.warn('Grafana data readiness probe failed:', error)
-        // iframe 은 떴으니 화면은 열어준다. 다만 degraded 로 표시한다.
-        if (isGrafanaFrameReady && failures >= GRAFANA_DATA_FALLBACK_FAILURES) markDataReady(true)
+      const payload = (await response.json()) as PrometheusQueryResponse
+      if (hasPrometheusResponse(payload)) {
+        probeFailuresRef.current = 0
+        return markReady(false)
       }
-    }
+      return 'continue' as const
+    } catch (error) {
+      probeFailuresRef.current += 1
+      console.warn('Grafana data readiness probe failed:', error)
 
-    void probeGrafanaData()
-    intervalId = window.setInterval(probeGrafanaData, GRAFANA_DATA_POLL_INTERVAL_MS)
+      // iframe 은 떴으니 화면은 열어준다. 다만 degraded 로 표시한다.
+      if (isGrafanaFrameReady && probeFailuresRef.current >= GRAFANA_DATA_FALLBACK_FAILURES) {
+        return markReady(true)
+      }
 
-    return () => {
-      cancelled = true
-      if (intervalId) window.clearInterval(intervalId)
+      /*
+       * iframe 도 안 뜨고 Prometheus 도 계속 죽어 있으면 무한히 두드리지 않는다.
+       * 상한을 넘기면 degraded 로 열어 준다 — 관측이 없다고 터미널까지 막을 이유가 없다.
+       */
+      if (probeAttemptsRef.current >= GRAFANA_PROBE_MAX_ATTEMPTS) {
+        return markReady(true)
+      }
+
+      throw error
     }
-  }, [grafanaProbeUrl, hasActiveAttempt, isGrafanaFrameReady])
+  }, [grafanaProbeUrl, isGrafanaFrameReady])
+
+  usePolling(probeGrafanaData, {
+    intervalMs: GRAFANA_PROBE_INTERVAL_MS,
+    hiddenIntervalMs: GRAFANA_PROBE_HIDDEN_MS,
+    maxBackoffMs: MAX_BACKOFF_MS,
+    enabled: hasActiveAttempt && grafanaProbeUrl !== null,
+    restartKey: `${grafanaProbeUrl ?? ''}:${isGrafanaFrameReady}`,
+  })
 
   const handleLoginSuccess = (newToken: string) => {
     setToken(newToken)
