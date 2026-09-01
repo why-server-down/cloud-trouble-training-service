@@ -45,7 +45,7 @@ class TestCommonSchema:
 
     REQUIRED_KEYS = {
         "environment", "scope", "mission",
-        "recent_user_commands", "observations", "metrics", "logs",
+        "recent_user_commands", "observations", "metrics", "logs", "collection_status",
     }
 
     @pytest.mark.asyncio
@@ -60,6 +60,7 @@ class TestCommonSchema:
         )
         assert self.REQUIRED_KEYS <= set(context)
         assert context["environment"] == environment
+        assert context["collection_status"]["state"] == "unavailable"
 
     @pytest.mark.asyncio
     async def test_scope_carries_namespace_and_sandbox(self, collector, monkeypatch):
@@ -101,6 +102,37 @@ class TestObserverRegistry:
     async def test_unknown_environment_returns_empty(self, collector):
         result = await collector._collect_observations("application", NS, None)
         assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_docker_collects_full_observation_contract(self, collector, monkeypatch):
+        class _Service:
+            def reference_for(self, **kwargs):
+                return type("S", (), {"id": "s1"})()
+
+            def exec_in_sandbox(self, sandbox, argv):
+                return "training-app running" if argv[1] == "ps" else "summary"
+
+        monkeypatch.setattr(
+            "app.services.sandbox_service.get_sandbox_service", lambda: _Service()
+        )
+        result = await collector._observe_docker(NS, None)
+        assert set(collector._EXPECTED_OBSERVATIONS[environments.DOCKER]) <= set(result)
+        assert result["logs"] == "summary"
+
+    @pytest.mark.asyncio
+    async def test_linux_declares_every_required_probe(self, collector, monkeypatch):
+        class _Service:
+            def reference_for(self, **kwargs):
+                return type("S", (), {"id": "s1"})()
+
+            def exec_in_sandbox(self, sandbox, argv):
+                return "summary"
+
+        monkeypatch.setattr(
+            "app.services.sandbox_service.get_sandbox_service", lambda: _Service()
+        )
+        result = await collector._observe_linux(NS, None)
+        assert set(collector._EXPECTED_OBSERVATIONS[environments.LINUX]) == set(result)
 
 
 class TestPartialFailureIsTolerated:
