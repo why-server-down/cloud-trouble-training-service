@@ -4,7 +4,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
@@ -82,7 +82,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # wildcard 와 allow_credentials 를 함께 쓰면 브라우저가 자격 증명을 아무 origin 에나
+    # 보낸다. 허용 목록을 설정으로 받는다.
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -110,4 +112,69 @@ app.mount("/metrics", make_asgi_app())
 
 @app.get("/health")
 async def health_check():
+    """프로세스가 살아 있는지만 본다. 의존 서비스를 확인하지 않는다.
+
+    여기서 DB 를 확인하면 DB 가 잠깐 흔들릴 때 오케스트레이터가 살아 있는 프로세스를
+    죽여 복구를 더 어렵게 만든다.
+    """
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def readiness_check(response: Response):
+    """요청을 받을 준비가 됐는지. 의존 서비스 상태를 함께 알린다.
+
+    하나라도 준비되지 않으면 503 을 준다. 개별 상태를 함께 돌려주므로 어떤 의존이
+    문제인지 바로 알 수 있다.
+    """
+    checks = {
+        "database": await _check_database(),
+        "kubernetes": await _check_kubernetes(),
+        "qdrant": await _check_qdrant(),
+    }
+    ready = all(state["ok"] for state in checks.values() if state["required"])
+    if not ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return {"ready": ready, "checks": checks}
+
+
+async def _check_database() -> dict:
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"ok": True, "required": True}
+    except Exception as exc:
+        return {"ok": False, "required": True, "error": type(exc).__name__}
+
+
+async def _check_kubernetes() -> dict:
+    """샌드박스를 만들려면 필요하다. mock 백엔드에서는 없어도 된다."""
+    required = settings.TERMINAL_BACKEND != "mock"
+    try:
+        from kubernetes import client, config as k8s_config
+
+        try:
+            k8s_config.load_incluster_config()
+        except Exception:
+            k8s_config.load_kube_config()
+        await asyncio.get_running_loop().run_in_executor(
+            None, client.VersionApi().get_code
+        )
+        return {"ok": True, "required": required}
+    except Exception as exc:
+        return {"ok": False, "required": required, "error": type(exc).__name__}
+
+
+async def _check_qdrant() -> dict:
+    """RAG 검색에 쓴다. mock AI 백엔드에서는 없어도 동작한다."""
+    required = settings.AI_BACKEND != "mock"
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            res = await client.get(f"{settings.QDRANT_URL}/readyz")
+        return {"ok": res.status_code < 400, "required": required}
+    except Exception as exc:
+        return {"ok": False, "required": required, "error": type(exc).__name__}

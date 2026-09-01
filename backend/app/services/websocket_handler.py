@@ -4,6 +4,7 @@
 namespace/pod 는 신뢰하지 않으며, 프로토콜 메시지에서도 읽지 않는다.
 """
 import asyncio
+import time
 import logging
 from datetime import datetime, timezone
 
@@ -11,6 +12,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.metrics import (
+    COMMAND_DURATION,
+    COMMAND_EXECUTIONS,
+    command_category,
+)
 from app.models import CommandLog, TerminalSession
 from app.services.command_executor import BaseCommandExecutor, create_command_executor
 from app.services.command_validator import CommandValidator
@@ -133,7 +139,17 @@ class WebSocketHandler:
                     await self._send_error(websocket, validation.error)
                 return
 
+            started = time.perf_counter()
             result = await self.command_executor.execute(validation.argv, sandbox)
+            COMMAND_DURATION.labels(session.environment).observe(
+                time.perf_counter() - started
+            )
+            COMMAND_EXECUTIONS.labels(
+                session.environment,
+                # 원문이 아니라 저카디널리티 범주만 label 로 쓴다.
+                command_category(validation.argv),
+                "ok" if result.exit_code == 0 else "error",
+            ).inc()
 
             # 명령 원문·출력 본문은 info 로그에 남기지 않는다.
             logger.info(

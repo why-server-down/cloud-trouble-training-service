@@ -1,7 +1,10 @@
+import logging
 import asyncio
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 import httpx
 
@@ -124,7 +127,7 @@ class PrometheusValidationService(BaseValidationService):
             if self._is_resolved(result):
                 return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Prometheus query failed for {chaos_type} in {namespace}: {e}")
+            logger.warning(f"[Validation] Prometheus query failed for {chaos_type} in {namespace}: {e}")
         return ValidationResult(is_resolved=False, message=RETRY_MESSAGE)
 
     @staticmethod
@@ -166,7 +169,7 @@ class K8sValidationService(BaseValidationService):
                 return self._retry()
             return result
         except Exception as e:
-            print(f"[Validation] Failed to check {chaos_type} in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to check {chaos_type} in {namespace}: {e}")
             return self._retry()
 
     def _check_resolution_sync(self, chaos_type: str, namespace: str) -> ValidationResult:
@@ -185,7 +188,7 @@ class K8sValidationService(BaseValidationService):
             if nginx_container.image == "nginx:wrongtag":
                 return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
             return self._retry()
 
         try:
@@ -203,7 +206,7 @@ class K8sValidationService(BaseValidationService):
             
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect pods in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect pods in {namespace}: {e}")
             return self._retry()
 
     def _check_memory_stress(self, namespace: str) -> ValidationResult:
@@ -230,7 +233,7 @@ class K8sValidationService(BaseValidationService):
             else:
                 return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
             return self._retry()
 
         try:
@@ -242,7 +245,7 @@ class K8sValidationService(BaseValidationService):
                     return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect pods in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect pods in {namespace}: {e}")
             return self._retry()
 
     def _check_service_misconfig(self, namespace: str) -> ValidationResult:
@@ -253,7 +256,7 @@ class K8sValidationService(BaseValidationService):
                 return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect service in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect service in {namespace}: {e}")
             return self._retry()
 
     def _check_network_latency(self, namespace: str) -> ValidationResult:
@@ -265,7 +268,7 @@ class K8sValidationService(BaseValidationService):
                     return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
             return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
             return self._retry()
 
     # chaos_type → 검증 핸들러 레지스트리. 새 chaos_type 검증은 여기에 등록한다.

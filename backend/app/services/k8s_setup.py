@@ -1,4 +1,7 @@
+import logging
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -35,14 +38,14 @@ class K8sSetupService:
                         metadata=client.V1ObjectMeta(name=namespace)
                     )
                 )
-                print(f"[K8s] 네임스페이스 생성: {namespace}")
+                logger.info(f"[K8s] 네임스페이스 생성: {namespace}")
             else:
                 raise
 
     def _ensure_nginx_deployment(self, namespace: str) -> None:
         try:
             self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
-            print(f"[K8s] nginx 이미 존재: {namespace}")
+            logger.info(f"[K8s] nginx 이미 존재: {namespace}")
         except ApiException as e:
             if e.status == 404:
                 deployment = client.V1Deployment(
@@ -73,14 +76,14 @@ class K8sSetupService:
                 self._apps_api.create_namespaced_deployment(
                     namespace=namespace, body=deployment
                 )
-                print(f"[K8s] nginx 배포 완료: {namespace}")
+                logger.info(f"[K8s] nginx 배포 완료: {namespace}")
             else:
                 raise
 
     def _ensure_nginx_service(self, namespace: str) -> None:
         try:
             self._core_api.read_namespaced_service(name="nginx-svc", namespace=namespace)
-            print(f"[K8s] nginx-svc 이미 존재: {namespace}")
+            logger.info(f"[K8s] nginx-svc 이미 존재: {namespace}")
         except ApiException as e:
             if e.status == 404:
                 service = client.V1Service(
@@ -91,7 +94,7 @@ class K8sSetupService:
                     ),
                 )
                 self._core_api.create_namespaced_service(namespace=namespace, body=service)
-                print(f"[K8s] nginx-svc 생성 완료: {namespace}")
+                logger.info(f"[K8s] nginx-svc 생성 완료: {namespace}")
             else:
                 raise
 
@@ -106,7 +109,7 @@ class K8sSetupService:
     def _teardown_sync(self, namespace: str) -> None:
         try:
             self._core_api.delete_namespace(name=namespace)
-            print(f"[K8s] 네임스페이스 삭제: {namespace}")
+            logger.info(f"[K8s] 네임스페이스 삭제: {namespace}")
         except ApiException as e:
             if e.status != 404:
                 raise

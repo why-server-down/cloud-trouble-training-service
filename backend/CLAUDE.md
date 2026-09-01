@@ -63,7 +63,8 @@ app/
 │   ├── config.py        # Settings (환경변수, AI 백엔드 선택 - mock/openai/gemini)
 │   ├── environments.py  # 환경 상수·EnvironmentId(Literal)·검증·가용성(availability)
 │   ├── database.py      # async engine, session (스키마 관리는 Alembic 담당)
-│   ├── metrics.py       # Prometheus 메트릭
+│   ├── metrics.py       # Prometheus 메트릭 (저카디널리티 label 원칙)
+│   ├── rate_limit.py    # 사용자당 요청 빈도 제한
 │   └── security.py      # JWT, 비밀번호 해싱
 ├── services/
 │   ├── command_validator.py      # 환경별 명령 정책 (Kubectl | Docker | Linux)
@@ -226,6 +227,61 @@ POST /api/scenarios/current/check
 |---|---|
 | image_pull_error, pod_failure, crash_loop, probe_failure, oom_killed, memory_stress, network_latency | `deployment:nginx:running` |
 | service_selector_mismatch, service_misconfig | `service:webapp-svc:endpoints` |
+
+### 운영 설정과 관측 (BE-23)
+
+#### CORS
+
+`allow_origins=["*"]`와 `allow_credentials=True`를 함께 쓰고 있었다. **브라우저가 아무
+origin에나 자격 증명을 보낸다.** `CORS_ORIGINS`(쉼표 구분) 설정으로 바꿨다.
+배포에서는 반드시 지정한다.
+
+#### 메트릭 — label은 저카디널리티만
+
+**label에 사용자 값이 들어가면 시계열이 사용자 수만큼 늘어나 저장소가 터지고,
+민감정보가 메트릭에 남는다.** user ID·namespace·명령 원문·시나리오 제목을 label로
+쓰지 않는다. 테스트가 금지 label을 감시한다.
+
+명령은 `command_category()`로 줄인다.
+
+```
+kubectl get pods -n user-abc  →  kubectl:get
+```
+
+| 메트릭 | label |
+|---|---|
+| `sandbox_provision_total` / `_duration_seconds` | environment, result |
+| `command_execution_total` / `_duration_seconds` | environment, category, result |
+| `chaos_operation_total` / `_duration_seconds` | environment, operation, result |
+| `validation_check_total` / `_duration_seconds` | environment, result |
+| `ai_call_total` / `_duration_seconds` / `ai_token_total` | provider, purpose, result, kind |
+| `active_terminal_sessions` / `active_mission_attempts` | environment |
+| `cleanup_failure_total` | environment, kind |
+
+**AI 메트릭에 프롬프트·응답 본문은 담지 않는다.** provider와 용도만 label로 쓴다.
+
+#### chat rate limit
+
+chat은 호출마다 LLM 비용이 나간다. 제한이 없으면 한 사용자가 반복 요청만으로 전체
+예산을 소진할 수 있다. 사용자당 분당 `CHAT_RATE_LIMIT_PER_MINUTE`회(기본 12).
+
+초과 시 **429와 `Retry-After` 헤더**를 준다. 언제 다시 시도할 수 있는지 알려야 프론트가
+화면에 표시할 수 있다.
+
+> 인메모리 고정 윈도우다. 서버 인스턴스가 여러 개면 인스턴스마다 따로 센다.
+> 단일 인스턴스에는 충분하고, 다중 인스턴스로 가면 Redis 같은 공유 저장소가 필요하다.
+
+#### health와 readiness를 분리
+
+| 엔드포인트 | 확인 대상 |
+|---|---|
+| `GET /health` | 프로세스만. **의존 서비스를 보지 않는다** |
+| `GET /ready` | database / kubernetes / qdrant. 하나라도 준비되지 않으면 503 |
+
+`/health`에서 DB를 확인하면 **DB가 잠깐 흔들릴 때 오케스트레이터가 살아 있는 프로세스를
+죽여** 복구를 더 어렵게 만든다.
+
+`mock` 백엔드에서는 Kubernetes·Qdrant를 `required: false`로 표시해 없어도 준비된 것으로 본다.
 
 ### 동시성과 재시작 복구 (BE-22)
 
