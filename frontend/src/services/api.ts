@@ -53,12 +53,40 @@ export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
 export class ApiError extends Error {
   status: number
+  /**
+   * 429 응답의 Retry-After 를 초로 환산한 값. 읽을 수 없으면 null 이다.
+   * null 이라고 해서 제한이 없는 것이 아니다 — 아래 parseRetryAfter 주석 참고.
+   */
+  retryAfterSeconds: number | null
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+/**
+ * Retry-After 파싱. delta-seconds 와 HTTP-date 두 형식을 모두 받는다.
+ *
+ * **주의:** Retry-After 는 CORS-safelisted response header 가 아니다.
+ * 다른 origin 의 API 를 직접 호출하면 백엔드가 `Access-Control-Expose-Headers` 에
+ * 넣어주지 않는 한 null 로 읽힌다. 같은 origin(Vite proxy / nginx)에서는 그대로 읽힌다.
+ * 그래서 호출자는 null 을 "제한 없음"으로 해석해서는 안 된다.
+ */
+export const parseRetryAfter = (value: string | null | undefined): number | null => {
+  if (!value) return null
+
+  const trimmed = value.trim()
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed)
+    return Number.isFinite(seconds) ? Math.max(0, seconds) : null
+  }
+
+  const at = Date.parse(trimmed)
+  if (Number.isNaN(at)) return null
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000))
 }
 
 interface LoginResponse {
@@ -480,7 +508,16 @@ export const askTutor = async (
   })
 
   if (!response.ok) {
-    throw new Error(await getErrorDetail(response, 'AI 튜터 응답을 받지 못했습니다'))
+    /*
+     * plain Error 를 던지면 호출자가 429 를 500 과 구분할 수 없다.
+     * chat 은 사용자당 분당 호출 제한이 걸려 있으므로(백엔드 CHAT_RATE_LIMIT_PER_MINUTE)
+     * 상태 코드와 재시도 시각을 그대로 올려 화면이 재시도를 막을 수 있게 한다.
+     */
+    throw new ApiError(
+      await getErrorDetail(response, 'AI 튜터 응답을 받지 못했습니다'),
+      response.status,
+      response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : null,
+    )
   }
 
   return response.json()

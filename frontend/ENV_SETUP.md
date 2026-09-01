@@ -26,6 +26,49 @@ VITE_API_BASE_URL=http://192.168.1.100:8000
 VITE_WS_BASE_URL=ws://192.168.1.100:8000
 ```
 
+## CORS: 어떤 origin 으로 열었는지가 중요하다
+
+`api.ts` 의 `normalizeApiBaseUrl` 은 **`VITE_API_BASE_URL` 의 hostname 이 브라우저
+주소창의 hostname 과 같고 포트가 8000 이면** base URL 을 빈 문자열로 접는다.
+그러면 요청이 상대 경로로 나가 Vite dev proxy(또는 nginx)를 타고 **same-origin** 이
+되므로 CORS 가 아예 관여하지 않는다.
+
+hostname 이 다르면 그 접기가 일어나지 않고 **cross-origin 직접 호출**이 된다.
+이때는 백엔드 `CORS_ORIGINS` 에 **페이지의 origin** 이 들어 있어야 한다.
+예전에는 wildcard 라 전부 통과했지만 BE-23 에서 허용 목록으로 바뀌었다.
+
+백엔드 기본값 (`.env.example`):
+
+```env
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
+
+| 브라우저 주소 | `VITE_API_BASE_URL` | 결과 |
+|---|---|---|
+| `http://localhost:3000` | `http://localhost:8000` | same-origin (proxy). CORS 무관 |
+| `http://127.0.0.1:3000` | `http://localhost:8000` | **cross-origin.** `CORS_ORIGINS` 에 `http://127.0.0.1:3000` 추가 필요 |
+| `http://192.168.1.100:3000` | `http://192.168.1.100:8000` | same-origin (proxy). CORS 무관 |
+| `http://192.168.1.100:3000` | `http://localhost:8000` | **cross-origin.** LAN origin 추가 필요 |
+| Docker (nginx) | `http://backend:8000` | same-origin (nginx proxy). CORS 무관 |
+
+`localhost` 와 `127.0.0.1` 은 **다른 origin** 이다. 같은 `.env` 로 한쪽은 되고 한쪽은
+막히는 형태이므로, CORS 오류가 나면 먼저 주소창의 origin 을 확인한다.
+
+> `vite.config.ts` 는 `host: true` 라 LAN IP 로도 열린다. 팀 시연에서 다른 기기로
+> 접속하려면 그 origin 을 `CORS_ORIGINS` 에 넣어야 한다 (백엔드 `.env`, 백엔드 담당 소유).
+
+### Retry-After 가 안 읽히는 경우
+
+`POST /api/chat/` 은 사용자당 분당 호출 제한이 있고(백엔드 `CHAT_RATE_LIMIT_PER_MINUTE`,
+기본 12) 초과 시 429 와 `Retry-After` 헤더를 보낸다.
+
+`Retry-After` 는 CORS-safelisted response header 가 **아니다.** cross-origin 경로에서는
+백엔드가 `Access-Control-Expose-Headers` 에 넣어주지 않으면 JS 에서 `null` 로 읽힌다.
+프론트는 이 경우 초를 만들어 표시하지 않고 "잠시 후 다시 질문할 수 있습니다"로만 안내하며,
+그래도 재시도는 최소 시간 잠근다.
+
+same-origin(proxy) 경로에서는 헤더가 그대로 읽혀 남은 초가 카운트다운으로 표시된다.
+
 ## Docker 환경 설정
 
 Docker Compose를 사용하는 경우:

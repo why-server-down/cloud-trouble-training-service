@@ -450,6 +450,14 @@
   color: var(--faint);
 }
 
+/* 호출 제한 안내. 실패가 아니라 "기다리면 된다"는 상태임을 구분해 보여준다. */
+.chat-rate-limit-note {
+  margin: 0.35rem 0 0;
+  color: var(--warning, #d9b45b);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
 /* 환경 배지 (FE-11). 색만으로 구분하지 않으므로 텍스트를 그대로 노출한다. */
 .tutor-environment-badge {
   padding: 0.1rem 0.4rem;
