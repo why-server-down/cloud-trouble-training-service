@@ -80,10 +80,35 @@ export interface UserProfileResponse {
   total_score: number
 }
 
-interface ChatResponse {
+/**
+ * 튜터 답변의 근거 한 건. 백엔드 `TutorSource` 와 1:1 이다 (FE-11).
+ * `path` 는 지식 베이스 내부 경로일 수 있어 무조건 링크로 만들지 않는다.
+ */
+export interface TutorSource {
+  title: string
+  source_id?: string | null
+  path?: string | null
+  environment?: string | null
+  similarity?: number | null
+}
+
+/**
+ * `POST /api/chat/` 응답. 백엔드 `ChatResponse` 와 1:1 이다 (FE-11).
+ *
+ * 주의: 백엔드 `TutorResult` 에는 environment 가 있지만 `ChatResponse` 는 내보내지
+ * 않는다. 그래서 환경 배지는 응답이 아니라 활성 attempt 의 환경으로 그린다.
+ */
+export interface ChatResponse {
   response: string
   hint_level: number
   mission_name: string | null
+  /** 답변에 쓰인 근거 문서. 없을 수 있다. */
+  sources?: TutorSource[] | null
+  /** 답변에 실제로 쓰인 관측값의 이름. 정답이 아니라 무엇을 봤는지를 알린다. */
+  observations_used?: string[] | null
+  token_usage?: Record<string, unknown> | null
+  /** 프로바이더 실패로 대체 응답을 준 경우. 사용자에게 숨기지 않는다. */
+  fallback_used?: boolean
 }
 
 /**
@@ -410,7 +435,16 @@ export const requestHint = async (token: string): Promise<MissionAttemptResponse
   return withEnvironment(await response.json() as MissionAttemptResponse, '힌트 사용')
 }
 
-export const askTutor = async (token: string, message: string, hintLevel: number = 0): Promise<ChatResponse> => {
+/**
+ * AI 튜터 질문. `signal` 로 취소할 수 있다 (FE-12).
+ * 취소된 요청은 AbortError 로 올라가므로 호출자가 메시지 목록에 넣지 않는다.
+ */
+export const askTutor = async (
+  token: string,
+  message: string,
+  hintLevel: number = 0,
+  signal?: AbortSignal,
+): Promise<ChatResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/chat/`, {
     method: 'POST',
     headers: {
@@ -418,6 +452,7 @@ export const askTutor = async (token: string, message: string, hintLevel: number
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ message, hint_level: hintLevel }),
+    signal,
   })
 
   if (!response.ok) {

@@ -60,6 +60,12 @@ const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope 
 const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environment, onActiveAttemptChange }) => {
   const [missions, setMissions] = useState<MissionResponse[]>([])
   const [activeMissionId, setActiveMissionId] = useState<string | null>(null)
+  /**
+   * 활성 정적 미션의 환경 (FE-11).
+   * 튜터 배지를 선택된 탭이 아니라 attempt 의 환경으로 그리기 위한 값이다 —
+   * 서버 attempt 가 우선이라는 FE-05 규칙을 튜터에도 그대로 적용한다.
+   */
+  const [activeMissionEnvironment, setActiveMissionEnvironment] = useState<EnvironmentId | null>(null)
   const [hintsUsed, setHintsUsed] = useState(0)
   const [statusRefreshKey, setStatusRefreshKey] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -131,6 +137,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
                 status: missionStatus.attempt.status,
               }
               setActiveMissionId(missionStatus.attempt.mission_id ?? null)
+              setActiveMissionEnvironment(missionStatus.attempt.environment)
               setHintsUsed(missionStatus.attempt.hints_used)
             }
           } catch {
@@ -157,6 +164,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
 
       if (summary?.attemptType !== 'static_mission') {
         setActiveMissionId(null)
+        setActiveMissionEnvironment(null)
         setHintsUsed(0)
       }
       if (summary?.attemptType !== 'ai_scenario') {
@@ -547,6 +555,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           <TutorChat
             token={token}
             missionId={activeMissionId}
+            environment={activeMissionEnvironment ?? environment}
             hintsUsed={hintsUsed}
             disabled={loading}
             floating
@@ -589,6 +598,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
           <TutorChat
             token={token}
             missionId={activeScenario.scenario_id}
+            environment={activeScenario.environment}
             hintsUsed={scenarioHintsUsed}
             disabled={loading}
             floating
@@ -666,6 +676,7 @@ const MissionList: React.FC<MissionListProps> = ({ token, storageScope, environm
               <TutorChat
                 token={token}
                 missionId={activeScenario.scenario_id}
+                environment={activeScenario.environment}
                 hintsUsed={scenarioHintsUsed}
                 disabled={loading}
                 floating
