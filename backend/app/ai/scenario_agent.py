@@ -11,6 +11,9 @@ import os
 import time
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.core.config import settings
 from app.ai.observability import record_ai_call
@@ -33,6 +36,87 @@ class ScenarioCandidate:
     score: float
     rejected: bool = False
     rejection_reason: str | None = None
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioTarget(_StrictModel):
+    kind: str
+    name: str
+    namespace: str
+
+
+class ScenarioFault(_StrictModel):
+    type: str
+    target: ScenarioTarget | None = None
+    parameters: dict = Field(default_factory=dict)
+
+
+class ExpectedSolution(_StrictModel):
+    summary: str
+    allowed_fix_patterns: list[str]
+
+
+class Observability(_StrictModel):
+    symptoms: list[str] = Field(min_length=1)
+    suggested_queries: list[str]
+    log_signals: list[str]
+
+
+class ValidationRuleSchema(_StrictModel):
+    name: str
+    type: str
+    query: str
+    stability_seconds: int = Field(ge=0, le=300)
+    is_required: bool = True
+
+
+class ValidationSchema(_StrictModel):
+    rules: list[ValidationRuleSchema] = Field(min_length=1)
+    all_required: bool
+
+
+class ScoringSchema(_StrictModel):
+    base_score: int = Field(ge=50, le=300)
+    hint_penalty: int = Field(ge=0, le=50)
+    time_limit_seconds: int = Field(ge=300, le=3600)
+
+
+class GeneratedScenarioSchema(_StrictModel):
+    environment: Literal["kubernetes", "docker", "linux"]
+    title: str = Field(min_length=2, max_length=80)
+    difficulty: Literal["beginner", "intermediate", "advanced", "expert"]
+    learning_objectives: list[str] = Field(min_length=1, max_length=5)
+    student_brief: str = Field(min_length=10, max_length=600)
+    internal_summary: str = Field(min_length=3, max_length=500)
+    fault: ScenarioFault
+    expected_solution: ExpectedSolution
+    observability: Observability
+    validation: ValidationSchema
+    scoring: ScoringSchema
+
+    @field_validator("student_brief")
+    @classmethod
+    def brief_must_not_reveal_answer(cls, value: str) -> str:
+        import re
+
+        leakage = (
+            r"원인은|정답|내부 요약|주입 방법|exit\s+1|wrongtag|6Mi|"
+            r"kubectl\s+(?:patch|edit|set|apply|delete)|"
+            r"docker\s+(?:network\s+connect|start|restart|update)|kill\s+-"
+        )
+        if re.search(leakage, value, re.IGNORECASE):
+            raise ValueError("student_brief에 원인/정답/복구 또는 주입 방법이 노출되었습니다")
+        return value
+
+
+VALIDATION_TYPES_BY_ENVIRONMENT = {
+    "kubernetes": {"k8s"},
+    "docker": {"mock"},
+    "linux": {"mock"},
+}
 
 
 # 난이도별 Mock Fixture 시나리오
@@ -901,7 +985,11 @@ class OpenAIScenarioAgent:
                 duration_seconds=time.perf_counter() - started,
                 token_usage=getattr(response, "usage", None),
             )
-            return self._parse_response(raw, gen_input)
+            parsed = self._parse_response(raw, gen_input)
+            if any(not candidate.rejected for candidate in parsed):
+                return parsed
+            logger.warning("scenario LLM candidates rejected; appending environment fixture fallback")
+            return [*parsed, *MockScenarioAgent().generate(gen_input)]
 
         except Exception:
             record_ai_call(
@@ -929,9 +1017,12 @@ class OpenAIScenarioAgent:
     ) -> list[ScenarioCandidate]:
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("scenario LLM response JSON parsing failed; using fixture fallback")
-            return MockScenarioAgent().generate(gen_input)
+        except json.JSONDecodeError as exc:
+            logger.warning("scenario LLM response JSON parsing failed")
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason=f"invalid_json: {exc.msg}",
+            )]
 
         # {"scenarios": [...]} 또는 배열 직접 처리
         if isinstance(data, dict):
@@ -942,28 +1033,71 @@ class OpenAIScenarioAgent:
         elif isinstance(data, list):
             scenarios = data
         else:
-            return MockScenarioAgent().generate(gen_input)
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason="invalid_top_level: scenarios 배열이 필요합니다",
+            )]
 
         candidates = []
         for s in scenarios[:3]:
             if not isinstance(s, dict):
+                candidates.append(ScenarioCandidate(
+                    scenario={}, score=0, rejected=True,
+                    rejection_reason="schema_error: candidate는 JSON object여야 합니다",
+                ))
                 continue
-            # 필수 필드 검증
-            if not all(k in s for k in ("title", "student_brief", "fault", "validation")):
+            try:
+                parsed = GeneratedScenarioSchema.model_validate(s)
+            except ValidationError as exc:
+                candidates.append(ScenarioCandidate(
+                    scenario=s, score=0, rejected=True,
+                    rejection_reason=f"schema_error: {exc.errors(include_url=False)}",
+                ))
                 continue
-            if s.get("environment") != gen_input.environment:
+            scenario = parsed.model_dump()
+            if scenario["environment"] != gen_input.environment:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=(
+                        f"wrong_environment: requested={gen_input.environment}, "
+                        f"generated={scenario['environment']}"
+                    ),
+                ))
                 continue
-            # namespace placeholder 확인
-            fault_str = json.dumps(s.get("fault", {}))
+            fault_type = scenario["fault"]["type"]
+            if fault_type not in gen_input.allowed_fault_types:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=f"unknown_fault: {fault_type}",
+                ))
+                continue
+            allowed_rule_types = VALIDATION_TYPES_BY_ENVIRONMENT[gen_input.environment]
+            actual_rule_types = {rule["type"] for rule in scenario["validation"]["rules"]}
+            if not actual_rule_types.issubset(allowed_rule_types):
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=(
+                        f"invalid_validation_type: {sorted(actual_rule_types)}; "
+                        f"allowed={sorted(allowed_rule_types)}"
+                    ),
+                ))
+                continue
+            fault_str = json.dumps(scenario["fault"])
             if gen_input.environment == "kubernetes" and "{{namespace}}" not in fault_str and "namespace" not in fault_str:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason="missing_namespace_placeholder",
+                ))
                 continue
 
-            score = _score_candidate(s, gen_input)
-            candidates.append(ScenarioCandidate(scenario=s, score=score))
+            score = _score_candidate(scenario, gen_input)
+            candidates.append(ScenarioCandidate(scenario=scenario, score=score))
 
         if not candidates:
-            logger.warning("scenario LLM returned no valid candidates; using fixture fallback")
-            return MockScenarioAgent().generate(gen_input)
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason="empty_candidates",
+            )]
 
         return candidates
 

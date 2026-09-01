@@ -367,3 +367,28 @@
   - `backend/app/ai/` print 호출 `0건`
 - 남은 AI-23 범위:
   - retrieval latency/result count/empty rate와 environment별 tutor result metric
+
+## AI-15 환경별 scenario prompt와 schema
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-14 PR #75와 backend 환경 전달 PR #76 dev 머지 확인
+- 변경:
+  - scenario prompt를 공통 exact schema와 Kubernetes/Docker/Linux 환경별 계약으로 일반화
+  - environment별 allowed fault, observation vocabulary, validation rule type 명시
+  - namespace/Pod command나 임의 실행 step 대신 declarative `fault.parameters`만 허용
+  - Pydantic `extra=forbid` strict nested schema로 candidate parse
+  - score 50~300, hint penalty 0~50, time limit 300~3600초, stability 0~300초 검증
+  - student_brief의 원인·정답·복구 명령·주입 방법 leakage 차단
+  - rejected candidate에 invalid JSON/schema/wrong environment/unknown fault/validation reason 보존
+  - 전체 후보 reject 시 동일 environment fixture를 별도 valid fallback으로 추가
+- 인수 조건 검증:
+  - invalid JSON, wrong environment, unknown field/fault, missing validation, answer leakage 모두 reject
+  - Kubernetes/Docker/Linux × 4개 난이도 fixture strict parse/compile `100%`
+- 검증:
+  - AI pytest `142 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+- 후속: AI-16 후보 scoring과 다양성
