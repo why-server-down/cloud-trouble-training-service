@@ -224,6 +224,7 @@ class TutorService:
         fault_type: str | None = None,
         environment: str = "kubernetes",
     ):
+        started = time.perf_counter()
         try:
             from ai_engine import TutorRequest
             from prompt_engine import MissionContext, TrainingContext, UserContext
@@ -246,6 +247,8 @@ class TutorService:
                 "mission": {}, "observations": {}, "recent_user_commands": [],
                 "metrics": {}, "logs": [],
             }
+            from app.ai.runtime_observations import prepare_runtime_context
+            runtime_ctx = prepare_runtime_context(runtime_ctx, user_question, environment)
             training_ctx = TrainingContext(
                 environment=environment,
                 scope=runtime_ctx.get("scope", {"namespace": namespace}),
@@ -255,6 +258,7 @@ class TutorService:
                 metrics=runtime_ctx.get("metrics", {}),
                 logs=runtime_ctx.get("logs", []),
                 user=user_ctx.__dict__,
+                collection_status=runtime_ctx.get("collection_status", {}),
             )
 
             request = TutorRequest(

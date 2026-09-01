@@ -102,6 +102,16 @@ def test_tutor_response_reports_used_observations_and_hides_absolute_path():
     assert response.observations_used == ["processes", "metrics.load", "logs", "recent_commands"]
 
 
+def test_observations_used_contains_only_values_included_in_prompt_context():
+    from prompt_engine import TrainingContext
+
+    context = TrainingContext(
+        environment="docker", observations={"exit": "137", "networks": ""},
+        collection_status={"state": "partial", "missing": ["networks"]},
+    )
+    assert AITutorEngine._observation_keys(context) == ["exit"]
+
+
 def test_rag_failure_returns_safe_fallback_without_exception_text():
     engine = object.__new__(AITutorEngine)
     engine.settings = AISettings(AI_BACKEND="mock")
