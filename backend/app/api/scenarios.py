@@ -44,6 +44,7 @@ async def start_random_scenario(
             body.difficulty,
             environment=body.environment,
             allow_demo_unlock=body.demo_unlock,
+            randomize=body.randomize,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

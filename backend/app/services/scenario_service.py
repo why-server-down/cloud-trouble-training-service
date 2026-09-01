@@ -11,7 +11,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
-from app.ai.scenario_agent import ScenarioGenerationInput, get_scenario_agent
+from app.ai.scenario_agent import ScenarioGenerationInput, get_scenario_agent, select_candidate
 from app.services.chaos_injector import BaseChaosInjector
 from app.services.chaos_plan import (
     ChaosPlanCompiler,
@@ -157,6 +157,7 @@ class ScenarioService:
         difficulty: str,
         environment: str = DEFAULT_ENVIRONMENT,
         allow_demo_unlock: bool = False,
+        randomize: bool = True,
     ) -> dict:
         """난이도 선택 → AI 시나리오 생성 + 장애 주입 + attempt 생성 원스텝."""
         await self._assert_unlocked(db, user.id, allow_demo_unlock=allow_demo_unlock)
@@ -176,6 +177,7 @@ class ScenarioService:
             recent_fault_types=recent_faults,
             allowed_fault_types=environment_fault_types,
             environment=environment,
+            randomize=randomize,
         )
 
         # AI 시나리오 생성
@@ -185,7 +187,7 @@ class ScenarioService:
         if not valid:
             raise RuntimeError("시나리오 생성에 실패했습니다. 잠시 후 다시 시도해 주세요")
 
-        best = max(valid, key=lambda c: c.score)
+        best = select_candidate(valid, gen_input)
         scenario_json = best.scenario
 
         # AI 가 만든 시나리오의 환경이 요청과 다르면 그 환경 injector 가 처리할 수 없다.
