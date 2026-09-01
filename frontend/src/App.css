@@ -504,6 +504,31 @@
   flex: 1;
 }
 
+/* 관측 대시보드가 없는 환경의 안내 자리 (FE-08). iframe 자리를 그대로 채운다. */
+.grafana-frame-wrap.grafana-frame-empty {
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: #111;
+}
+
+/* Prometheus probe 실패 후에도 화면은 열어주되 상태를 숨기지 않는다 (FE-08). */
+.grafana-degraded-note {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  left: 0.6rem;
+  z-index: 1;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #6b5a1f;
+  border-radius: 4px;
+  color: #f4e6b8;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: rgba(28, 22, 5, 0.92);
+}
+
 .grafana-loading-overlay {
   position: absolute;
   inset: 0;

@@ -9,8 +9,13 @@ import {
 } from '../types/training'
 import {
   ENVIRONMENT_META,
+  ENVIRONMENT_OBSERVABILITY,
   ENVIRONMENT_ORDER,
   ENVIRONMENT_ROADMAP,
+  escapePrometheusLabelValue,
+  getGrafanaDataProbeUrl,
+  getGrafanaUrl,
+  hasObservabilityDashboard,
   isSelectableStatus,
   statusNote,
 } from './environments'
@@ -102,5 +107,49 @@ describe('환경 상태 해석 (FE-03)', () => {
     // 아직 열리지 않은 환경은 무엇이 열릴지 보여줄 항목이 있어야 한다.
     expect(ENVIRONMENT_ROADMAP.docker.length).toBeGreaterThan(0)
     expect(ENVIRONMENT_ROADMAP.linux.length).toBeGreaterThan(0)
+  })
+})
+
+describe('환경별 관측 설정 (FE-08)', () => {
+  it('모든 EnvironmentId 에 관측 설정 키가 있다', () => {
+    expect(Object.keys(ENVIRONMENT_OBSERVABILITY).sort()).toEqual([...ENVIRONMENT_IDS].sort())
+  })
+
+  it('Kubernetes 대시보드 URL 에 환경의 scope 변수가 실린다', () => {
+    const url = getGrafanaUrl('kubernetes', 'afterfail-abc')
+    expect(url).toContain('/d/k8s-survival-overview/')
+    expect(url).toContain('var-namespace=afterfail-abc')
+    expect(url).toContain('kiosk')
+  })
+
+  it('namespace 가 없으면 전체를 뜻하는 matcher 로 대체한다', () => {
+    expect(getGrafanaUrl('kubernetes', null)).toContain(`var-namespace=${encodeURIComponent('.*')}`)
+  })
+
+  it('대시보드가 없는 환경은 URL 대신 null 을 준다 — 다른 환경 대시보드로 대체하지 않는다', () => {
+    expect(getGrafanaUrl('docker', 'afterfail-abc')).toBeNull()
+    expect(getGrafanaUrl('linux', 'afterfail-abc')).toBeNull()
+    expect(hasObservabilityDashboard('docker')).toBe(false)
+    expect(hasObservabilityDashboard('linux')).toBe(false)
+    expect(hasObservabilityDashboard('kubernetes')).toBe(true)
+    expect(hasObservabilityDashboard(null)).toBe(false)
+  })
+
+  it('대시보드가 없는 환경은 probe URL 도 없다 — polling 을 시작할 근거가 사라진다', () => {
+    expect(getGrafanaDataProbeUrl('docker', 'afterfail-abc')).toBeNull()
+    expect(getGrafanaDataProbeUrl('linux', 'afterfail-abc')).toBeNull()
+    expect(getGrafanaDataProbeUrl('kubernetes', 'afterfail-abc')).toContain('/api/v1/query?query=')
+  })
+
+  it('probe 쿼리에 scope 가 escape 되어 들어간다', () => {
+    const url = getGrafanaDataProbeUrl('kubernetes', 'ns"injected') as string
+    const query = decodeURIComponent(url.split('query=')[1])
+    expect(query).toBe('sum(kube_pod_status_phase{namespace=~"ns\\"injected"})')
+  })
+
+  it('escape 는 백슬래시와 큰따옴표만 다룬다', () => {
+    expect(escapePrometheusLabelValue('a"b')).toBe('a\\"b')
+    expect(escapePrometheusLabelValue('a\\b')).toBe('a\\\\b')
+    expect(escapePrometheusLabelValue('afterfail-abc')).toBe('afterfail-abc')
   })
 })

@@ -403,3 +403,65 @@ describe('세션을 만드는 시점 (FE-04 회귀)', () => {
     expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('환경별 관측 패널 (FE-08)', () => {
+  /** Prometheus probe 를 가로챈다. 성공 응답이면 readiness 가 바로 통과한다. */
+  const stubPrometheus = () => {
+    const probe = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'success', data: { result: [{ value: [0, '1'] }] } }),
+    })) as unknown as typeof fetch
+    vi.stubGlobal('fetch', probe)
+    return vi.mocked(probe)
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('Kubernetes 미션에서는 해당 환경 대시보드를 열고 title 로 환경을 드러낸다', async () => {
+    const probe = stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    const frame = await screen.findByTitle('Kubernetes Grafana dashboard')
+    expect(frame.getAttribute('src')).toContain('/d/k8s-survival-overview/')
+    expect(screen.getByText('OBSERVABILITY / KUBERNETES')).toBeTruthy()
+    await waitFor(() => expect(probe).toHaveBeenCalled())
+    expect(vi.mocked(probe).mock.calls[0][0]).toContain('/api/v1/query?query=')
+  })
+
+  it('대시보드가 없는 Docker 미션에서는 iframe 대신 안내를 띄운다', async () => {
+    stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('docker'))
+    render(<App />)
+
+    expect(await screen.findByText(/Docker 환경은 관측 대시보드가 아직 없습니다/)).toBeTruthy()
+    // K8s 대시보드로 대체하지 않는다 — 남의 환경 지표를 자기 것으로 읽게 된다.
+    expect(screen.queryByTitle(/Grafana dashboard/)).toBeNull()
+    expect(screen.getByText('OBSERVABILITY / DOCKER')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: '새 창' })).toBeNull()
+  })
+
+  it('대시보드가 없는 환경에서는 readiness polling 을 시작하지 않는다', async () => {
+    const probe = stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('docker'))
+    render(<App />)
+
+    await screen.findByText(/Docker 환경은 관측 대시보드가 아직 없습니다/)
+    expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('활성 미션이 없으면 학습 대시보드를 띄우고 probe 를 돌리지 않는다', async () => {
+    const probe = stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    render(<App />)
+
+    await screen.findByRole('tablist')
+    expect(screen.getByText('PROFILE / LEARNING DASHBOARD')).toBeTruthy()
+    expect(probe).not.toHaveBeenCalled()
+  })
+})
