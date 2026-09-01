@@ -140,6 +140,18 @@ class TestAiContracts:
         assert result.sources[0].title == "docs"
         assert result.token_usage == {"total": 120}
 
+    def test_tutor_source_has_no_external_url_field(self):
+        """링크를 그대로 넘기면 프론트가 임의 외부 주소를 anchor 로 렌더링하게 된다.
+
+        프론트 계획서도 "백엔드가 안전한 URL 을 줄 때만 anchor 로 렌더링한다" 고
+        못 박고 있다. 표시 가능한 식별자와 경로만 넘긴다.
+        """
+        from app.schemas import TutorSource
+
+        fields = set(TutorSource.model_fields)
+        for forbidden in ("url", "link", "href", "external_url"):
+            assert forbidden not in fields
+
     def test_tutor_source_preserves_safe_retrieval_metadata(self):
         from app.schemas import TutorSource
 

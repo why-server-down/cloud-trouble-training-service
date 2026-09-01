@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -23,8 +24,11 @@ from app.core.database import (
     stamp_head_if_schema_current,
 )
 from app.core.metrics import HTTP_DURATION, HTTP_REQUESTS
+from app.services.reconciliation_service import reconcile_active_attempts
 from app.services.seed_data import seed_missions
 from app.services.qdrant_init import auto_ingest_if_empty
+
+logger = logging.getLogger(__name__)
 
 # Windows에서 subprocess 지원을 위한 이벤트 루프 설정
 if sys.platform == 'win32':
@@ -58,6 +62,13 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed_missions(db)
+        # 재시작 전에 진행 중이던 attempt 를 실제 상태와 대조한다.
+        # 시간 초과 정리가 사용자의 status 조회에만 의존하면, 돌아오지 않는
+        # 사용자의 장애가 클러스터에 그대로 남는다.
+        try:
+            await reconcile_active_attempts(db)
+        except Exception:
+            logger.exception("startup reconciliation failed")
     await auto_ingest_if_empty()
     yield
 

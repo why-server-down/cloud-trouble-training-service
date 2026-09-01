@@ -273,6 +273,11 @@ class ScenarioService:
             await db.commit()
             await db.refresh(attempt)
             await db.refresh(scenario)
+        except IntegrityError:
+            # 동시 요청 두 개가 앞의 조회를 모두 통과하면 여기서 하나가 걸린다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise ValueError("이미 진행 중인 시나리오가 있습니다")
         except Exception:
             await db.rollback()
             await injector.revert(chaos_result.chaos_id, namespace)

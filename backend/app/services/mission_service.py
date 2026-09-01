@@ -3,6 +3,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
@@ -195,6 +196,13 @@ class MissionService:
         try:
             await db.commit()
             await db.refresh(attempt)
+        except IntegrityError:
+            # 사용자당 in_progress attempt 는 DB partial unique index 로 1개다.
+            # 동시 요청 두 개가 앞의 조회를 모두 통과하면 여기서 하나가 걸린다.
+            # 서버 오류가 아니라 사용자에게 설명 가능한 상황이다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise ValueError("이미 진행 중인 미션이 있습니다")
         except Exception:
             # 기록에 실패하면 주입된 장애가 고아가 되므로 즉시 되돌린다.
             await db.rollback()
