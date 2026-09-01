@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from dataclasses import dataclass
 
 from app.core.config import settings
+from app.ai.observability import record_ai_call
+
+logger = logging.getLogger(__name__)
 
 _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
@@ -173,16 +178,19 @@ class MockValidationAgent:
 class LLMValidationAgent:
     """OpenAI / Gemini 기반 AI 판정."""
 
-    def __init__(self, api_key: str, model: str, base_url: str | None = None):
+    def __init__(self, api_key: str, model: str, base_url: str | None = None,
+                 provider: str = "openai"):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
+        self._provider = provider
 
     async def judge(self, scenario_context: dict, namespace: str) -> ValidationJudgment:
         state = await asyncio.get_event_loop().run_in_executor(
             None, _collect_k8s_state, namespace
         )
 
+        started = time.perf_counter()
         try:
             import openai
             client_kwargs: dict = {"api_key": self._api_key}
@@ -203,14 +211,23 @@ class LLMValidationAgent:
             )
 
             data = json.loads(response.choices[0].message.content)
+            record_ai_call(
+                provider=self._provider, purpose="validation", result="success",
+                duration_seconds=time.perf_counter() - started,
+                token_usage=getattr(response, "usage", None),
+            )
             return ValidationJudgment(
                 resolved=bool(data.get("resolved", False)),
                 reason=str(data.get("reason", "")),
                 confidence=float(data.get("confidence", 0.5)),
             )
 
-        except Exception as e:
-            print(f"[ValidationAgent] LLM 호출 실패, K8s 상태 기반 fallback: {e}")
+        except Exception:
+            record_ai_call(
+                provider=self._provider, purpose="validation", result="fallback",
+                duration_seconds=time.perf_counter() - started,
+            )
+            logger.exception("validation LLM call failed; using mechanical-state fallback")
             return await MockValidationAgent().judge(scenario_context, namespace)
 
     def _build_prompt(self, scenario_context: dict, k8s_state: dict) -> str:
@@ -232,10 +249,12 @@ def get_validation_agent() -> MockValidationAgent | LLMValidationAgent:
             api_key=settings.GEMINI_API_KEY,
             model=settings.GEMINI_MODEL,
             base_url=_GEMINI_BASE_URL,
+            provider="gemini",
         )
     if settings.AI_BACKEND == "openai" and settings.OPENAI_API_KEY:
         return LLMValidationAgent(
             api_key=settings.OPENAI_API_KEY,
             model=settings.SCENARIO_MODEL,
+            provider="openai",
         )
     return MockValidationAgent()

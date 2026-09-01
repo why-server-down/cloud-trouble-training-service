@@ -5,6 +5,8 @@ AI 튜터 서비스 - ai-data 모듈을 FastAPI 백엔드와 연결하는 어댑
 import sys
 import os
 import asyncio
+import logging
+import time
 import uuid
 from typing import Optional
 
@@ -12,6 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.ai.observability import record_ai_call
+
+logger = logging.getLogger(__name__)
 
 # ai-data 경로를 Python path에 추가
 _AI_DATA_PATH_CANDIDATES = (
@@ -63,7 +68,7 @@ class TutorService:
                 settings=ai_settings,
             )
         except Exception:
-            print("[AI Tutor] 엔진 초기화 실패 (Mock 모드로 fallback)")
+            logger.exception("AI tutor engine initialization failed; using mock fallback")
             self._engine = None
 
     async def get_hint(
@@ -125,8 +130,8 @@ class TutorService:
                         environment=attempt_environment,
                         sandbox=sandbox,
                     )
-            except Exception as e:
-                print(f"[AI Tutor] RuntimeContext 수집 실패 (무시): {e}")
+            except Exception:
+                logger.exception("AI tutor runtime context collection failed")
 
         if self._engine is None:
             response = TutorResult(
@@ -186,6 +191,7 @@ class TutorService:
         assistant_response: str,
         hint_level: int,
     ):
+        started = time.perf_counter()
         try:
             from app.models import TutorMessage
             db.add(TutorMessage(
@@ -201,8 +207,8 @@ class TutorService:
                 hint_level=hint_level,
             ))
             await db.commit()
-        except Exception as e:
-            print(f"[AI Tutor] TutorMessage 저장 실패 (무시): {e}")
+        except Exception:
+            logger.exception("AI tutor message persistence failed")
 
     async def _call_engine(
         self,
@@ -265,6 +271,13 @@ class TutorService:
             response = await loop.run_in_executor(
                 None, lambda: self._engine.get_response(request)
             )
+            record_ai_call(
+                provider=settings.AI_BACKEND,
+                purpose="tutor",
+                result="fallback" if response.fallback_used else "success",
+                duration_seconds=time.perf_counter() - started,
+                token_usage=response.token_usage,
+            )
             from app.schemas import TutorResult
             return TutorResult(
                 message=response.message,
@@ -279,6 +292,13 @@ class TutorService:
             )
 
         except Exception:
+            record_ai_call(
+                provider=settings.AI_BACKEND,
+                purpose="tutor",
+                result="fallback",
+                duration_seconds=time.perf_counter() - started,
+            )
+            logger.exception("AI tutor adapter call failed; using safe fallback")
             from app.schemas import TutorResult
             return TutorResult(
                 message="현재 AI 튜터 응답을 생성하지 못했습니다. 잠시 후 다시 질문해 주세요.",

@@ -346,3 +346,24 @@
   - AI pytest `118 passed, 3 deselected`
   - backend pytest `511 passed, 4 deselected`
 - 후속: AI-15 환경별 scenario prompt와 schema
+
+## 백엔드 관측 handoff — AI-23 부분 구현
+
+- 상태: 완료 (AI-23 전체 완료 아님)
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/ai-hardening`
+- 요청 배경:
+  - 백엔드 담당이 추가한 `AI_CALLS`, `AI_CALL_DURATION`, `AI_TOKENS` 연결
+  - AI 소유 경로 `backend/app/ai/`에 남은 print 7건 제거
+- 변경:
+  - Tutor/Scenario/Validation LLM 호출을 provider와 purpose 저카디널리티 label로 계측
+  - success/fallback 호출 수, 호출 시간, prompt/completion/total token 기록
+  - user ID, namespace, prompt, response 본문은 metric label/value에 포함하지 않음
+  - print 7건을 표준 logging의 warning/exception으로 전환
+  - provider 실패 fallback도 result=fallback으로 기록
+- 검증:
+  - AI pytest `122 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+  - `backend/app/ai/` print 호출 `0건`
+- 남은 AI-23 범위:
+  - retrieval latency/result count/empty rate와 environment별 tutor result metric
