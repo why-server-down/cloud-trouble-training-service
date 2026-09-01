@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ApiError, askTutor, TutorSource } from '../../services/api'
 import { getEnvironmentMeta } from '../../config/environments'
 import { getSafeSourceHref } from '../../utils/tutorSources'
+import { markStart, measureSince, PERF } from '../../utils/perf'
 import { EnvironmentId } from '../../types/training'
 
 interface TutorChatProps {
@@ -29,6 +30,8 @@ interface ChatMessage {
   observations?: string[]
   /** 프로바이더 실패로 받은 대체 응답인가. */
   fallback?: boolean
+  /** 질문 전송부터 답변 도착까지 걸린 ms (FE-20). 숨기지 않고 그대로 보여준다. */
+  latencyMs?: number | null
 }
 
 const initialMessages: ChatMessage[] = [
@@ -105,10 +108,15 @@ const ChatMessageContent: React.FC<{ text: string }> = ({ text }) => {
 const ChatMessageEvidence: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const observations = message.observations ?? []
   const sources = message.sources ?? []
-  if (observations.length === 0 && sources.length === 0) return null
+  const latency = message.latencyMs
+  if (observations.length === 0 && sources.length === 0 && latency == null) return null
 
   return (
     <div className="chat-evidence">
+      {latency != null && (
+        // 측정값을 숨기지 않는다 (FE-20). 느렸다면 사용자도 알아야 한다.
+        <span className="chat-latency">응답 {(latency / 1000).toFixed(1)}초</span>
+      )}
       {observations.length > 0 && (
         <details className="chat-evidence-group">
           <summary>사용한 관측 정보 {observations.length}건</summary>
@@ -263,7 +271,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
 
     const controller = new AbortController()
     requestRef.current = controller
-    const startedAt = performance.now()
+    markStart(PERF.TUTOR_RESPONSE)
 
     setLoading(true)
     setError(null)
@@ -275,9 +283,11 @@ const TutorChat: React.FC<TutorChatProps> = ({
       // 취소된 요청의 응답은 목록에 넣지 않는다.
       if (controller.signal.aborted) return
 
-      if (import.meta.env.DEV) {
-        console.debug(`[tutor] ${environment} 응답 ${Math.round(performance.now() - startedAt)}ms`)
-      }
+      /*
+       * 응답 시간을 measure 로 남긴다 (FE-20). AI 1.5초 목표는 백엔드·LLM 을 포함한
+       * 목표라서 프론트가 감추면 달성 여부를 판단할 수 없다.
+       */
+      const latencyMs = measureSince(PERF.TUTOR_RESPONSE)
 
       setMessages((current) => [
         ...current,
@@ -287,6 +297,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
           sources: response.sources ?? [],
           observations: response.observations_used ?? [],
           fallback: Boolean(response.fallback_used),
+          latencyMs,
         },
       ])
     } catch (err) {
@@ -319,7 +330,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
         setLoading(false)
       }
     }
-  }, [cooldown, disabled, environment, hintLevel, missionId, token])
+  }, [cooldown, disabled, hintLevel, missionId, token])
 
   const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()
