@@ -13,34 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.ai.scenario_agent import ScenarioGenerationInput, get_scenario_agent
 from app.services.chaos_injector import BaseChaosInjector
-from app.services.chaos_plan import ChaosPlanCompiler, FAULT_TYPE_TO_CHAOS_TYPE
+from app.services.chaos_plan import (
+    ChaosPlanCompiler,
+    FAULT_TYPE_TO_CHAOS_TYPE,
+    allowed_fault_types,
+)
 from app.services.scoring_service import ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
 from app.core.environments import DEFAULT_ENVIRONMENT
-
-ALLOWED_FAULT_TYPES = [
-    "image_pull_error",
-    "pod_failure",
-    "crash_loop",
-    "oom_killed",
-    "memory_stress",
-    "service_selector_mismatch",
-    "service_misconfig",
-    "network_latency",
-    "probe_failure",
-    "configmap_misconfig",
-    "liveness_probe_failure",
-    "init_container_failure",
-    "node_selector_mismatch",
-    "compound_probe_cascade",
-    "compound_crash_service",
-    "wrong_image_registry",
-    "secret_ref_missing",
-    "pvc_unbound",
-    "cpu_throttle",
-]
-
 
 class ScenarioService:
 
@@ -150,7 +131,9 @@ class ScenarioService:
         await db.refresh(attempt)
         return True
 
-    async def _get_recent_fault_types(self, db: AsyncSession, user_id: uuid.UUID, limit: int = 5) -> list[str]:
+    async def _get_recent_fault_types(
+        self, db: AsyncSession, user_id: uuid.UUID, environment: str, limit: int = 5
+    ) -> list[str]:
         result = await db.execute(
             select(GeneratedScenario.fault_type)
             .join(MissionAttempt, MissionAttempt.scenario_id == GeneratedScenario.id)
@@ -159,6 +142,7 @@ class ScenarioService:
                     MissionAttempt.user_id == user_id,
                     MissionAttempt.status.in_(["completed", "abandoned"]),
                     MissionAttempt.attempt_type == "ai_scenario",
+                    GeneratedScenario.environment == environment,
                 )
             )
             .order_by(MissionAttempt.start_time.desc())
@@ -182,14 +166,16 @@ class ScenarioService:
             raise ValueError("이미 진행 중인 미션이 있습니다. 완료하거나 포기한 후 다시 시작하세요")
 
         # 생성 컨텍스트
-        recent_faults = await self._get_recent_fault_types(db, user.id)
+        recent_faults = await self._get_recent_fault_types(db, user.id, environment)
         namespace = f"user-{user.id}"
+        environment_fault_types = sorted(allowed_fault_types(environment))
 
         gen_input = ScenarioGenerationInput(
             difficulty=difficulty,
             namespace=namespace,
             recent_fault_types=recent_faults,
-            allowed_fault_types=ALLOWED_FAULT_TYPES,
+            allowed_fault_types=environment_fault_types,
+            environment=environment,
         )
 
         # AI 시나리오 생성
@@ -250,7 +236,7 @@ class ScenarioService:
         )
 
         # 장애 주입 (fault_type → chaos_type 매핑 후 기존 inject() 사용)
-        chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(plan.fault_type, "pod_failure")
+        chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(plan.fault_type, plan.fault_type)
         injector = self._injector_for(scenario.environment)
         chaos_result = await injector.inject(chaos_type, namespace)
         if not chaos_result.success:

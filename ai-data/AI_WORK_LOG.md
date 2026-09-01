@@ -320,3 +320,29 @@
   - backend pytest `364 passed`
   - tutor offline eval `60/60 passed`
 - 후속: AI-14 environment-aware scenario input과 fixtures
+
+## AI-14 environment-aware scenario input과 fixtures
+
+- 상태: 완료 — AI PR #75 + backend 경계 PR
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`, `feature/be-scenario-environment-contract`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-13 PR #70 dev 머지와 Kubernetes/Docker/Linux 실행 fault allowlist 확인
+- 변경:
+  - `ScenarioGenerationInput.environment` 추가
+  - Kubernetes/Docker/Linux fixture를 환경별·난이도별로 분리
+  - LLM 요청에 environment를 전달하고 wrong-environment 응답을 거절
+  - provider/parse 실패 시 요청과 같은 environment fixture로만 fallback
+  - 빈 allowlist 또는 일치 fixture 부재 시 명시적 오류 반환
+  - ScenarioService가 요청 environment와 해당 환경 allowlist를 agent에 전달
+  - 최근 fault 중복 이력을 GeneratedScenario.environment 안에서만 조회
+  - Docker/Linux fault type이 Kubernetes `pod_failure`로 fallback되지 않고 해당 injector에 그대로 전달
+- 인수 조건 검증:
+  - Docker 요청 candidate environment `100% docker`
+  - Docker provider 실패 fallback environment `100% docker`
+  - 세 환경의 빈 allowlist가 모두 명시적 오류
+- 검증:
+  - AI pytest `118 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+- 후속: AI-15 환경별 scenario prompt와 schema
