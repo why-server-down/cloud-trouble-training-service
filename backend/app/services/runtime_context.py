@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 
 class RuntimeContextCollector:
 
+    _EXPECTED_OBSERVATIONS = {
+        environments.KUBERNETES: ("pods", "deployments", "services", "events", "readiness"),
+        environments.DOCKER: ("containers", "exit", "resources", "networks", "volumes", "logs"),
+        environments.LINUX: ("processes", "memory", "disk", "load", "sockets", "services", "logs"),
+    }
+
     async def collect(
         self,
         user_id: uuid.UUID,
@@ -92,6 +98,14 @@ class RuntimeContextCollector:
             "metrics": metrics,
             "logs": [],
         }
+        expected = self._EXPECTED_OBSERVATIONS.get(environment, ())
+        available = [key for key in expected if observations.get(key) not in (None, "", [], {})]
+        missing = [key for key in expected if key not in available]
+        context["collection_status"] = {
+            "state": "unavailable" if not available else "partial" if missing else "complete",
+            "available": available,
+            "missing": missing,
+        }
 
         # 기존 튜터 구현이 쓰는 키를 함께 남긴다. AI 담당이 새 스키마로 옮길 때까지
         # 양쪽이 같이 동작해야 한다(소유 경로가 달라 한 PR 에서 못 바꾼다).
@@ -130,14 +144,38 @@ class RuntimeContextCollector:
         state = await loop.run_in_executor(
             None, lambda: self._collect_k8s_state(namespace)
         )
-        return {"kubernetes_state": state}
+        pods = state.get("pods", []) if isinstance(state, dict) else []
+        return {
+            "kubernetes_state": state,
+            "pods": pods,
+            "deployments": state.get("deployments", []) if isinstance(state, dict) else [],
+            "services": state.get("services", []) if isinstance(state, dict) else [],
+            "events": state.get("recent_events", []) if isinstance(state, dict) else [],
+            "readiness": [
+                {"name": pod.get("name"), "ready": pod.get("ready")}
+                for pod in pods if isinstance(pod, dict)
+            ],
+        }
 
     async def _observe_docker(self, namespace: str, sandbox) -> dict:
         probes = {
-            "containers": ["docker", "ps", "-a", "--format", "{{.Names}} {{.Status}}"],
+            "containers": ["docker", "ps", "-a", "--format", "{{.Names}} {{.State}} {{.Status}}"],
+            "exit": ["docker", "ps", "-a", "--format", "{{.Names}} {{.Status}}"],
+            "resources": ["docker", "stats", "--no-stream", "--format", "{{.Name}} {{.CPUPerc}} {{.MemUsage}}"],
             "networks": ["docker", "network", "ls", "--format", "{{.Name}}"],
+            "volumes": ["docker", "volume", "ls", "--format", "{{.Name}}"],
         }
-        return await self._probe_sandbox(namespace, sandbox, environments.DOCKER, probes)
+        observations = await self._probe_sandbox(
+            namespace, sandbox, environments.DOCKER, probes
+        )
+        container_output = observations.get("containers", "")
+        container_name = container_output.split(maxsplit=1)[0] if container_output else ""
+        if container_name and container_name.replace("-", "").replace("_", "").replace(".", "").isalnum():
+            observations.update(await self._probe_sandbox(
+                namespace, sandbox, environments.DOCKER,
+                {"logs": ["docker", "logs", "--tail", "20", container_name]},
+            ))
+        return observations
 
     async def _observe_linux(self, namespace: str, sandbox) -> dict:
         probes = {
@@ -145,6 +183,9 @@ class RuntimeContextCollector:
             "disk": ["sh", "-c", "df -h | head -10"],
             "memory": ["sh", "-c", "free -m"],
             "load": ["sh", "-c", "cat /proc/loadavg"],
+            "sockets": ["sh", "-c", "ss -lntup | head -25"],
+            "services": ["sh", "-c", "ps -eo pid,stat,comm,args | head -25"],
+            "logs": ["sh", "-c", "tail -n 20 /var/log/*.log 2>/dev/null | tail -40"],
         }
         return await self._probe_sandbox(namespace, sandbox, environments.LINUX, probes)
 
