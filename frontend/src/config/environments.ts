@@ -16,13 +16,27 @@ import {
 export interface EnvironmentDisplayMeta {
   label: string
   subtitle: string
+  /** 미션 시작 전 field guide 의 "상태 조사" 단계 설명 (FE-09). */
+  investigationHint: string
 }
 
 /** Record 로 선언해 환경이 추가되면 컴파일 단계에서 누락이 드러나게 한다. */
 export const ENVIRONMENT_META: Record<EnvironmentId, EnvironmentDisplayMeta> = {
-  kubernetes: { label: 'Kubernetes', subtitle: '쿠버네티스 장애 대응' },
-  docker: { label: 'Docker', subtitle: '컨테이너 운영' },
-  linux: { label: 'Linux', subtitle: '시스템 관리' },
+  kubernetes: {
+    label: 'Kubernetes',
+    subtitle: '쿠버네티스 장애 대응',
+    investigationHint: 'Pod, Deployment, Service 상태와 이벤트를 차례로 확인합니다.',
+  },
+  docker: {
+    label: 'Docker',
+    subtitle: '컨테이너 운영',
+    investigationHint: '컨테이너 상태와 로그, 네트워크·볼륨 설정을 차례로 확인합니다.',
+  },
+  linux: {
+    label: 'Linux',
+    subtitle: '시스템 관리',
+    investigationHint: '프로세스, 디스크 사용량, 부하 지표를 차례로 확인합니다.',
+  },
 }
 
 /**
@@ -36,18 +50,36 @@ export interface EnvironmentTerminalMeta {
   /** 터미널 헤더 라벨. 어느 환경의 셸인지 한눈에 보이게 한다. */
   headerLabel: string
   /**
-   * 이 환경에서 실행할 수 있는 명령의 실행 파일.
-   * 백엔드 정책이 아직 없는 환경은 null 이다 — 없는 정책을 추측해 쓰지 않는다.
+   * argv[0] 이 고정 실행 파일인 환경의 그 실행 파일 (kubectl / docker).
+   * 명령 자체가 argv[0] 인 환경(Linux)은 null 이고 `allowedCommands` 를 쓴다.
    */
   binary: string | null
+  /**
+   * argv[0] 자체로 허용 여부가 갈리는 환경의 명령 목록 (FE-09).
+   * 원본은 `LinuxPolicy` 의 READ_COMMANDS + FILE_READ_COMMANDS + RECOVERY_COMMANDS 다.
+   * binary 환경은 null.
+   */
+  allowedCommands: readonly string[] | null
   /** Tab 자동완성 후보. */
   completions: readonly string[]
+  /**
+   * 미션 시작 전 field guide 에 보여줄 조사 시작 명령 (FE-09).
+   * 예전에는 App.tsx 에 kubectl 명령이 하드코딩돼 Docker/Linux 탭에서도 그대로 보였다.
+   */
+  investigationStarters: readonly string[]
 }
 
 export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta> = {
   kubernetes: {
     headerLabel: 'SHELL / KUBECTL',
     binary: 'kubectl',
+    allowedCommands: null,
+    investigationStarters: [
+      'kubectl get pods',
+      'kubectl get deployments',
+      'kubectl get services',
+      'kubectl get events --sort-by=.metadata.creationTimestamp',
+    ],
     completions: [
       'kubectl get pods',
       'kubectl get services',
@@ -66,6 +98,13 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
   docker: {
     headerLabel: 'SHELL / DOCKER',
     binary: 'docker',
+    allowedCommands: null,
+    investigationStarters: [
+      'docker ps -a',
+      'docker logs ',
+      'docker inspect ',
+      'docker network inspect ',
+    ],
     // BE-12 DockerPolicy 의 READ_COMMANDS / READ_SUBCOMMANDS / RECOVERY_COMMANDS 범위 안에서만 고른다.
     completions: [
       'docker ps',
@@ -95,9 +134,54 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
   },
   linux: {
     headerLabel: 'SHELL / LINUX',
-    // BE-16~18 이 아직 없어 명령 정책이 정해지지 않았다. 정해지면 여기를 채운다.
+    // Linux 는 단일 바이너리가 아니라 명령 자체가 argv[0] 이다 (BE-16 LinuxPolicy).
     binary: null,
-    completions: ['clear'],
+    // LinuxPolicy 의 READ_COMMANDS + FILE_READ_COMMANDS + RECOVERY_COMMANDS 를 그대로 옮겼다.
+    allowedCommands: [
+      'ps', 'free', 'df', 'du', 'top', 'uptime', 'iostat',
+      'ss', 'netstat', 'lsof', 'pstree', 'id', 'whoami', 'env',
+      'cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find',
+      'kill', 'pkill', 'rm', 'truncate',
+    ],
+    // 실제 장애 유형(disk_pressure / cpu_saturation / process_flood)을 조사하는 순서대로.
+    investigationStarters: ['ps aux', 'df -h', 'top -b -n 1', 'cat /proc/loadavg'],
+    /*
+     * 계획서 FE-09 의 최소 목록에는 systemctl / journalctl / dmesg 가 있지만
+     * LinuxPolicy 가 셋 다 배제한다 — 이 이미지에 systemd 가 없고 커널 링 버퍼도
+     * 막혀 있다(BE-16 실측). 제안하면 사용자가 그것을 정답으로 착각한다.
+     *
+     * 경로 인자를 받는 명령에는 값이 분리되는 플래그(-n 50 처럼)를 넣지 않는다.
+     * LinuxPolicy._check_paths 가 플래그 값을 경로로 오인해 거절한다.
+     */
+    completions: [
+      'ps aux',
+      'ps -ef',
+      'pstree -p',
+      'top -b -n 1',
+      'uptime',
+      'free -m',
+      'df -h',
+      'du -sh /tmp/afterfail',
+      'iostat',
+      'ss -lntp',
+      'netstat -lntp',
+      'lsof ',
+      'id',
+      'whoami',
+      'env',
+      'cat /proc/loadavg',
+      'cat /proc/meminfo',
+      'ls -al /tmp/afterfail',
+      'find /tmp/afterfail',
+      'stat ',
+      'head ',
+      'tail ',
+      'wc -l ',
+      'kill ',
+      'pkill -f afterfail-',
+      'rm /tmp/afterfail/',
+      'clear',
+    ],
   },
 }
 

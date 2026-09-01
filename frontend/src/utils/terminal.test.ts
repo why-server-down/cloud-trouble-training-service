@@ -62,11 +62,25 @@ describe('getOfflineCommandNotice (FE-07)', () => {
     )
   })
 
-  it('명령 정책이 없는 환경에서는 무엇이 허용되는지 단정하지 않는다', () => {
+  it('allowlist 환경에서는 허용 목록에 없는 명령을 먼저 구분해 알린다 (FE-09)', () => {
+    // LinuxPolicy 가 systemd 부재로 배제한 명령이다. 정답으로 착각하게 두지 않는다.
     const notice = getOfflineCommandNotice('linux', 'systemctl status nginx')
 
-    expect(notice).toContain('연결')
-    expect(notice).not.toContain('만 실행할 수 있습니다')
+    expect(notice).toContain('systemctl')
+    expect(notice).toContain('실행할 수 없습니다')
+    // 단일 바이너리 문구를 쓰면 안 된다 — Linux 는 실행 파일이 하나가 아니다.
+    expect(notice).not.toContain('명령만 실행할 수 있습니다')
+  })
+
+  it('allowlist 환경에서 허용된 명령은 연결 문제로 안내한다 (FE-09)', () => {
+    expect(getOfflineCommandNotice('linux', 'ps aux')).toContain('연결')
+    expect(getOfflineCommandNotice('linux', 'df -h')).toContain('연결')
+    expect(getOfflineCommandNotice('linux', '')).toContain('연결')
+  })
+
+  it('allowlist 판정은 argv[0] 만 본다 — 접두어가 같은 다른 명령을 통과시키지 않는다', () => {
+    expect(getOfflineCommandNotice('linux', 'psql -l')).toContain('실행할 수 없습니다')
+    expect(getOfflineCommandNotice('linux', 'dfx')).toContain('실행할 수 없습니다')
   })
 
   it('빈 명령에도 안내를 낸다', () => {
@@ -83,14 +97,20 @@ describe('환경별 터미널 설정 (FE-07)', () => {
     }
   })
 
-  it('자동완성 후보는 그 환경의 실행 파일이거나 로컬 명령이다', () => {
+  it('자동완성 후보는 그 환경의 정책 안에 있다', () => {
     // 서버가 거절할 명령을 Tab 으로 완성해 주면 안 된다.
     for (const environment of ENVIRONMENT_IDS) {
-      const { binary, completions } = ENVIRONMENT_TERMINAL[environment]
+      const { binary, allowedCommands, completions } = ENVIRONMENT_TERMINAL[environment]
+      // 두 정책 형태 중 정확히 하나만 갖는다.
+      expect(Boolean(binary) !== Boolean(allowedCommands), `${environment} 정책 형태`).toBe(true)
+
       for (const candidate of completions) {
         if (candidate === 'clear') continue
-        expect(binary).not.toBeNull()
-        expect(candidate.startsWith(`${binary} `)).toBe(true)
+        if (binary) {
+          expect(candidate.startsWith(`${binary} `), candidate).toBe(true)
+        } else {
+          expect(allowedCommands, candidate).toContain(candidate.split(/\s+/)[0])
+        }
       }
     }
   })
@@ -126,5 +146,67 @@ describe('환경별 터미널 설정 (FE-07)', () => {
     const labels = ENVIRONMENT_IDS.map((id) => ENVIRONMENT_TERMINAL[id].headerLabel)
 
     expect(new Set(labels).size).toBe(ENVIRONMENT_IDS.length)
+  })
+})
+
+describe('Linux 터미널 설정 (FE-09)', () => {
+  const linux = ENVIRONMENT_TERMINAL.linux
+
+  it('계획서 목록이 아니라 LinuxPolicy 실측 목록을 따른다', () => {
+    // BE-16 이 배제한 명령들: systemd 가 없고 커널 링 버퍼도 막혀 있다.
+    for (const excluded of ['systemctl', 'journalctl', 'dmesg']) {
+      expect(linux.allowedCommands).not.toContain(excluded)
+      expect(linux.completions.some((c) => c.startsWith(excluded))).toBe(false)
+    }
+  })
+
+  it('실제 장애 유형을 조사할 명령을 제안한다', () => {
+    // linux_chaos_injector: disk_pressure / cpu_saturation / process_flood
+    const heads = linux.completions.map((c) => c.split(/\s+/)[0])
+    for (const command of ['ps', 'df', 'du', 'top', 'free', 'pstree', 'cat']) {
+      expect(heads, command).toContain(command)
+    }
+  })
+
+  it('경로를 받는 명령에 값이 분리되는 플래그를 붙이지 않는다', () => {
+    /*
+     * LinuxPolicy._check_paths 는 argv 에서 `-` 로 시작하지 않는 토큰을 전부
+     * 경로로 본다. `tail -n 50 <path>` 의 `50` 이 경로로 오인돼 거절된다.
+     */
+    const pathCommands = ['cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find', 'rm', 'truncate']
+    for (const candidate of linux.completions) {
+      const [head, ...rest] = candidate.trim().split(/\s+/)
+      if (!pathCommands.includes(head)) continue
+      const flagIndexes = rest.flatMap((token, i) => (token.startsWith('-') ? [i] : []))
+      for (const i of flagIndexes) {
+        const next = rest[i + 1]
+        if (next === undefined) continue
+        expect(next.startsWith('/') || next.startsWith('.'), candidate).toBe(true)
+      }
+    }
+  })
+
+  it('신호 명령은 훈련 프로세스 접두어를 붙여 제안한다', () => {
+    // LinuxPolicy._check_signal_target 은 PID 또는 afterfail- 이름만 받는다.
+    expect(linux.completions).toContain('pkill -f afterfail-')
+  })
+
+  it('쓰기 가능한 경로만 제안한다', () => {
+    for (const candidate of linux.completions) {
+      const head = candidate.trim().split(/\s+/)[0]
+      if (head !== 'rm' && head !== 'truncate') continue
+      expect(candidate, candidate).toContain('/tmp/afterfail')
+    }
+  })
+
+  it('모든 환경이 조사 시작 명령을 갖고, 그 명령은 자동완성 정책과 같은 범위다', () => {
+    for (const environment of ENVIRONMENT_IDS) {
+      const { binary, allowedCommands, investigationStarters } = ENVIRONMENT_TERMINAL[environment]
+      expect(investigationStarters.length, environment).toBeGreaterThan(0)
+      for (const starter of investigationStarters) {
+        if (binary) expect(starter.startsWith(`${binary} `), starter).toBe(true)
+        else expect(allowedCommands, starter).toContain(starter.split(/\s+/)[0])
+      }
+    }
   })
 })
