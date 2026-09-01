@@ -8,12 +8,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import re
 import time
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import settings
 from app.ai.observability import record_ai_call
@@ -28,6 +30,9 @@ class ScenarioGenerationInput:
     recent_fault_types: list[str]
     allowed_fault_types: list[str]
     environment: str = "kubernetes"
+    randomize: bool = True
+    seed: int | None = None
+    eval_mode: bool = False
 
 
 @dataclass
@@ -36,6 +41,7 @@ class ScenarioCandidate:
     score: float
     rejected: bool = False
     rejection_reason: str | None = None
+    score_breakdown: dict[str, float] | None = None
 
 
 class _StrictModel(BaseModel):
@@ -96,21 +102,6 @@ class GeneratedScenarioSchema(_StrictModel):
     observability: Observability
     validation: ValidationSchema
     scoring: ScoringSchema
-
-    @field_validator("student_brief")
-    @classmethod
-    def brief_must_not_reveal_answer(cls, value: str) -> str:
-        import re
-
-        leakage = (
-            r"원인은|정답|내부 요약|주입 방법|exit\s+1|wrongtag|6Mi|"
-            r"kubectl\s+(?:patch|edit|set|apply|delete)|"
-            r"docker\s+(?:network\s+connect|start|restart|update)|kill\s+-"
-        )
-        if re.search(leakage, value, re.IGNORECASE):
-            raise ValueError("student_brief에 원인/정답/복구 또는 주입 방법이 노출되었습니다")
-        return value
-
 
 VALIDATION_TYPES_BY_ENVIRONMENT = {
     "kubernetes": {"k8s"},
@@ -879,23 +870,96 @@ _MOCK_FIXTURES_BY_ENVIRONMENT: dict[str, dict[str, list[dict]]] = {
 }
 
 
-def _score_candidate(candidate: dict, gen_input: ScenarioGenerationInput) -> float:
-    score = 50.0
+_ANSWER_LEAKAGE = re.compile(
+    r"원인은|정답|내부 요약|주입 방법|exit\s+1|wrongtag|6Mi|"
+    r"kubectl\s+(?:patch|edit|set|apply|delete)|"
+    r"docker\s+(?:network\s+connect|start|restart|update)|kill\s+-",
+    re.IGNORECASE,
+)
+_UNSAFE_PARAMETER_KEY = re.compile(
+    r"(?i)(command|argv|script|shell|hostpath|privileged|capabilities|sudo)"
+)
+_UNSAFE_PARAMETER_VALUE = re.compile(
+    r"(?i)(rm\s+-rf|sudo\b|/etc/(?:shadow|passwd)|curl\b.*\|\s*(?:sh|bash)|"
+    r"kubectl\s+(?:auth|exec|delete\s+namespace)|docker\s+system\s+prune)"
+)
+_SOURCE_BACKED_FAULTS = frozenset(
+    fault
+    for fixtures in _MOCK_FIXTURES_BY_ENVIRONMENT.values()
+    for scenarios in fixtures.values()
+    for scenario in scenarios
+    for fault in [scenario.get("fault", {}).get("type")]
+    if fault
+)
+
+
+def _unsafe_parameter_reason(parameters) -> str | None:
+    if isinstance(parameters, dict):
+        for key, value in parameters.items():
+            if _UNSAFE_PARAMETER_KEY.search(str(key)):
+                return f"unsafe parameter key: {key}"
+            reason = _unsafe_parameter_reason(value)
+            if reason:
+                return reason
+    elif isinstance(parameters, list):
+        for value in parameters:
+            reason = _unsafe_parameter_reason(value)
+            if reason:
+                return reason
+    elif _UNSAFE_PARAMETER_VALUE.search(str(parameters)):
+        return "unsafe executable parameter value"
+    return None
+
+
+def _score_candidate_details(
+    candidate: dict, gen_input: ScenarioGenerationInput
+) -> tuple[float, dict[str, float]]:
+    breakdown: dict[str, float] = {"base": 40.0}
     fault_type = candidate.get("fault", {}).get("type", "")
-
-    # 최근에 풀지 않은 장애 유형 가산
     if fault_type not in gen_input.recent_fault_types:
-        score += 20.0
-
-    # 난이도 일치 가산
+        breakdown["new_fault"] = 20.0
     if candidate.get("difficulty") == gen_input.difficulty:
-        score += 15.0
+        breakdown["difficulty_match"] = 15.0
+    if len(candidate.get("observability", {}).get("symptoms", [])) >= 2:
+        breakdown["observable_signals"] = 10.0
+    try:
+        from app.services.chaos_plan import ChaosPlanCompiler
 
-    # 관찰 가능성 가산
-    if candidate.get("observability", {}).get("symptoms"):
-        score += 10.0
+        ChaosPlanCompiler().compile(candidate, gen_input.namespace, gen_input.environment)
+        breakdown["compiler_success"] = 10.0
+    except Exception:
+        breakdown["compiler_success"] = 0.0
+    if fault_type in _SOURCE_BACKED_FAULTS and candidate.get("learning_objectives"):
+        breakdown["source_backed_objective"] = 5.0
+    if _unsafe_parameter_reason(candidate.get("fault", {}).get("parameters", {})):
+        breakdown["unsafe_parameter"] = -30.0
+    if fault_type in gen_input.recent_fault_types[:3]:
+        breakdown["recent_three_duplicate"] = -20.0
+    if _ANSWER_LEAKAGE.search(candidate.get("student_brief", "")):
+        breakdown["answer_leakage"] = -20.0
+    return sum(breakdown.values()), breakdown
 
-    return score
+
+def _score_candidate(candidate: dict, gen_input: ScenarioGenerationInput) -> float:
+    return _score_candidate_details(candidate, gen_input)[0]
+
+
+def select_candidate(
+    candidates: list[ScenarioCandidate], gen_input: ScenarioGenerationInput
+) -> ScenarioCandidate:
+    valid = [candidate for candidate in candidates if not candidate.rejected]
+    if not valid:
+        reasons = [candidate.rejection_reason for candidate in candidates]
+        raise ValueError(f"선택 가능한 시나리오 후보가 없습니다: {reasons}")
+    best_score = max(candidate.score for candidate in valid)
+    tied = sorted(
+        (candidate for candidate in valid if candidate.score == best_score),
+        key=lambda candidate: candidate.scenario.get("fault", {}).get("type", ""),
+    )
+    if not gen_input.randomize or len(tied) == 1:
+        return tied[0]
+    seed = 0 if gen_input.eval_mode and gen_input.seed is None else gen_input.seed
+    return random.Random(seed).choice(tied) if seed is not None else random.choice(tied)
 
 
 class MockScenarioAgent:
@@ -925,8 +989,10 @@ class MockScenarioAgent:
         for fixture in valid[:3]:
             scenario = deepcopy(fixture)
             scenario["environment"] = gen_input.environment
-            score = _score_candidate(scenario, gen_input)
-            candidates.append(ScenarioCandidate(scenario=scenario, score=score))
+            score, breakdown = _score_candidate_details(scenario, gen_input)
+            candidates.append(ScenarioCandidate(
+                scenario=scenario, score=score, score_breakdown=breakdown
+            ))
 
         return candidates
 
@@ -980,15 +1046,23 @@ class OpenAIScenarioAgent:
             )
 
             raw = response.choices[0].message.content
+            parsed = self._parse_response(raw, gen_input)
+            if any(not candidate.rejected for candidate in parsed):
+                record_ai_call(
+                    provider=self._provider, purpose="scenario", result="success",
+                    duration_seconds=time.perf_counter() - started,
+                    token_usage=getattr(response, "usage", None),
+                )
+                return parsed
+            logger.warning(
+                "scenario LLM candidates rejected; appending environment fixture fallback",
+                extra={"reject_reasons": [candidate.rejection_reason for candidate in parsed]},
+            )
             record_ai_call(
-                provider=self._provider, purpose="scenario", result="success",
+                provider=self._provider, purpose="scenario", result="fallback",
                 duration_seconds=time.perf_counter() - started,
                 token_usage=getattr(response, "usage", None),
             )
-            parsed = self._parse_response(raw, gen_input)
-            if any(not candidate.rejected for candidate in parsed):
-                return parsed
-            logger.warning("scenario LLM candidates rejected; appending environment fixture fallback")
             return [*parsed, *MockScenarioAgent().generate(gen_input)]
 
         except Exception:
@@ -1071,6 +1145,22 @@ class OpenAIScenarioAgent:
                     rejection_reason=f"unknown_fault: {fault_type}",
                 ))
                 continue
+            score, breakdown = _score_candidate_details(scenario, gen_input)
+            unsafe_reason = _unsafe_parameter_reason(scenario["fault"]["parameters"])
+            if unsafe_reason:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=score, rejected=True,
+                    rejection_reason=f"unsafe_parameter: {unsafe_reason}",
+                    score_breakdown=breakdown,
+                ))
+                continue
+            if _ANSWER_LEAKAGE.search(scenario["student_brief"]):
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=score, rejected=True,
+                    rejection_reason="answer_leakage: student_brief가 정답 또는 주입 방법을 노출합니다",
+                    score_breakdown=breakdown,
+                ))
+                continue
             allowed_rule_types = VALIDATION_TYPES_BY_ENVIRONMENT[gen_input.environment]
             actual_rule_types = {rule["type"] for rule in scenario["validation"]["rules"]}
             if not actual_rule_types.issubset(allowed_rule_types):
@@ -1090,8 +1180,9 @@ class OpenAIScenarioAgent:
                 ))
                 continue
 
-            score = _score_candidate(scenario, gen_input)
-            candidates.append(ScenarioCandidate(scenario=scenario, score=score))
+            candidates.append(ScenarioCandidate(
+                scenario=scenario, score=score, score_breakdown=breakdown
+            ))
 
         if not candidates:
             return [ScenarioCandidate(

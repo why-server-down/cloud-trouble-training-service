@@ -9,7 +9,13 @@ BACKEND = Path(__file__).resolve().parents[2] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.ai.scenario_agent import MockScenarioAgent, OpenAIScenarioAgent, ScenarioGenerationInput
+from app.ai.scenario_agent import (
+    MockScenarioAgent,
+    OpenAIScenarioAgent,
+    ScenarioCandidate,
+    ScenarioGenerationInput,
+    select_candidate,
+)
 from app.services.chaos_plan import ChaosPlanCompiler, allowed_fault_types
 
 
@@ -86,7 +92,7 @@ def _parse(scenario, environment="docker"):
         (lambda scenario: scenario["fault"].update(type="unknown_fault"), "unknown_fault"),
         (lambda scenario: scenario.update(unexpected="value"), "schema_error"),
         (lambda scenario: scenario.pop("validation"), "schema_error"),
-        (lambda scenario: scenario.update(student_brief="원인은 CPU 제한입니다. docker update로 복구하세요."), "schema_error"),
+        (lambda scenario: scenario.update(student_brief="원인은 CPU 제한입니다. docker update로 복구하세요."), "answer_leakage"),
         (lambda scenario: scenario["scoring"].update(time_limit_seconds=10), "schema_error"),
     ],
 )
@@ -102,6 +108,102 @@ def test_invalid_json_is_rejected_with_reason():
     candidate = OpenAIScenarioAgent("test-key")._parse_response("{broken", _input("docker"))[0]
     assert candidate.rejected is True
     assert candidate.rejection_reason.startswith("invalid_json")
+
+
+def test_scoring_formula_rewards_diversity_and_records_breakdown():
+    gen_input = _input("docker")
+    gen_input.recent_fault_types = ["docker_network_disconnect"]
+    candidates = MockScenarioAgent().generate(gen_input)
+    by_fault = {candidate.scenario["fault"]["type"]: candidate for candidate in candidates}
+
+    duplicate = by_fault["docker_network_disconnect"]
+    fresh = by_fault["docker_container_stopped"]
+    assert duplicate.score_breakdown["recent_three_duplicate"] == -20
+    assert "new_fault" not in duplicate.score_breakdown
+    assert fresh.score_breakdown["new_fault"] == 20
+    assert fresh.score > duplicate.score
+    assert fresh.score == sum(fresh.score_breakdown.values())
+
+
+def test_unsafe_high_score_candidate_is_rejected_before_selection():
+    unsafe_scenario = deepcopy(_scenario())
+    unsafe_scenario["fault"]["parameters"] = {"command": "rm -rf /"}
+    unsafe = _parse(unsafe_scenario)
+    safe = _parse(deepcopy(_scenario()))
+    unsafe.score = safe.score + 1000
+
+    selected = select_candidate([unsafe, safe], _input("docker"))
+    assert unsafe.rejected is True
+    assert unsafe.rejection_reason.startswith("unsafe_parameter")
+    assert unsafe.score_breakdown["unsafe_parameter"] == -30
+    assert selected is safe
+
+
+def test_seeded_selection_is_reproducible_in_eval_mode():
+    candidates = [
+        ScenarioCandidate(scenario={"fault": {"type": fault}}, score=100)
+        for fault in ("a", "b", "c")
+    ]
+    gen_input = _input("docker")
+    gen_input.seed = 2026
+    gen_input.eval_mode = True
+
+    first = select_candidate(candidates, gen_input)
+    second = select_candidate(list(reversed(candidates)), gen_input)
+    assert first.scenario == second.scenario
+
+
+def test_each_rejected_candidate_keeps_its_reason():
+    wrong_environment = deepcopy(_scenario())
+    wrong_environment["environment"] = "linux"
+    unknown_fault = deepcopy(_scenario())
+    unknown_fault["fault"]["type"] = "unknown_fault"
+    unsafe = deepcopy(_scenario())
+    unsafe["fault"]["parameters"] = {"script": "rm -rf /"}
+    raw = json.dumps(
+        {"scenarios": [wrong_environment, unknown_fault, unsafe]}, ensure_ascii=False
+    )
+
+    candidates = OpenAIScenarioAgent("test-key")._parse_response(raw, _input("docker"))
+    reasons = [candidate.rejection_reason for candidate in candidates]
+    assert len(reasons) == 3
+    assert reasons[0].startswith("wrong_environment")
+    assert reasons[1].startswith("unknown_fault")
+    assert reasons[2].startswith("unsafe_parameter")
+
+
+def test_all_rejected_llm_response_records_only_fallback_metric(monkeypatch):
+    scenario = deepcopy(_scenario())
+    scenario["fault"]["parameters"] = {"command": "rm -rf /"}
+    raw = json.dumps({"scenarios": [scenario]}, ensure_ascii=False)
+
+    class _Message:
+        content = raw
+
+    class _Choice:
+        message = _Message()
+
+    class _Completions:
+        @staticmethod
+        def create(**kwargs):
+            return type("Response", (), {"choices": [_Choice()], "usage": None})()
+
+    class _OpenAI:
+        def __init__(self, **kwargs):
+            self.chat = type("Chat", (), {"completions": _Completions()})()
+
+    import openai
+    monkeypatch.setattr(openai, "OpenAI", _OpenAI)
+    results = []
+    monkeypatch.setattr(
+        "app.ai.scenario_agent.record_ai_call",
+        lambda **kwargs: results.append(kwargs["result"]),
+    )
+
+    candidates = OpenAIScenarioAgent("test-key").generate(_input("docker"))
+    assert results == ["fallback"]
+    assert candidates[0].rejected is True
+    assert any(not candidate.rejected for candidate in candidates[1:])
 
 
 @pytest.mark.parametrize("environment", ["kubernetes", "docker", "linux"])
