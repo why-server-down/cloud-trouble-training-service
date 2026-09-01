@@ -149,7 +149,14 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   }, [stats])
 
   const isAllView = filter === 'all'
-  const hasEnvironmentBreakdown = isAllView && environmentAxes.some((axis) => axis.entry !== null)
+  /*
+   * 엔트리가 있는지가 아니라 **competency 가 계산됐는지**를 본다.
+   * 백엔드는 environment=all 조회에서 완료가 0건이어도 세 환경 엔트리를 모두 채워
+   * 보내고 competency 만 null 로 둔다(analytics_service._environment_stats).
+   * 엔트리 유무로 판정하면 신규 사용자에게 중심으로 찌그러진 0축 레이더가 보인다.
+   */
+  const hasEnvironmentBreakdown =
+    isAllView && environmentAxes.some((axis) => axis.entry?.competency != null)
 
   const radarValues = isAllView
     ? environmentAxes.map((axis) => axis.entry?.competency ?? 0)

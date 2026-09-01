@@ -150,12 +150,50 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     expect(radar.querySelector('.skill-radar-value')?.getAttribute('points')?.split(' ')).toHaveLength(4)
   })
 
-  it('완료가 없으면 환경 역량을 0 축으로 그리지 않고 안내를 띄운다', async () => {
-    mocked.getDashboardStats.mockResolvedValue(stats({ environment_stats: {} }))
+  it('완료가 0건이면 환경 역량을 0 축으로 그리지 않고 안내를 띄운다', async () => {
+    /*
+     * 라이브 확인(2026-09-01): 백엔드는 environment=all 조회에서 완료가 0건이어도
+     * 세 환경 엔트리를 모두 채워 보내고 competency 만 null 로 둔다.
+     * 엔트리 유무로 판정하면 신규 사용자에게 찌그러진 0축 레이더가 보인다.
+     */
+    mocked.getDashboardStats.mockResolvedValue(
+      stats({
+        missions_completed: 0,
+        environment_stats: {
+          kubernetes: envEntry({ completed: 0, average_score: 0, average_mttr: 0, hints_used: 0, competency: null }),
+          docker: envEntry({ completed: 0, average_score: 0, average_mttr: 0, hints_used: 0, competency: null }),
+          linux: envEntry({ completed: 0, average_score: 0, average_mttr: 0, hints_used: 0, competency: null }),
+        },
+      }),
+    )
     render(<DashboardOverview token="t" />)
 
     expect(await screen.findByText(/환경 역량을 계산할 수 없습니다/)).toBeTruthy()
     expect(screen.queryByRole('img', { name: /환경 역량 레이더/ })).toBeNull()
+  })
+
+  it('environment_stats 가 비어 있어도 안내를 띄운다', async () => {
+    mocked.getDashboardStats.mockResolvedValue(stats({ environment_stats: {} }))
+    render(<DashboardOverview token="t" />)
+
+    expect(await screen.findByText(/환경 역량을 계산할 수 없습니다/)).toBeTruthy()
+  })
+
+  it('한 환경만 완료했으면 레이더를 그리고 나머지는 대체 텍스트로 구분한다', async () => {
+    mocked.getDashboardStats.mockResolvedValue(
+      stats({
+        environment_stats: {
+          kubernetes: envEntry({ competency: 70 }),
+          docker: envEntry({ completed: 0, competency: null }),
+          linux: envEntry({ completed: 0, competency: null }),
+        },
+      }),
+    )
+    render(<DashboardOverview token="t" />)
+
+    const radar = await screen.findByRole('img', { name: /환경 역량 레이더/ })
+    expect(radar.getAttribute('aria-label')).toContain('Kubernetes 70')
+    expect(radar.getAttribute('aria-label')).toContain('Docker 데이터 없음')
   })
 
   it('학습 곡선에 점수를 함께 표시하고 대체 텍스트로 수치를 읽을 수 있다', async () => {

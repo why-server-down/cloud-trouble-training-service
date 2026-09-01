@@ -264,6 +264,24 @@ describe('호출 제한(429) 처리', () => {
     expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(true)
   })
 
+  it('제한 안내와 서버 detail 을 함께 띄우지 않는다 — 숫자가 두 개 보이면 안 된다', async () => {
+    /*
+     * 백엔드 detail 에도 "N초 후" 가 들어 있는데 그것은 응답 시점의 고정값이라
+     * 줄어드는 카운트다운과 어긋난다. 라이브 확인에서 56.9초/55초가 동시에 보였다.
+     */
+    mocked.askTutor.mockRejectedValue(
+      new api.ApiError('요청이 너무 잦습니다. 56.9초 후 다시 시도해 주세요.', 429, 57),
+    )
+    renderChat()
+    await askOnce()
+
+    await screen.findByText(/57초 후 다시 질문할 수 있습니다/)
+    expect(screen.queryByText(/56.9초 후 다시 시도해 주세요/)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    // "N초" 로 끝나는 안내가 정확히 한 종류만 보인다.
+    expect(screen.queryAllByText(/초 후 다시 질문할 수 있습니다/)).toHaveLength(1)
+  })
+
   it('제한 중에는 재시도 버튼을 눌러도 chat API 를 부르지 않는다', async () => {
     mocked.askTutor.mockRejectedValue(rateLimited(8))
     renderChat()
@@ -274,6 +292,7 @@ describe('호출 제한(429) 처리', () => {
 
     // 질문 1회 + 재시도 시도 0회 = 1회
     expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '8초 후 재시도' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('남은 시간이 지나면 다시 질문할 수 있다', async () => {
