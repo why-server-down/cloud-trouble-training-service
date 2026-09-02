@@ -1,5 +1,15 @@
 from app.core.config import Settings
-from app.core.metrics import AI_ESTIMATED_COST, AI_STAGE_DURATION
+from app.core.metrics import (
+    AI_ESTIMATED_COST,
+    AI_INGESTION_CHANGES,
+    AI_RETRIEVAL_CONTAMINATION,
+    AI_RETRIEVAL_RESULT_COUNT,
+    AI_RETRIEVALS,
+    AI_SCENARIO_CANDIDATES,
+    AI_STAGE_DURATION,
+    AI_TUTOR_RESULTS,
+    AI_VALIDATION_AGREEMENT,
+)
 from app.schemas import TutorResult
 
 
@@ -36,3 +46,14 @@ def test_token_cost_budget_defaults_are_bounded():
 
 def test_cost_metric_has_no_user_or_content_labels():
     assert AI_ESTIMATED_COST._labelnames == ("provider", "purpose", "model")
+
+
+def test_ai_quality_metrics_use_only_bounded_labels():
+    metrics = (
+        AI_TUTOR_RESULTS, AI_RETRIEVALS, AI_RETRIEVAL_RESULT_COUNT,
+        AI_RETRIEVAL_CONTAMINATION, AI_SCENARIO_CANDIDATES,
+        AI_VALIDATION_AGREEMENT, AI_INGESTION_CHANGES,
+    )
+    forbidden = {"user_id", "attempt_id", "namespace", "question", "source", "title"}
+    for metric in metrics:
+        assert forbidden.isdisjoint(metric._labelnames)
