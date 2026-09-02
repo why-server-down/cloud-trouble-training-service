@@ -537,3 +537,33 @@
   - AI pytest `174 passed, 3 deselected`
   - backend pytest `518 passed, 4 deselected`
 - 후속: AI-22 token·cost 제한
+
+## AI-22 token·cost 제한
+
+- 상태: 완료 — backend 예산 계약 PR #99 + AI 실행 경로 PR
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-cost-contract`, `feature/ai-hardening`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-21 PR #97~98 dev 반영 및 chat rate limit 확인
+- 변경:
+  - question/command/log/docs 기존 문자 상한에 실제 tokenizer 기반 context token 상한 추가
+  - tutor completion 최대 500 token, retrieved chunk 최대 5개를 설정으로 강제
+  - provider 호출은 rate limit/connection만 최대 2 attempts, 비일시 오류는 재시도하지 않음
+  - scenario 3개 후보는 기존 단일 provider call 유지
+  - prompt/completion 실제 token으로 provider/purpose/model별 예상 USD metric 기록
+  - 알 수 없는 모델은 단가를 임의 추정하지 않고 cost metric에서 제외
+- 비용 추정(2026-09-02 공식 표준 단가):
+  - gpt-4o-mini input/output `$0.15/$0.60` per 1M token
+  - gemini-2.5-flash-lite input/output `$0.10/$0.40` per 1M token
+  - 시연 50 tutor + 10 scenario: OpenAI `$0.048`, Gemini `$0.032`
+  - 월 2,000 tutor + 100 scenario: OpenAI `$1.425`, Gemini `$0.950`
+  - embedding/hosting/network/free-tier/tax 제외; 실제 metric과 provider 청구서로 보정 필요
+- 인수 조건 검증:
+  - 긴 입력에서도 설정 context token budget 이하
+  - completion/retrieved chunk/retry 상한 테스트 통과
+  - 월/시연 비용과 단가 출처를 `evals/cost_report.json`에 기록
+- 검증:
+  - AI pytest `179 passed, 3 deselected`
+  - backend pytest `520 passed, 4 deselected`
+- 후속: AI-23 관측 메트릭 남은 범위

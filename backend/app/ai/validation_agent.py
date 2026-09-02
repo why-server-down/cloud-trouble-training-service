@@ -159,6 +159,7 @@ class LLMValidationAgent:
                 provider=self._provider, purpose="validation", result="success",
                 duration_seconds=time.perf_counter() - started,
                 token_usage=getattr(response, "usage", None),
+                model=self._model,
             )
             return ValidationJudgment(
                 resolved=bool(data.get("resolved", False)),
@@ -171,6 +172,7 @@ class LLMValidationAgent:
             record_ai_call(
                 provider=self._provider, purpose="validation", result="fallback",
                 duration_seconds=time.perf_counter() - started,
+                model=self._model,
             )
             logger.warning("validation LLM returned invalid advisory response")
             return ValidationJudgment(
@@ -184,6 +186,7 @@ class LLMValidationAgent:
             record_ai_call(
                 provider=self._provider, purpose="validation", result="fallback",
                 duration_seconds=time.perf_counter() - started,
+                model=self._model,
             )
             logger.exception("validation LLM call failed; returning safe advisory failure")
             return ValidationJudgment(

@@ -55,6 +55,23 @@ def test_record_ai_call_accepts_openai_usage_object(monkeypatch):
     assert tokens.values == [3, 2, 5]
 
 
+def test_record_ai_call_estimates_known_model_cost_without_user_labels(monkeypatch):
+    cost = _Metric()
+    monkeypatch.setattr(observability, "AI_CALLS", _Metric())
+    monkeypatch.setattr(observability, "AI_CALL_DURATION", _Metric())
+    monkeypatch.setattr(observability, "AI_TOKENS", _Metric())
+    monkeypatch.setattr(observability, "AI_ESTIMATED_COST", cost)
+    observability.record_ai_call(
+        provider="openai", purpose="tutor", result="success", duration_seconds=0.1,
+        token_usage={"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000},
+        model="gpt-4o-mini",
+    )
+    assert cost.labels_seen == [{
+        "provider": "openai", "purpose": "tutor", "model": "gpt-4o-mini"
+    }]
+    assert cost.values == [0.75]
+
+
 def test_stage_metric_has_only_bounded_pipeline_labels(monkeypatch):
     duration = _Metric()
     monkeypatch.setattr(observability, "AI_STAGE_DURATION", duration)

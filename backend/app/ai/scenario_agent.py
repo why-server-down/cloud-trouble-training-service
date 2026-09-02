@@ -1052,6 +1052,7 @@ class OpenAIScenarioAgent:
                     provider=self._provider, purpose="scenario", result="success",
                     duration_seconds=time.perf_counter() - started,
                     token_usage=getattr(response, "usage", None),
+                    model=self._model,
                 )
                 return parsed
             logger.warning(
@@ -1062,6 +1063,7 @@ class OpenAIScenarioAgent:
                 provider=self._provider, purpose="scenario", result="fallback",
                 duration_seconds=time.perf_counter() - started,
                 token_usage=getattr(response, "usage", None),
+                model=self._model,
             )
             return [*parsed, *MockScenarioAgent().generate(gen_input)]
 
@@ -1069,6 +1071,7 @@ class OpenAIScenarioAgent:
             record_ai_call(
                 provider=self._provider, purpose="scenario", result="fallback",
                 duration_seconds=time.perf_counter() - started,
+                model=self._model,
             )
             logger.exception("scenario LLM call failed; using environment fixture fallback")
             return MockScenarioAgent().generate(gen_input)

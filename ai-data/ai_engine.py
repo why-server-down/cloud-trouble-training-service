@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 import openai
 
 from config import AISettings, config
-from context_safety import redact_text
+from context_safety import enforce_token_budget, redact_text
 from rag_service import RAGService
 from prompt_engine import (
     SocraticPromptEngine,
@@ -127,6 +127,7 @@ class AITutorEngine:
         started = time.perf_counter()
         if max_tokens is None:
             max_tokens = self.settings.OPENAI_MAX_TOKENS
+        max_tokens = max(1, min(max_tokens, self.settings.AI_MAX_COMPLETION_TOKENS))
         if temperature is None:
             temperature = self.settings.OPENAI_TEMPERATURE
 
@@ -159,19 +160,19 @@ class AITutorEngine:
             system_ctx=request.system_ctx,
             user_ctx=request.user_ctx,
         )
+        prompt = enforce_token_budget(prompt, self.settings.AI_MAX_CONTEXT_TOKENS)
         
         # Call LLM
         llm_started = time.perf_counter()
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_with_retry(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": "구조화된 USER QUESTION 데이터에 대해 튜터 지침대로 답하세요."}
                 ],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=self.settings.OPENAI_TIMEOUT
+                max_tokens=max_tokens, temperature=temperature,
+                timeout=self.settings.OPENAI_TIMEOUT,
             )
             
             message = redact_text(response.choices[0].message.content or "")
@@ -223,6 +224,7 @@ class AITutorEngine:
                 [], [], (time.perf_counter() - started) * 1000,
                 error_code="retrieval_failed",
             )
+        retrieved_docs = retrieved_docs[: self.settings.AI_MAX_RETRIEVED_CHUNKS]
         sources = [self._safe_source(doc, request.environment) for doc in retrieved_docs]
         context = [
             {"source": source, "content": doc.content}
@@ -232,6 +234,17 @@ class AITutorEngine:
             sources, context, (time.perf_counter() - started) * 1000,
             rerank_ms=timing.get("rerank_ms", 0.0),
         )
+
+    def _create_with_retry(self, **kwargs):
+        """Rate limit/connection만 최대 설정 횟수까지 재시도한다."""
+        attempts = max(1, min(3, self.settings.AI_PROVIDER_MAX_ATTEMPTS))
+        for attempt in range(attempts):
+            try:
+                return self.client.chat.completions.create(**kwargs)
+            except (openai.RateLimitError, openai.APIConnectionError):
+                if attempt + 1 >= attempts:
+                    raise
+                time.sleep(min(0.25, 0.05 * (2 ** attempt)))
 
     @staticmethod
     def _safe_source(document, environment: str) -> dict:
