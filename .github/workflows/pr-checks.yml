@@ -48,15 +48,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 백엔드 변경 여부 확인
+      - name: 백엔드·AI 변경 여부 확인
         id: changed
         run: |
           if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-             | grep -qE '^(backend/|\.github/)'; then
+             | grep -qE '^(backend/|ai-data/|\.github/)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "백엔드 변경 없음 — 건너뛴다."
+            echo "백엔드·AI 변경 없음 — 건너뛴다."
           fi
 
       - uses: actions/setup-python@v5
@@ -70,10 +70,16 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         run: pip install -r backend/requirements.txt
 
-      - name: pytest
+      - name: 백엔드 pytest
         if: steps.changed.outputs.run == 'true'
         working-directory: backend
         run: python -m pytest -q
+
+      - name: AI offline pytest와 회귀 평가
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          python -m pytest -q ai-data/tests
+          python ai-data/evals/run_regression_gate.py
 
   frontend:
     name: 프론트엔드 빌드/린트
