@@ -20,7 +20,7 @@ import {
   startRandomScenario,
   UnlockStatusResponse,
 } from '../../services/api'
-import { getEnvironmentMeta } from '../../config/environments'
+import { getEnvironmentMeta, hasCapability } from '../../config/environments'
 import {
   MAX_BACKOFF_MS,
   MISSION_POLL_HIDDEN_MS,
@@ -28,7 +28,12 @@ import {
 } from '../../config/polling'
 import { usePolling } from '../../hooks/usePolling'
 import { markStart, measureSince, nextFrame, PERF } from '../../utils/perf'
-import { ActiveAttemptSummary, AttemptType, EnvironmentId } from '../../types/training'
+import {
+  ActiveAttemptSummary,
+  AttemptType,
+  EnvironmentCapability,
+  EnvironmentId,
+} from '../../types/training'
 import MissionCard from './MissionCard'
 import MissionStatus, { MissionAction } from './MissionStatus'
 import TutorChat from './TutorChat'
@@ -39,6 +44,12 @@ interface MissionListProps {
   storageScope: string | null
   /** 현재 선택된 훈련 환경. AI 시나리오 생성 요청에 그대로 실려 나간다. */
   environment: EnvironmentId
+  /**
+   * 이 환경이 광고하는 기능 (FE-22). `null` 은 판정할 근거가 없다는 뜻이고
+   * 그때는 아무것도 숨기지 않는다 — 규칙은 `config/environments.ts` 의
+   * `hasCapability` 한 곳에 있다.
+   */
+  capabilities: EnvironmentCapability[] | null
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
   /**
@@ -75,6 +86,7 @@ const MissionList: React.FC<MissionListProps> = ({
   token,
   storageScope,
   environment,
+  capabilities,
   onActiveAttemptChange,
   onAttemptCompleted,
 }) => {
@@ -561,6 +573,39 @@ const MissionList: React.FC<MissionListProps> = ({
       ? []
     : missions
 
+  /*
+   * 서버가 이 환경에 광고하지 않는 기능은 그리지 않는다 (FE-22).
+   * 백엔드 `assert_implemented` 가 요청을 거절하므로, 버튼을 눌러 오류를 받게
+   * 하는 대신 화면에서 빼는 편이 맞다. 판정 근거가 없으면(null) 아무것도 숨기지
+   * 않는다 — 규칙은 `hasCapability` 한 곳에 있다.
+   */
+  const canUseStaticMission = hasCapability(capabilities, 'static_mission')
+  const canUseAiScenario = hasCapability(capabilities, 'ai_scenario')
+  const canUseTutor = hasCapability(capabilities, 'tutor')
+
+  /*
+   * 튜터 패널은 세 자리(정적 미션 / AI 시나리오 / 모바일 AI 시나리오)에서 같은 모양으로
+   * 쓰인다. 세 번 적어 두면 한 곳만 고치는 사고가 나므로 여기서 만든다.
+   * capability 가 없으면 아무것도 그리지 않는다 (FE-22).
+   */
+  const renderTutorPanel = (
+    missionId: string,
+    tutorEnvironment: EnvironmentId,
+    tutorHintsUsed: number,
+  ) =>
+    canUseTutor ? (
+      <TutorChat
+        token={token}
+        missionId={missionId}
+        environment={tutorEnvironment}
+        hintsUsed={tutorHintsUsed}
+        disabled={loading}
+        floating
+        floatingOpen={isTutorFloatingOpen}
+        onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
+      />
+    ) : null
+
   return (
     <div className={`mission-panel${activeMissionId || isActiveScenario ? ' mission-active' : ''}`}>
       <div className="mission-header">
@@ -590,7 +635,18 @@ const MissionList: React.FC<MissionListProps> = ({
           * 목록이 비는 이유는 세 가지고 문구가 달라야 한다 (FE-06).
           * 조회 실패는 위 mission-error 배너가 이유까지 말하므로 여기서 반복하지 않는다.
           */}
-        {displayedMissions.length === 0 && !isActiveScenario && missionsStatus !== 'error' ? (
+        {!canUseStaticMission ? (
+          /*
+           * 서버가 이 환경에 static_mission 을 광고하지 않는다 (FE-22).
+           * "아직 준비 중"과 다른 사실이라 문구를 나눈다 — 기다리면 열리는 게 아니다.
+           * (진행 중인 AI 시나리오 카드는 위에서 이미 그렸으므로 그때는 아무것도 넣지 않는다)
+           */
+          !isActiveScenario && (
+            <div className="empty-state">
+              {getEnvironmentMeta(environment).label} 환경은 기본 미션을 제공하지 않습니다.
+            </div>
+          )
+        ) : displayedMissions.length === 0 && !isActiveScenario && missionsStatus !== 'error' ? (
           <div className="empty-state">
             {missionsStatus === 'loading'
               ? '미션을 불러오는 중...'
@@ -621,16 +677,7 @@ const MissionList: React.FC<MissionListProps> = ({
             onAbandon={handleAbandonMission}
             onHint={handleUseHint}
           />
-          <TutorChat
-            token={token}
-            missionId={activeMissionId}
-            environment={activeMissionEnvironment ?? environment}
-            hintsUsed={hintsUsed}
-            disabled={loading}
-            floating
-            floatingOpen={isTutorFloatingOpen}
-            onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
-          />
+          {renderTutorPanel(activeMissionId, activeMissionEnvironment ?? environment, hintsUsed)}
         </>
       )}
 
@@ -664,21 +711,12 @@ const MissionList: React.FC<MissionListProps> = ({
               </button>
             </div>
           </div>
-          <TutorChat
-            token={token}
-            missionId={activeScenario.scenario_id}
-            environment={activeScenario.environment}
-            hintsUsed={scenarioHintsUsed}
-            disabled={loading}
-            floating
-            floatingOpen={isTutorFloatingOpen}
-            onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
-          />
+          {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
         </>
       )}
 
-      {/* AI 문제 더 풀기 섹션 */}
-      {!activeMissionId && !isActiveScenario && (
+      {/* AI 문제 더 풀기 섹션. 서버가 ai_scenario 를 광고하지 않으면 그리지 않는다 (FE-22) */}
+      {canUseAiScenario && !activeMissionId && !isActiveScenario && (
         <div className="ai-scenario-section">
           <div className="ai-section-header">
             <span className="panel-index">AI CHALLENGE MODE</span>
@@ -742,16 +780,7 @@ const MissionList: React.FC<MissionListProps> = ({
                   </button>
                 </div>
               </div>
-              <TutorChat
-                token={token}
-                missionId={activeScenario.scenario_id}
-                environment={activeScenario.environment}
-                hintsUsed={scenarioHintsUsed}
-                disabled={loading}
-                floating
-                floatingOpen={isTutorFloatingOpen}
-                onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
-              />
+              {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
             </>
           )}
 

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MissionList from './MissionList'
 import * as api from '../../services/api'
 import {
+  EnvironmentCapability,
   EnvironmentId,
   MissionAttemptResponse,
   MissionResponse,
@@ -68,13 +69,19 @@ const scenarioStatus: ScenarioStatusResponse = {
 
 const notFound = () => Promise.reject(new api.ApiError('없음', 404))
 
-const renderList = (environment: EnvironmentId = 'kubernetes') => {
+const renderList = (
+  environment: EnvironmentId = 'kubernetes',
+  // 기존 테스트는 capability 게이팅과 무관하다. null = 판정 근거 없음 = 아무것도 숨기지
+  // 않는다 (FE-22). 게이팅 자체는 아래 별도 describe 에서 확인한다.
+  capabilities: EnvironmentCapability[] | null = null,
+) => {
   const onActiveAttemptChange = vi.fn()
   const view = render(
     <MissionList
       token="test-token"
       storageScope="user-1"
       environment={environment}
+      capabilities={capabilities}
       onActiveAttemptChange={onActiveAttemptChange}
     />,
   )
@@ -84,6 +91,7 @@ const renderList = (environment: EnvironmentId = 'kubernetes') => {
         token="test-token"
         storageScope="user-1"
         environment={next}
+        capabilities={capabilities}
         onActiveAttemptChange={onActiveAttemptChange}
       />,
     )
@@ -283,5 +291,75 @@ describe('환경별 미션 (FE-06)', () => {
     renderList('kubernetes')
 
     expect(await screen.findByText(/계정 단위로 열립니다/)).toBeTruthy()
+  })
+})
+
+describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
+  const ALL: EnvironmentCapability[] = [
+    'static_mission',
+    'ai_scenario',
+    'terminal',
+    'tutor',
+    'observability',
+  ]
+  const without = (dropped: EnvironmentCapability) => ALL.filter((c) => c !== dropped)
+
+  /** 활성 정적 미션을 만든다 — 튜터 패널은 시도가 있을 때만 나온다. */
+  const withActiveMission = () =>
+    mocked.getMissionStatus.mockResolvedValue({
+      attempt,
+      elapsed_seconds: 10,
+      remaining_seconds: 1190,
+      current_score: 100,
+    })
+
+  it('tutor 를 광고하면 튜터 패널이 나온다', async () => {
+    withActiveMission()
+    renderList('kubernetes', ALL)
+
+    // "AI 튜터" 는 floating 런처 버튼과 패널 헤더 두 곳에 있다.
+    expect((await screen.findAllByText('AI 튜터')).length).toBeGreaterThan(0)
+  })
+
+  it('tutor 를 광고하지 않으면 튜터 패널이 사라진다 — 프론트 코드 수정 없이', async () => {
+    withActiveMission()
+    renderList('kubernetes', without('tutor'))
+
+    // 미션 진행 화면은 그대로 나오는데 튜터만 없다.
+    await waitFor(() => expect(mocked.getMissionStatus).toHaveBeenCalled())
+    expect(screen.queryAllByText('AI 튜터')).toHaveLength(0)
+  })
+
+  it('ai_scenario 를 광고하지 않으면 AI 문제 섹션이 사라진다', async () => {
+    renderList('kubernetes', without('ai_scenario'))
+
+    await screen.findByText('미션 목록')
+    expect(screen.queryByText('AI 문제 더 풀기')).toBeNull()
+    expect(screen.queryByText('AI CHALLENGE MODE')).toBeNull()
+  })
+
+  it('ai_scenario 를 광고하면 AI 문제 섹션이 나온다', async () => {
+    renderList('kubernetes', ALL)
+
+    expect(await screen.findByText('AI 문제 더 풀기')).toBeTruthy()
+  })
+
+  it('static_mission 을 광고하지 않으면 "준비 중"과 다른 문구를 낸다', async () => {
+    /*
+     * "아직 준비 중"은 기다리면 열린다는 뜻이다. 서버가 제공하지 않는다고 말한 것과
+     * 사용자가 할 일이 다르므로 문구를 섞지 않는다.
+     */
+    renderList('kubernetes', without('static_mission'))
+
+    expect(await screen.findByText(/Kubernetes 환경은 기본 미션을 제공하지 않습니다/)).toBeTruthy()
+    expect(screen.queryByText(/미션은 아직 준비 중입니다/)).toBeNull()
+  })
+
+  it('capabilities 가 null 이면 아무것도 숨기지 않는다', async () => {
+    withActiveMission()
+    renderList('kubernetes', null)
+
+    // 활성 미션이 있으면 AI 섹션은 원래 나오지 않는다 — 튜터만 본다.
+    expect((await screen.findAllByText('AI 튜터')).length).toBeGreaterThan(0)
   })
 })

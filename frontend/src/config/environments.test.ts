@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ENVIRONMENT_CAPABILITIES,
   ENVIRONMENT_IDS,
   ENVIRONMENT_STATUSES,
+  EnvironmentItem,
   isAttemptType,
   isEnvironmentId,
   isEnvironmentStatus,
 } from '../types/training'
 import {
+  capabilityList,
   ENVIRONMENT_META,
   ENVIRONMENT_OBSERVABILITY,
   ENVIRONMENT_ORDER,
@@ -15,6 +18,7 @@ import {
   escapePrometheusLabelValue,
   getGrafanaDataProbeUrl,
   getGrafanaUrl,
+  hasCapability,
   hasObservabilityDashboard,
   isSelectableStatus,
   statusNote,
@@ -151,5 +155,56 @@ describe('환경별 관측 설정 (FE-08)', () => {
     expect(escapePrometheusLabelValue('a"b')).toBe('a\\"b')
     expect(escapePrometheusLabelValue('a\\b')).toBe('a\\\\b')
     expect(escapePrometheusLabelValue('afterfail-abc')).toBe('afterfail-abc')
+  })
+})
+
+describe('기능 광고(capabilities) 판정 (FE-22)', () => {
+  const item = (capabilities?: string[]): EnvironmentItem =>
+    ({ id: 'kubernetes', status: 'available', capabilities }) as EnvironmentItem
+
+  it('계약에 있는 capability 만 남기고 모르는 문자열은 버린다', () => {
+    expect(capabilityList(item(['tutor', 'quantum_debugger', 'terminal']))).toEqual([
+      'tutor',
+      'terminal',
+    ])
+  })
+
+  it('응답에 capabilities 가 없으면 null 이다 — 빈 배열과 구분한다', () => {
+    // 이 구분이 판정의 전부다. 섞으면 계약이 안 맞는 배포에서 화면이 통째로 사라진다.
+    expect(capabilityList(item(undefined))).toBeNull()
+    expect(capabilityList(null)).toBeNull()
+    expect(capabilityList(item([]))).toEqual([])
+  })
+
+  it('배열이 아닌 값이 와도 던지지 않고 null 로 본다', () => {
+    expect(capabilityList({ id: 'kubernetes', status: 'available', capabilities: 'tutor' } as unknown as EnvironmentItem)).toBeNull()
+  })
+
+  it('판정 근거가 없으면(null) 아무것도 막지 않는다', () => {
+    for (const capability of ENVIRONMENT_CAPABILITIES) {
+      expect(hasCapability(null, capability), capability).toBe(true)
+    }
+  })
+
+  it('빈 배열이면 전부 막는다 — 서버가 명시적으로 없다고 말한 것이다', () => {
+    for (const capability of ENVIRONMENT_CAPABILITIES) {
+      expect(hasCapability([], capability), capability).toBe(false)
+    }
+  })
+
+  it('목록에 있는 것만 통과시킨다', () => {
+    expect(hasCapability(['tutor'], 'tutor')).toBe(true)
+    expect(hasCapability(['tutor'], 'observability')).toBe(false)
+  })
+
+  it('observability capability 는 Grafana 대시보드 유무와 다른 사실이다', () => {
+    /*
+     * 백엔드는 세 환경 모두 observability 를 광고하지만 대시보드는 k8s 것 하나뿐이다.
+     * capability 로 갈음하면 Docker/Linux 에서 Grafana 404 를 보여준다.
+     */
+    expect(hasCapability(['observability'], 'observability')).toBe(true)
+    expect(hasObservabilityDashboard('docker')).toBe(false)
+    expect(hasObservabilityDashboard('linux')).toBe(false)
+    expect(hasObservabilityDashboard('kubernetes')).toBe(true)
   })
 })

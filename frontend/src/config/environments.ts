@@ -1,7 +1,10 @@
 import {
   ENVIRONMENT_IDS,
+  EnvironmentCapability,
   EnvironmentId,
+  EnvironmentItem,
   EnvironmentStatus,
+  isEnvironmentCapability,
   isEnvironmentStatus,
 } from '../types/training'
 
@@ -201,6 +204,34 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
 export const getEnvironmentTerminal = (environment: EnvironmentId): EnvironmentTerminalMeta =>
   ENVIRONMENT_TERMINAL[environment]
 
+/* ── 기능 광고(capabilities) 판정 (FE-22) ─────────────────────────────── */
+
+/**
+ * 이 환경이 광고하는 기능 목록. 계약에 없는 문자열은 버린다.
+ *
+ * `null` 은 **판정할 근거가 없다**는 뜻이다 — 환경 정보를 아직 못 받았거나
+ * 응답에 `capabilities` 가 없는 경우다. 빈 배열(`[]`)과 다르다: 빈 배열은
+ * 서버가 "없다"고 말한 것이다.
+ */
+export const capabilityList = (
+  item: EnvironmentItem | null | undefined,
+): EnvironmentCapability[] | null => {
+  if (!item || !Array.isArray(item.capabilities)) return null
+  return item.capabilities.filter(isEnvironmentCapability)
+}
+
+/**
+ * 그 기능을 쓸 수 있는가.
+ *
+ * `list` 가 null 이면 **막지 않는다.** capabilities 는 광고이고 관문은 백엔드
+ * `assert_implemented` 이므로, 모를 때 닫으면 계약이 안 맞는 배포에서 이미 되는
+ * 기능까지 사라진다. 반대로 빈 배열이면 서버가 명시적으로 없다고 말한 것이라 막는다.
+ */
+export const hasCapability = (
+  list: EnvironmentCapability[] | null,
+  capability: EnvironmentCapability,
+): boolean => list === null || list.includes(capability)
+
 /**
  * 환경별 관측(Grafana / Prometheus) 설정 (FE-08).
  *
@@ -247,6 +278,14 @@ export const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || '
 export const escapePrometheusLabelValue = (value: string) =>
   value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 
+/**
+ * 이 환경 전용 Grafana 대시보드가 있는가.
+ *
+ * **`capabilities` 의 `observability` 와 다른 사실이다 (FE-22).** capability 는
+ * 백엔드 관측 probe 가 배선됐다는 뜻이고, 이 함수는 `infra/monitoring/grafana/
+ * dashboards/` 에 대시보드 정의가 있는지다. capability 로 갈음하면 대시보드가 없는
+ * 환경에서 iframe 을 열어 사용자에게 Grafana 404 를 보여준다. 둘 다 필요하다.
+ */
 export const hasObservabilityDashboard = (environment: EnvironmentId | null): boolean =>
   Boolean(environment && ENVIRONMENT_OBSERVABILITY[environment].dashboard)
 
