@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from app.core.metrics import (
-    AI_CALL_DURATION, AI_CALLS, AI_ESTIMATED_COST, AI_STAGE_DURATION, AI_TOKENS,
+    AI_CALL_DURATION, AI_CALLS, AI_ESTIMATED_COST, AI_RETRIEVAL_CONTAMINATION,
+    AI_RETRIEVAL_RESULT_COUNT, AI_RETRIEVALS, AI_SCENARIO_CANDIDATES,
+    AI_STAGE_DURATION, AI_TOKENS, AI_TUTOR_RESULTS,
 )
 
 _PRICE_PER_MILLION = {
@@ -57,3 +59,43 @@ def record_ai_stage(
         stage=stage,
         result=result,
     ).observe(max(0.0, duration_ms) / 1000)
+
+
+def record_tutor_result(*, provider: str, environment: str, result: str) -> None:
+    AI_TUTOR_RESULTS.labels(
+        provider=provider, environment=environment, result=result,
+    ).inc()
+
+
+def record_retrieval(
+    *, provider: str, environment: str, result: str,
+    result_count: int, contamination_count: int = 0,
+) -> None:
+    AI_RETRIEVALS.labels(
+        provider=provider, environment=environment, result=result,
+    ).inc()
+    AI_RETRIEVAL_RESULT_COUNT.labels(
+        provider=provider, environment=environment,
+    ).observe(max(0, result_count))
+    if contamination_count:
+        AI_RETRIEVAL_CONTAMINATION.labels(
+            provider=provider, environment=environment,
+        ).inc(contamination_count)
+
+
+def record_scenario_candidate(
+    *, provider: str, environment: str, result: str, reason: str = "none",
+) -> None:
+    allowed_reasons = {
+        "none", "schema_error", "wrong_environment", "unknown_fault",
+        "unsafe_parameter", "answer_leakage", "invalid_validation_type",
+        "missing_namespace_placeholder", "invalid_json", "empty_candidates",
+        "provider_error", "all_rejected",
+    }
+    bounded_reason = reason.split(":", 1)[0]
+    if bounded_reason not in allowed_reasons:
+        bounded_reason = "other"
+    AI_SCENARIO_CANDIDATES.labels(
+        provider=provider, environment=environment,
+        result=result, reason=bounded_reason,
+    ).inc()

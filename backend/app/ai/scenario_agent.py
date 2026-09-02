@@ -18,7 +18,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import settings
-from app.ai.observability import record_ai_call
+from app.ai.observability import record_ai_call, record_scenario_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -994,6 +994,11 @@ class MockScenarioAgent:
                 scenario=scenario, score=score, score_breakdown=breakdown
             ))
 
+        for candidate in candidates:
+            record_scenario_candidate(
+                provider="mock", environment=gen_input.environment, result="valid",
+            )
+
         return candidates
 
 
@@ -1047,6 +1052,13 @@ class OpenAIScenarioAgent:
 
             raw = response.choices[0].message.content
             parsed = self._parse_response(raw, gen_input)
+            for candidate in parsed:
+                record_scenario_candidate(
+                    provider=self._provider,
+                    environment=gen_input.environment,
+                    result="rejected" if candidate.rejected else "valid",
+                    reason=candidate.rejection_reason or "none",
+                )
             if any(not candidate.rejected for candidate in parsed):
                 record_ai_call(
                     provider=self._provider, purpose="scenario", result="success",
@@ -1065,6 +1077,10 @@ class OpenAIScenarioAgent:
                 token_usage=getattr(response, "usage", None),
                 model=self._model,
             )
+            record_scenario_candidate(
+                provider=self._provider, environment=gen_input.environment,
+                result="fallback", reason="all_rejected",
+            )
             return [*parsed, *MockScenarioAgent().generate(gen_input)]
 
         except Exception:
@@ -1072,6 +1088,10 @@ class OpenAIScenarioAgent:
                 provider=self._provider, purpose="scenario", result="fallback",
                 duration_seconds=time.perf_counter() - started,
                 model=self._model,
+            )
+            record_scenario_candidate(
+                provider=self._provider, environment=gen_input.environment,
+                result="fallback", reason="provider_error",
             )
             logger.exception("scenario LLM call failed; using environment fixture fallback")
             return MockScenarioAgent().generate(gen_input)

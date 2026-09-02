@@ -435,12 +435,15 @@ class RAGService:
                 wait=True,
             )
 
-        return IngestionReport(
+        report = IngestionReport(
             added=len(new_ids - updated_ids),
             updated=len(updated_ids),
             deleted=len(stale_ids),
             unchanged=len(unchanged_ids),
         )
+        from observability_bridge import record_ingestion_changes
+        record_ingestion_changes(report)
+        return report
 
     def ingest_documents(self, documents: List[Document]) -> int:
         """
@@ -455,7 +458,12 @@ class RAGService:
         Raises:
             DocumentIngestionError: If ingestion fails
         """
-        return self.sync_documents(documents).total
+        try:
+            return self.sync_documents(documents).total
+        except Exception:
+            from observability_bridge import record_ingestion_changes
+            record_ingestion_changes(error=True)
+            raise
 
     def _upsert_documents(
         self,

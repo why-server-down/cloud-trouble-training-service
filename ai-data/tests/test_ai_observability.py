@@ -86,6 +86,36 @@ def test_stage_metric_has_only_bounded_pipeline_labels(monkeypatch):
     assert duration.values == [0.125]
 
 
+def test_quality_metrics_use_bounded_labels(monkeypatch):
+    tutor, retrievals = _Metric(), _Metric()
+    counts, contamination, candidates = _Metric(), _Metric(), _Metric()
+    monkeypatch.setattr(observability, "AI_TUTOR_RESULTS", tutor)
+    monkeypatch.setattr(observability, "AI_RETRIEVALS", retrievals)
+    monkeypatch.setattr(observability, "AI_RETRIEVAL_RESULT_COUNT", counts)
+    monkeypatch.setattr(observability, "AI_RETRIEVAL_CONTAMINATION", contamination)
+    monkeypatch.setattr(observability, "AI_SCENARIO_CANDIDATES", candidates)
+
+    observability.record_tutor_result(
+        provider="openai", environment="linux", result="fallback",
+    )
+    observability.record_retrieval(
+        provider="openai", environment="linux", result="success",
+        result_count=3, contamination_count=1,
+    )
+    observability.record_scenario_candidate(
+        provider="openai", environment="linux", result="rejected",
+        reason="schema_error: raw validation details",
+    )
+
+    assert tutor.labels_seen == [{
+        "provider": "openai", "environment": "linux", "result": "fallback",
+    }]
+    assert retrievals.labels_seen[0]["result"] == "success"
+    assert counts.values == [3]
+    assert contamination.values == [1]
+    assert candidates.labels_seen[0]["reason"] == "schema_error"
+
+
 def test_ai_owned_code_has_no_print_calls():
     offenders = []
     for path in (BACKEND / "app" / "ai").glob("*.py"):
