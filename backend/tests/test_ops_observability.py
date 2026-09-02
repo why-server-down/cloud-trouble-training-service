@@ -187,3 +187,37 @@ class TestNoPrintDebugging:
                 if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "print":
                     offenders.append(f"{path.name}:{node.lineno}")
         assert offenders == []
+
+
+class TestImagesAreImmutable(object):
+    """움직이는 태그를 쓰면 같은 미션이 다른 이미지 위에서 돈다 (BE-25).
+
+    `:latest` 는 그 위에 imagePullPolicy 기본값이 Always 라, 네임스페이스를 만들
+    때마다 레지스트리를 다시 다녀온다. 배포 환경에서는 digest 로 고정한다
+    (.env.example 의 배포 섹션).
+    """
+
+    IMAGE_SETTINGS = (
+        "SANDBOX_TOOLBOX_IMAGE",
+        "SANDBOX_DIND_IMAGE",
+        "SANDBOX_LINUX_IMAGE",
+        "SANDBOX_TRAINING_IMAGE",
+        "TRAINING_K8S_IMAGE",
+    )
+
+    @pytest.mark.parametrize("name", IMAGE_SETTINGS)
+    def test_no_floating_latest_tag(self, name):
+        value = getattr(settings, name)
+        assert value, f"{name} 이 비어 있다"
+        assert not value.endswith(":latest"), f"{name} 이 움직이는 태그다: {value}"
+        assert ":" in value or "@" in value, f"{name} 에 태그가 없다(=latest): {value}"
+
+    def test_no_image_is_hardcoded_in_the_cluster_setup(self):
+        """설정을 우회해 코드에 이미지를 박으면 배포에서 고정할 수 없다."""
+        source = (APP_DIR / "services" / "k8s_setup.py").read_text()
+        assert "nginx:latest" not in source
+        assert "settings.TRAINING_K8S_IMAGE" in source
+
+    def test_training_workload_does_not_repull_every_time(self):
+        source = (APP_DIR / "services" / "k8s_setup.py").read_text()
+        assert 'image_pull_policy="IfNotPresent"' in source
