@@ -212,6 +212,7 @@ class TutorResult(BaseModel):
     # 운영 지표. 사용량과 지연을 추적한다(BE-23 메트릭과 연결된다).
     token_usage: Optional[dict] = None
     latency_ms: Optional[int] = None
+    latency_breakdown: Optional[dict[str, float]] = None
     # 프로바이더 실패로 대체 응답을 준 경우
     fallback_used: bool = False
     error_code: Optional[str] = None

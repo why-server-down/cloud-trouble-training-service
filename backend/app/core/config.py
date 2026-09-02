@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     SCENARIO_MODEL: str = "gpt-4o-mini"
     TUTOR_MODEL: str = "gpt-4o-mini"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_TIMEOUT: float = 10.0
+    CONTEXT_COLLECTION_TIMEOUT: float = 3.0
+    RAG_SEARCH_TIMEOUT: float = 2.0
 
     # Gemini
     GEMINI_API_KEY: str = ""
