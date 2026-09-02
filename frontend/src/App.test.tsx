@@ -35,11 +35,20 @@ vi.mock('./services/api', async (importOriginal) => {
 
 const mocked = vi.mocked(api)
 
-const K8S: EnvironmentItem = { id: 'kubernetes', status: 'available', capabilities: ['terminal'] }
-const DOCKER_AVAILABLE: EnvironmentItem = { id: 'docker', status: 'available', capabilities: [] }
+/*
+ * 백엔드 `availability()` 는 구현된 환경에 capability 5개를 모두 실어 보낸다
+ * (2026-09-02 실측). `available` + 빈 배열은 실제로 오지 않는 조합이다 —
+ * FE-22 로 capabilities 가 화면 분기의 근거가 된 뒤로는 픽스처가 이 형태여야
+ * 다른 테스트가 엉뚱한 이유로 깨지지 않는다. capability 게이팅 자체는 아래
+ * "capabilities 기반 기능 게이팅 (FE-22)" describe 에서 값을 바꿔 확인한다.
+ */
+const ALL_CAPABILITIES = ['static_mission', 'ai_scenario', 'terminal', 'tutor', 'observability']
+
+const K8S: EnvironmentItem = { id: 'kubernetes', status: 'available', capabilities: ALL_CAPABILITIES }
+const DOCKER_AVAILABLE: EnvironmentItem = { id: 'docker', status: 'available', capabilities: ALL_CAPABILITIES }
 const DOCKER_PREPARING: EnvironmentItem = { id: 'docker', status: 'preparing', capabilities: [] }
 const LINUX_PREPARING: EnvironmentItem = { id: 'linux', status: 'preparing', capabilities: [] }
-const LINUX_AVAILABLE: EnvironmentItem = { id: 'linux', status: 'available', capabilities: [] }
+const LINUX_AVAILABLE: EnvironmentItem = { id: 'linux', status: 'available', capabilities: ALL_CAPABILITIES }
 
 const activeMissionStatus = (environment: 'kubernetes' | 'docker'): MissionStatusResponse => ({
   attempt: {
@@ -129,7 +138,7 @@ describe('환경 가용성 화면 (FE-03)', () => {
 
   it('degraded 환경을 선택하면 경고를 띄우되 진입은 허용한다', async () => {
     mocked.getEnvironments.mockResolvedValue([
-      { id: 'kubernetes', status: 'degraded', capabilities: ['terminal'] },
+      { id: 'kubernetes', status: 'degraded', capabilities: ALL_CAPABILITIES },
       DOCKER_PREPARING,
     ])
     render(<App />)
@@ -464,6 +473,103 @@ describe('환경별 관측 패널 (FE-08)', () => {
     await screen.findByRole('tablist')
     expect(screen.getByText('PROFILE / LEARNING DASHBOARD')).toBeTruthy()
     expect(probe).not.toHaveBeenCalled()
+  })
+})
+
+describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
+  const stubPrometheus = () => {
+    const probe = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'success', data: { result: [{ value: [0, '1'] }] } }),
+    })) as unknown as typeof fetch
+    vi.stubGlobal('fetch', probe)
+    return vi.mocked(probe)
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const withCapabilities = (capabilities: string[]): EnvironmentItem => ({
+    id: 'kubernetes',
+    status: 'available',
+    capabilities,
+  })
+
+  it('observability 를 광고하지 않으면 대시보드가 있는 환경에서도 iframe 을 열지 않는다', async () => {
+    /*
+     * Kubernetes 는 유일하게 Grafana 대시보드가 있는 환경이다. 그래도 서버가
+     * 관측을 광고하지 않으면 빈 대시보드를 보여주는 셈이라 열지 않는다.
+     */
+    const probe = stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([
+      withCapabilities(['static_mission', 'ai_scenario', 'terminal', 'tutor']),
+    ])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    // 이유가 "대시보드가 없다"가 아니라 "서버가 관측을 제공하지 않는다"로 나온다.
+    expect(await screen.findByText(/Kubernetes 환경은 관측 데이터를 제공하지 않습니다/)).toBeTruthy()
+    expect(screen.queryByTitle(/Grafana dashboard/)).toBeNull()
+    expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('대시보드가 없는 환경의 문구는 그대로 유지된다 — 두 이유를 섞지 않는다', async () => {
+    stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('docker'))
+    render(<App />)
+
+    expect(await screen.findByText(/Docker 환경은 관측 대시보드가 아직 없습니다/)).toBeTruthy()
+    expect(screen.queryByText(/관측 데이터를 제공하지 않습니다/)).toBeNull()
+  })
+
+  it('terminal 을 광고하지 않으면 세션 로딩 대신 이유를 알린다', async () => {
+    mocked.getEnvironments.mockResolvedValue([
+      withCapabilities(['static_mission', 'ai_scenario', 'tutor', 'observability']),
+    ])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    expect(await screen.findByText(/Kubernetes 환경은 터미널을 제공하지 않습니다/)).toBeTruthy()
+    // 실패할 세션을 만들지 않는다.
+    expect(mocked.createTerminalSession).not.toHaveBeenCalled()
+  })
+
+  it('capabilities 가 빈 배열이면 작업 화면 대신 준비 중 안내를 띄운다', async () => {
+    // 빈 배열은 서버가 "없다"고 말한 것이다. 화면을 그리면 누르는 것마다 거절당한다.
+    mocked.getEnvironments.mockResolvedValue([withCapabilities([])])
+    render(<App />)
+
+    await screen.findByRole('tablist')
+    expect(screen.getByText(/Kubernetes 환경은 아직 준비 중입니다/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '미션' })).toBeNull()
+  })
+
+  it('계약에 없는 capability 가 섞여 와도 아는 기능은 그대로 동작한다', async () => {
+    stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([
+      withCapabilities([...ALL_CAPABILITIES, 'quantum_debugger']),
+    ])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    expect(await screen.findByTitle('Kubernetes Grafana dashboard')).toBeTruthy()
+  })
+
+  it('응답에 capabilities 가 아예 없으면 아무것도 숨기지 않는다', async () => {
+    /*
+     * 판정 근거가 없는 것을 "없다"로 읽으면 계약이 안 맞는 배포에서 화면이 통째로
+     * 사라진다. capabilities 는 광고이고 관문은 백엔드 assert_implemented 다.
+     */
+    stubPrometheus()
+    mocked.getEnvironments.mockResolvedValue([
+      { id: 'kubernetes', status: 'available' } as EnvironmentItem,
+    ])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    expect(await screen.findByTitle('Kubernetes Grafana dashboard')).toBeTruthy()
   })
 })
 

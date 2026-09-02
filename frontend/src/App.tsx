@@ -8,10 +8,12 @@ import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
 import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
 import {
+  capabilityList,
   getEnvironmentMeta,
   getEnvironmentTerminal,
   getGrafanaDataProbeUrl,
   getGrafanaUrl,
+  hasCapability,
   isSelectableStatus,
 } from './config/environments'
 import {
@@ -173,14 +175,43 @@ function App() {
   /** namespace 는 세션 응답에서만 온다. 세션을 지연 생성하므로 그 전에는 알 수 없다. */
   const namespace = activeSession?.namespace ?? null
   const accountStorageScope = profile?.id ?? null
+  /*
+   * 환경이 광고하는 기능 (FE-22). 화면 분기를 프론트 하드코딩이 아니라 응답으로 판정한다.
+   *
+   * 목록을 둘로 나눈 이유: 관측 패널은 **진행 중인 시도의 환경**(sessionEnvironment)을
+   * 따르고, 미션·튜터 화면은 **선택된 탭의 환경**(activeEnvironment)을 따른다. 활성
+   * 시도가 있으면 App 이 탭을 잠가 둘이 같지만, 각자 자기 근거를 쓰는 편이 맞다.
+   */
+  const findEnvironmentItem = (environment: EnvironmentId | null) =>
+    environments?.find((item) => item.id === environment) ?? null
+  const activeEnvironmentItem = findEnvironmentItem(activeEnvironment)
+  const activeEnvironmentCapabilities = capabilityList(activeEnvironmentItem)
+  const sessionEnvironmentCapabilities = capabilityList(findEnvironmentItem(sessionEnvironment))
+
+  /*
+   * 대시보드 유무와 capability 는 다른 사실이므로 둘 다 본다 (FE-22).
+   * capability 만 보면 대시보드 없는 환경에서 Grafana 404 를, 대시보드만 보면
+   * 백엔드가 관측을 떼어낸 환경에서 빈 대시보드를 보여준다.
+   */
+  const advertisesObservability = hasCapability(sessionEnvironmentCapabilities, 'observability')
+  const canUseTerminal = hasCapability(sessionEnvironmentCapabilities, 'terminal')
+
   /**
    * 관측 URL 은 활성 attempt 의 환경으로 만든다 (FE-08).
    * 대시보드가 없는 환경은 null 이 오고, 그때는 iframe 대신 안내를 띄운다 —
    * K8s 대시보드로 대체하면 사용자는 남의 환경 지표를 자기 것으로 읽는다.
    */
   const grafanaUrl = getGrafanaUrl(sessionEnvironment, namespace)
-  const grafanaProbeUrl = getGrafanaDataProbeUrl(sessionEnvironment, namespace)
-  const hasObservability = grafanaUrl !== null
+  /*
+   * 실제로 돌릴 probe. 대시보드가 없거나 서버가 관측을 광고하지 않으면 없다.
+   * URL 을 여기서 null 로 만들어야 polling 과 effect 가 한 곳에서 함께 꺼진다 —
+   * iframe 만 감추면 Prometheus 요청은 계속 나간다 (FE-08 의 "polling 자체를 하지
+   * 않는다"는 기준은 이유가 capability 일 때도 같다).
+   */
+  const grafanaProbeUrl = advertisesObservability
+    ? getGrafanaDataProbeUrl(sessionEnvironment, namespace)
+    : null
+  const hasObservability = grafanaUrl !== null && advertisesObservability
   /** 관측 패널 문구에 쓰는 환경 이름. iframe title 에도 넣어 스크린리더가 구분할 수 있게 한다. */
   const observabilityLabel = sessionEnvironment ? getEnvironmentMeta(sessionEnvironment).label : ''
   /*
@@ -196,7 +227,6 @@ function App() {
     : '현재 상태와 최근 변화를 차례로 확인합니다.'
   const isGrafanaLoading =
     hasActiveAttempt && hasObservability && (!isGrafanaFrameReady || !isGrafanaDataReady)
-  const activeEnvironmentItem = environments?.find((item) => item.id === activeEnvironment) ?? null
   const isActiveEnvironmentDegraded = activeEnvironmentItem?.status === 'degraded'
   /**
    * 터미널 workspace 가 실제로 필요한 시점.
@@ -333,11 +363,16 @@ function App() {
     localStorage.setItem(scopedStorageKey(ENVIRONMENT_STORAGE_KEY, accountStorageScope), activeEnvironment)
   }, [accountStorageScope, activeEnvironment])
 
-  /** 선택된 환경의 터미널이 필요해진 순간에만 세션을 만든다. 이미 있으면 훅이 막는다. */
+  /**
+   * 선택된 환경의 터미널이 필요해진 순간에만 세션을 만든다. 이미 있으면 훅이 막는다.
+   *
+   * 서버가 terminal 을 광고하지 않으면 만들지 않는다 (FE-22) — 백엔드
+   * `assert_implemented` 가 거절할 요청이라 사용자에게 실패할 로딩만 보여준다.
+   */
   useEffect(() => {
-    if (!sessionEnvironment || !needsWorkspace) return
+    if (!sessionEnvironment || !needsWorkspace || !canUseTerminal) return
     ensure(sessionEnvironment)
-  }, [ensure, needsWorkspace, sessionEnvironment])
+  }, [canUseTerminal, ensure, needsWorkspace, sessionEnvironment])
 
   useEffect(() => {
     if (!accountStorageScope) return
@@ -550,6 +585,20 @@ function App() {
                     <p>모든 환경이 준비 중이거나 사용 중지 상태입니다.</p>
                     <EnvironmentRoadmap items={environments} />
                   </section>
+                ) : activeEnvironmentCapabilities?.length === 0 ? (
+                  /*
+                   * status 는 선택 가능한데 광고하는 기능이 하나도 없다 (FE-22).
+                   * 빈 배열은 서버가 "없다"고 말한 것이므로 그대로 전한다 — 작업 화면을
+                   * 그리면 사용자가 누르는 것마다 백엔드에 거절당한다.
+                   * (판정 근거가 없는 경우는 여기 오지 않는다. `capabilityList` 가 null 을 준다)
+                   */
+                  <section className="env-notice env-notice-empty" id="env-panel" role="tabpanel">
+                    <span className="env-notice-title">
+                      {getEnvironmentMeta(activeEnvironment).label} 환경은 아직 준비 중입니다
+                    </span>
+                    <p>서버가 이 환경에서 제공하는 기능을 아직 알리지 않았습니다.</p>
+                    <EnvironmentRoadmap items={environments} />
+                  </section>
                 ) : (
                   <>
                 <nav className="workspace-tabs" aria-label="작업 화면">
@@ -562,10 +611,26 @@ function App() {
                   role="tabpanel"
                   aria-labelledby={`env-tab-${activeEnvironment}`}
                 >
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} onActiveAttemptChange={handleActiveAttemptChange} onAttemptCompleted={handleAttemptCompleted} /></div>
+                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} capabilities={activeEnvironmentCapabilities} onActiveAttemptChange={handleActiveAttemptChange} onAttemptCompleted={handleAttemptCompleted} /></div>
                   <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
                     <div className="terminal-workspace">
-                      {activeAttempt ? (
+                      {activeAttempt && !canUseTerminal ? (
+                        /*
+                         * 서버가 이 환경에 terminal 을 광고하지 않는다 (FE-22).
+                         * 세션 생성을 시도하면 백엔드 assert_implemented 가 거절하므로,
+                         * 사용자에게 실패할 로딩을 보여주지 않고 이유를 먼저 알린다.
+                         */
+                        <section className="env-notice" role="status">
+                          <span className="env-notice-title">
+                            {getEnvironmentMeta(activeAttempt.environment).label} 환경은 터미널을
+                            제공하지 않습니다
+                          </span>
+                          <p>
+                            미션 진행과 검증은 그대로 동작합니다. 터미널이 필요한 미션이라면
+                            다른 환경을 선택하세요.
+                          </p>
+                        </section>
+                      ) : activeAttempt ? (
                         <div className="terminal-tour-target" data-tour="terminal">
                           {activeSession ? (
                             /*
@@ -673,11 +738,17 @@ function App() {
                             )}
                           </div>
                         ) : (
-                          /* 이 환경 전용 대시보드가 없다 (FE-08). 다른 환경 대시보드로 대체하지 않는다. */
+                          /*
+                           * 관측 화면을 열 수 없다. 다른 환경 대시보드로 대체하지 않는다 (FE-08).
+                           * 이유가 두 가지라 문구를 나눈다 (FE-22) — "대시보드가 없다"와
+                           * "서버가 관측을 제공하지 않는다"는 사용자가 할 일이 다르다.
+                           */
                           <div className="grafana-frame-wrap grafana-frame-empty">
                             <section className="env-notice" role="status">
                               <span className="env-notice-title">
-                                {observabilityLabel} 환경은 관측 대시보드가 아직 없습니다
+                                {advertisesObservability
+                                  ? `${observabilityLabel} 환경은 관측 대시보드가 아직 없습니다`
+                                  : `${observabilityLabel} 환경은 관측 데이터를 제공하지 않습니다`}
                               </span>
                               <p>
                                 터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는

@@ -1075,6 +1075,9 @@ Application/DB 착수 조건:
 
 선행: 백엔드 `_CAPABILITIES` 정합성 확보 (완료, 커밋 `6876c76`)
 
+> 구현 완료 (2026-09-02). 판정 규칙은 `src/config/environments.ts` 의
+> `capabilityList` / `hasCapability` 한 곳에 있다.
+
 배경:
 
 `GET /api/environments` 의 `capabilities` 는 FE-00 부터 계약에 있었지만 프론트는
@@ -1087,9 +1090,15 @@ Application/DB 착수 조건:
 
 수정 파일:
 
-- `src/config/environments.ts`
-- `src/App.tsx`
-- `src/components/Environment/EnvironmentTabs.tsx`
+- `src/types/training.ts` — capability 계약(`ENVIRONMENT_CAPABILITIES`)
+- `src/config/environments.ts` — 판정 규칙(`capabilityList` / `hasCapability`)
+- `src/services/api.ts` — 모르는 capability 경고
+- `src/App.tsx` — 관측 패널·Prometheus probe·터미널 세션
+- `src/components/Mission/MissionList.tsx` — 튜터·AI 시나리오·기본 미션
+
+(`EnvironmentTabs.tsx` 는 손대지 않았다 — 탭 노출은 `status` 가 정하고
+capabilities 는 탭 **안**의 기능을 정한다. 두 판정을 섞으면 준비 중 환경의
+로드맵 안내가 사라진다.)
 
 구현 지시:
 
@@ -1101,9 +1110,14 @@ Application/DB 착수 조건:
     capabilities 를 근거로 열면 Docker/Linux 에서 Grafana 404 를 보여준다.
     `hasObservabilityDashboard()` 를 유지하고, 두 조건을 AND 로 다룬다.
 - 계약에 없는 capability 문자열은 무시한다. 응답 전체를 실패시키지 않는다
-  (환경 id 를 다루는 `api.ts` 의 방식과 같게).
+  (환경 id 를 다루는 `api.ts` 의 방식과 같게). 다만 경고는 남긴다.
 - capabilities 가 빈 배열로 오면 "준비 중"으로 표시하고 기능을 숨긴다 —
   없는 기능을 눌러 500 을 받게 하지 않는다.
+- **빈 배열과 필드 없음을 구분한다.** 빈 배열은 서버가 "없다"고 말한 것이고, 필드가
+  없는 것은 그 말을 하지 않은 것이다. 후자를 "없다"로 읽으면 계약이 안 맞는 배포에서
+  화면이 통째로 사라진다 — 그때는 아무것도 숨기지 않는다(`capabilityList` → `null`).
+- **기능을 숨기는 데서 멈추지 않고 그 기능의 요청도 멈춘다.** 화면만 감추면
+  Prometheus polling 이나 터미널 세션 생성이 계속 나가 실패한다.
 
 인수 조건:
 
@@ -1112,6 +1126,10 @@ Application/DB 착수 조건:
 - `observability` 가 있어도 대시보드가 없는 환경은 여전히 "관측 대시보드가 아직
   없습니다" 안내를 보여준다. Grafana 404 가 노출되지 않는다.
 - 계약에 없는 capability 가 섞여 와도 환경 탭이 정상 렌더링된다.
+- `observability` 가 없으면 대시보드가 있는 Kubernetes 에서도 iframe 을 열지 않고
+  Prometheus probe 도 돌지 않는다. 문구가 "대시보드가 없다"와 구분된다.
+- `terminal` 이 없으면 세션 생성 요청 자체가 나가지 않는다.
+- 응답에 `capabilities` 가 없으면 이번 변경 이전과 똑같이 동작한다.
 
 ---
 

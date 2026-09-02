@@ -38,6 +38,28 @@ export type EnvironmentStatus = (typeof ENVIRONMENT_STATUSES)[number]
 export const isEnvironmentStatus = (value: unknown): value is EnvironmentStatus =>
   typeof value === 'string' && (ENVIRONMENT_STATUSES as readonly string[]).includes(value)
 
+/**
+ * 환경이 광고하는 기능. 백엔드 `_CAPABILITIES`
+ * (`backend/app/core/environments.py`) 와 같은 값이다.
+ *
+ * **capabilities 는 광고이고 관문이 아니다.** 요청을 실제로 막는 것은 백엔드
+ * `assert_implemented` 다. 그래서 이 값이 틀려도 서버는 정상 동작하고 프론트만
+ * 잘못된 화면을 그린다 — 값을 믿는 쪽이 판정 규칙을 신중하게 정해야 한다
+ * (`config/environments.ts` 의 `hasCapability`).
+ */
+export const ENVIRONMENT_CAPABILITIES = [
+  'static_mission',
+  'ai_scenario',
+  'terminal',
+  'tutor',
+  'observability',
+] as const
+
+export type EnvironmentCapability = (typeof ENVIRONMENT_CAPABILITIES)[number]
+
+export const isEnvironmentCapability = (value: unknown): value is EnvironmentCapability =>
+  typeof value === 'string' && (ENVIRONMENT_CAPABILITIES as readonly string[]).includes(value)
+
 export interface EnvironmentItem {
   id: EnvironmentId
   /**
@@ -45,8 +67,15 @@ export interface EnvironmentItem {
    * 죽지 않도록 string 으로 받는다. 소비하는 쪽에서 `isEnvironmentStatus()` 로 좁힌다.
    */
   status: string
-  /** 백엔드 `_CAPABILITIES` 값. status 가 preparing 이면 빈 배열이다. */
-  capabilities: string[]
+  /**
+   * 백엔드 `_CAPABILITIES` 값. status 가 preparing 이면 빈 배열이다.
+   *
+   * **빈 배열과 없음을 구분한다 (FE-22).** 빈 배열은 서버가 "이 환경엔 기능이
+   * 없다"고 말한 것이고, 필드가 없는 것은 그 말을 하지 않은 것이다. 후자를
+   * "없다"로 읽으면 계약이 안 맞는 배포에서 화면이 통째로 사라진다.
+   * 그래서 계약에 있는 필드지만 optional 로 받는다.
+   */
+  capabilities?: string[]
 }
 
 export interface EnvironmentListResponse {

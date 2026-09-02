@@ -212,6 +212,23 @@ describe('getEnvironments', () => {
 
     await expect(getEnvironments(TOKEN)).rejects.toMatchObject({ status: 502 })
   })
+
+  it('모르는 capability 는 응답을 죽이지 않고 경고만 남긴다 (FE-22)', async () => {
+    /*
+     * 조용히 버리면 백엔드가 기능을 추가했는데 프론트가 못 그리는 상태를 아무도 모른다.
+     * 그렇다고 응답을 실패시키면 이미 되는 훈련이 멈춘다 — 환경 id 와 같은 방식이다.
+     */
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    stubFetchOnce({
+      items: [{ id: 'kubernetes', status: 'available', capabilities: ['tutor', 'quantum_debugger'] }],
+    })
+
+    const items = await getEnvironments(TOKEN)
+
+    expect(items).toHaveLength(1)
+    expect(warn.mock.calls.flat().join(' ')).toContain('quantum_debugger')
+    warn.mockRestore()
+  })
 })
 
 describe('createTerminalSession', () => {

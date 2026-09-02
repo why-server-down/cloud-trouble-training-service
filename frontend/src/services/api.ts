@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   EnvironmentItem,
   EnvironmentListResponse,
+  isEnvironmentCapability,
   isEnvironmentId,
   MissionAttemptResponse,
   MissionCompleteResponse,
@@ -17,6 +18,7 @@ import {
 // 타입을 가져오고 있으므로 여기서 다시 내보내 import 경로를 깨지 않는다.
 export type {
   AttemptType,
+  EnvironmentCapability,
   EnvironmentId,
   EnvironmentItem,
   EnvironmentListResponse,
@@ -611,6 +613,24 @@ export const getEnvironments = async (token: string): Promise<EnvironmentItem[]>
   const known = payload.items.filter((item) => isEnvironmentId(item.id))
   if (known.length !== payload.items.length) {
     console.warn(`프론트가 모르는 환경 ${payload.items.length - known.length}건을 건너뛰었습니다.`)
+  }
+
+  /*
+   * 계약에 없는 capability 는 버리는 것으로 충분하다(`hasCapability` 가 무시한다).
+   * 다만 조용히 버리면 백엔드가 기능을 추가했는데 프론트가 못 그리는 상태를
+   * 아무도 모른다 — 환경 id 와 같은 방식으로 경고만 남긴다 (FE-22).
+   */
+  const unknownCapabilities = [
+    ...new Set(
+      known.flatMap((item) =>
+        Array.isArray(item.capabilities)
+          ? item.capabilities.filter((capability) => !isEnvironmentCapability(capability))
+          : [],
+      ),
+    ),
+  ]
+  if (unknownCapabilities.length > 0) {
+    console.warn(`프론트가 모르는 capability: ${unknownCapabilities.join(', ')}`)
   }
 
   return known
