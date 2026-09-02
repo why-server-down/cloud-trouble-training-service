@@ -1,5 +1,5 @@
 from app.core.config import Settings
-from app.core.metrics import AI_STAGE_DURATION
+from app.core.metrics import AI_ESTIMATED_COST, AI_STAGE_DURATION
 from app.schemas import TutorResult
 
 
@@ -24,3 +24,15 @@ def test_tutor_result_carries_latency_breakdown():
         latency_breakdown={"context_ms": 30.0, "retrieval_ms": 20.0, "llm_ms": 70.0},
     )
     assert result.latency_breakdown["llm_ms"] == 70.0
+
+
+def test_token_cost_budget_defaults_are_bounded():
+    settings = Settings(_env_file=None)
+    assert settings.AI_MAX_CONTEXT_TOKENS == 9_000
+    assert settings.AI_MAX_COMPLETION_TOKENS == 500
+    assert settings.AI_MAX_RETRIEVED_CHUNKS == 5
+    assert settings.AI_PROVIDER_MAX_ATTEMPTS == 2
+
+
+def test_cost_metric_has_no_user_or_content_labels():
+    assert AI_ESTIMATED_COST._labelnames == ("provider", "purpose", "model")

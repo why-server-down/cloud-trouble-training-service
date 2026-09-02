@@ -95,6 +95,11 @@ AI_STAGE_DURATION = Histogram(
     ["provider", "model", "environment", "hint_level", "stage", "result"],
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0),
 )
+AI_ESTIMATED_COST = Counter(
+    "ai_estimated_cost_usd_total",
+    "Estimated provider cost in USD based on token usage.",
+    ["provider", "purpose", "model"],
+)
 
 # ── 진행 상태 ─────────────────────────────────────────────────────────────
 ACTIVE_SESSIONS = Gauge(
