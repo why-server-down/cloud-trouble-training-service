@@ -27,7 +27,12 @@ python -m pytest -q
 ```bash
 python evals/run_evals.py
 # stdout: JSON summary, 전체 성공 0 / 실패 포함 1
+python evals/run_regression_gate.py
 ```
+
+회귀 게이트는 retrieval/tutor/scenario의 저장된 기준 보고서와 현재 offline
+결과를 비교한다. 품질 지표가 3%p를 초과해 하락하거나 environment contamination
+또는 unsafe scenario acceptance가 한 건이라도 있으면 실패한다.
 
 ### Integration test
 
