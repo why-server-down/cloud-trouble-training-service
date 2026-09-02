@@ -70,10 +70,13 @@ export class ApiError extends Error {
 /**
  * Retry-After 파싱. delta-seconds 와 HTTP-date 두 형식을 모두 받는다.
  *
- * **주의:** Retry-After 는 CORS-safelisted response header 가 아니다.
- * 다른 origin 의 API 를 직접 호출하면 백엔드가 `Access-Control-Expose-Headers` 에
- * 넣어주지 않는 한 null 로 읽힌다. 같은 origin(Vite proxy / nginx)에서는 그대로 읽힌다.
- * 그래서 호출자는 null 을 "제한 없음"으로 해석해서는 안 된다.
+ * Retry-After 는 CORS-safelisted response header 가 아니라 서버가
+ * `Access-Control-Expose-Headers` 에 넣어야 cross-origin 에서 읽힌다.
+ * 백엔드가 `expose_headers=["Retry-After"]` 를 붙였으므로(`backend/app/main.py`)
+ * 지금은 같은 origin(Vite proxy / nginx)과 cross-origin 양쪽에서 읽힌다.
+ *
+ * **그래도 null 을 "제한 없음"으로 해석해서는 안 된다.** 프록시가 헤더를 떨어뜨리거나
+ * 그 설정이 없는 배포를 만나면 다시 null 이 된다. 429 는 헤더 없이도 429 다.
  */
 export const parseRetryAfter = (value: string | null | undefined): number | null => {
   if (!value) return null
@@ -122,13 +125,18 @@ export interface TutorSource {
 
 /**
  * `POST /api/chat/` 응답. 백엔드 `ChatResponse` 와 1:1 이다 (FE-11).
- *
- * 주의: 백엔드 `TutorResult` 에는 environment 가 있지만 `ChatResponse` 는 내보내지
- * 않는다. 그래서 환경 배지는 응답이 아니라 활성 attempt 의 환경으로 그린다.
  */
 export interface ChatResponse {
   response: string
   hint_level: number
+  /**
+   * 튜터가 답의 근거로 삼은 환경 (백엔드 `ChatResponse.environment`).
+   *
+   * 요청 환경(활성 attempt)과 다르면 계층 간 계약이 어긋난 것이다 — 다른 환경
+   * 기준 힌트는 이 세션의 터미널이 거절할 명령을 안내하므로 화면에 드러낸다.
+   * 이 필드가 없던 시절의 응답도 있을 수 있어 호출부는 값을 검증한 뒤 비교한다.
+   */
+  environment: EnvironmentId
   mission_name: string | null
   /** 답변에 쓰인 근거 문서. 없을 수 있다. */
   sources?: TutorSource[] | null

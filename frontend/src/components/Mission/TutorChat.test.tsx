@@ -15,6 +15,8 @@ const mocked = vi.mocked(api)
 const answer = (overrides: Partial<api.ChatResponse> = {}): api.ChatResponse => ({
   response: '먼저 컨테이너 상태를 확인하세요.',
   hint_level: 0,
+  // renderChat 기본 환경과 같게 둔다 — 기본 응답이 불일치 경고를 만들지 않게.
+  environment: 'docker',
   mission_name: 'test',
   ...overrides,
 })
@@ -127,6 +129,41 @@ describe('환경 인지형 튜터 표시 (FE-11)', () => {
 
     expect(await screen.findByText(/컨테이너 상태를 확인/)).toBeTruthy()
     expect(mocked.askTutor).toHaveBeenCalledTimes(2)
+  })
+
+  it('응답 환경이 요청 환경과 같으면 경고를 붙이지 않는다', async () => {
+    mocked.askTutor.mockResolvedValue(answer({ environment: 'docker' }))
+    renderChat({ environment: 'docker' })
+    await askOnce()
+
+    expect(await screen.findByText(/컨테이너 상태를 확인/)).toBeTruthy()
+    expect(screen.queryByText(/기준입니다/)).toBeNull()
+  })
+
+  it('응답 환경이 요청 환경과 다르면 답변을 버리지 않고 경고를 함께 보여준다', async () => {
+    mocked.askTutor.mockResolvedValue(answer({ environment: 'kubernetes' }))
+    renderChat({ environment: 'linux' })
+    await askOnce()
+
+    /*
+     * 답변 자체는 그대로 보여준다. 버리면 사용자가 재전송해도 같은 결과를 받아
+     * 아무것도 얻지 못한다 — 오해만 막는 것이 목적이다.
+     */
+    expect(await screen.findByText(/컨테이너 상태를 확인/)).toBeTruthy()
+
+    // 색이나 아이콘이 아니라 문구로 두 환경을 모두 밝힌다 (FE-17).
+    const warning = screen.getByText(/Kubernetes 기준입니다/)
+    expect(warning.textContent).toContain('현재 세션: Linux')
+  })
+
+  it('계약에 없는 environment 는 불일치로 단정하지 않는다', async () => {
+    // 모르는 값을 불일치로 읽으면 없는 계약 위반을 사용자에게 알린다.
+    mocked.askTutor.mockResolvedValue(answer({ environment: 'windows' as api.EnvironmentId }))
+    renderChat({ environment: 'linux' })
+    await askOnce()
+
+    expect(await screen.findByText(/컨테이너 상태를 확인/)).toBeTruthy()
+    expect(screen.queryByText(/기준입니다/)).toBeNull()
   })
 
   it('입력에 접근 가능한 label 이 있다', () => {
