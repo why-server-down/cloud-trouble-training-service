@@ -524,6 +524,21 @@
   line-height: 1.4;
 }
 
+/*
+ * 답변이 다른 환경을 근거로 왔을 때의 경고 (FE-11). 계약 불일치는 fallback 안내보다
+ * 무거우므로 답변 **위**에 두고 테두리로 본문과 분리한다. 색만으로 구분하지 않는다
+ * (FE-17) — 문구에 두 환경 이름이 그대로 들어간다.
+ */
+.chat-environment-mismatch {
+  margin: 0 0 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-left: 2px solid var(--warning, #d9b45b);
+  background: rgba(217, 180, 91, 0.08);
+  color: var(--warning, #d9b45b);
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
 /* 시각적으로는 숨기고 스크린리더에는 남긴다. */
 .sr-only {
   position: absolute;

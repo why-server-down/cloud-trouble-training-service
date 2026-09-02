@@ -4,14 +4,14 @@ import { ApiError, askTutor, TutorSource } from '../../services/api'
 import { getEnvironmentMeta } from '../../config/environments'
 import { getSafeSourceHref } from '../../utils/tutorSources'
 import { markStart, measureSince, PERF } from '../../utils/perf'
-import { EnvironmentId } from '../../types/training'
+import { EnvironmentId, isEnvironmentId } from '../../types/training'
 
 interface TutorChatProps {
   token: string
   missionId: string
   /**
-   * 이 대화가 속한 훈련 환경 (FE-11).
-   * `ChatResponse` 는 environment 를 내보내지 않으므로 활성 attempt 의 값을 받는다.
+   * 이 대화가 속한 훈련 환경 = 활성 attempt 의 환경 (FE-11).
+   * 튜터 응답의 `environment` 와 비교해 계약 불일치를 판정하는 기준값이다.
    */
   environment: EnvironmentId
   hintsUsed: number
@@ -32,6 +32,11 @@ interface ChatMessage {
   fallback?: boolean
   /** 질문 전송부터 답변 도착까지 걸린 ms (FE-20). 숨기지 않고 그대로 보여준다. */
   latencyMs?: number | null
+  /**
+   * 응답이 요청 환경과 **다른** 환경을 근거로 왔을 때 그 환경 (FE-11).
+   * 일치하거나 판정할 수 없으면 null 이다 — 값이 있을 때만 경고를 붙인다.
+   */
+  mismatchedEnvironment?: EnvironmentId | null
 }
 
 const initialMessages: ChatMessage[] = [
@@ -45,9 +50,10 @@ const CANCELLABLE_AFTER_MS = 15000
 /**
  * 429 인데 Retry-After 를 읽지 못했을 때 쓸 최소 대기 (초).
  *
- * cross-origin 호출에서는 백엔드가 expose_headers 를 주지 않으면 헤더가 가려진다.
- * 그때 재시도를 열어두면 사용자가 버튼을 두드려 429 만 계속 받는다. 서버가 준
- * 숫자를 모르므로 화면에는 초를 표시하지 않고 "잠시 후"로만 안내한다.
+ * 백엔드가 `expose_headers=["Retry-After"]` 를 붙여 정상 경로에서는 서버가 준
+ * 숫자를 그대로 쓴다. 이 값은 헤더가 가려지는 경우(중간 프록시가 떨어뜨림,
+ * 그 설정이 없는 배포)를 위한 안전장치로 남긴다 — 재시도를 열어두면 사용자가
+ * 버튼을 두드려 429 만 계속 받는다. 숫자를 모르므로 초는 표시하지 않는다.
  */
 const RATE_LIMIT_FALLBACK_COOLDOWN_SEC = 5
 
@@ -289,6 +295,15 @@ const TutorChat: React.FC<TutorChatProps> = ({
        */
       const latencyMs = measureSince(PERF.TUTOR_RESPONSE)
 
+      /*
+       * 튜터가 실제로 어느 환경을 보고 답했는지 확인한다 (FE-11).
+       * 요청 환경과 다르면 계약이 어긋난 것이다 — 다른 환경 기준 힌트는 이 세션의
+       * 터미널이 거절할 명령을 안내한다. 그렇다고 답변을 버리지는 않는다.
+       * 버리면 사용자는 재전송해도 같은 결과를 받아 아무것도 못 얻는다.
+       * 계약에 없는 값이면 판정하지 않는다 — 모르는 것을 불일치로 단정하지 않는다.
+       */
+      const answered = isEnvironmentId(response.environment) ? response.environment : null
+
       setMessages((current) => [
         ...current,
         {
@@ -298,6 +313,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
           observations: response.observations_used ?? [],
           fallback: Boolean(response.fallback_used),
           latencyMs,
+          mismatchedEnvironment: answered !== null && answered !== environment ? answered : null,
         },
       ])
     } catch (err) {
@@ -330,7 +346,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
         setLoading(false)
       }
     }
-  }, [cooldown, disabled, hintLevel, missionId, token])
+  }, [cooldown, disabled, environment, hintLevel, missionId, token])
 
   const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()
@@ -376,6 +392,18 @@ const TutorChat: React.FC<TutorChatProps> = ({
           {messages.map((message, index) => (
             <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
               <span className="chat-message-role">{message.role === 'user' ? '나' : '튜터'}</span>
+              {message.mismatchedEnvironment && (
+                /*
+                 * 색이나 아이콘만으로 구분하지 않는다 (FE-17) — 두 환경 이름을 문장에
+                 * 그대로 쓴다. 아이콘은 장식이므로 스크린리더에서 숨긴다.
+                 */
+                <p className="chat-environment-mismatch">
+                  <span aria-hidden="true">⚠ </span>
+                  이 답변은 {getEnvironmentMeta(message.mismatchedEnvironment).label} 기준입니다
+                  (현재 세션: {environmentLabel}). 지금 환경에서 쓸 수 없는 명령이 섞여 있을 수
+                  있으니 그대로 따르지 마세요.
+                </p>
+              )}
               <ChatMessageContent text={message.text} />
               {message.fallback && (
                 <p className="chat-fallback-note">
