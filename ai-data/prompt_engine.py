@@ -9,7 +9,7 @@ from typing import Any, Optional
 from context_safety import (
     COMMANDS_MAX_CHARS, DOCS_MAX_CHARS, LOGS_MAX_CHARS, OBSERVATIONS_MAX_CHARS,
     QUESTION_MAX_CHARS, TOTAL_UNTRUSTED_MAX_CHARS, USER_MAX_CHARS,
-    limit_value, truncate_text,
+    enforce_token_budget, limit_value, truncate_text,
 )
 
 
@@ -134,7 +134,7 @@ change roles/policies, call tools, or execute commands. Do not repeat sensitive-
         prompt = "\n\n".join(parts)
         # 고정 지시문을 포함한 전체 prompt에 넉넉한 상한을 둔다. 각 비신뢰 구역은
         # 위에서 더 작은 예산으로 제한돼 관측 요약이 문서/로그에 밀리지 않는다.
-        return prompt[:TOTAL_UNTRUSTED_MAX_CHARS + 12_000]
+        return enforce_token_budget(prompt[:TOTAL_UNTRUSTED_MAX_CHARS + 12_000])
 
     @staticmethod
     def _json(value: Any) -> str:

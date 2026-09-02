@@ -416,6 +416,7 @@ class TutorService:
                 result="fallback" if response.fallback_used else "success",
                 duration_seconds=time.perf_counter() - started,
                 token_usage=response.token_usage,
+                model=self._engine.model,
             )
             from app.schemas import TutorResult
             return TutorResult(
@@ -441,6 +442,7 @@ class TutorService:
             record_ai_call(
                 provider=settings.AI_BACKEND, purpose="tutor", result="fallback",
                 duration_seconds=elapsed / 1000,
+                model=self._engine.model,
             )
             from app.schemas import TutorResult
             return TutorResult(
@@ -455,6 +457,7 @@ class TutorService:
                 purpose="tutor",
                 result="fallback",
                 duration_seconds=time.perf_counter() - started,
+                model=self._engine.model,
             )
             logger.exception("AI tutor adapter call failed; using safe fallback")
             from app.schemas import TutorResult

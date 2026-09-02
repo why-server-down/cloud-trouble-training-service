@@ -15,6 +15,7 @@ LOGS_MAX_CHARS = 4_000
 DOCS_MAX_CHARS = 8_000
 USER_MAX_CHARS = 2_000
 TOTAL_UNTRUSTED_MAX_CHARS = 24_000
+MAX_CONTEXT_TOKENS = 9_000
 
 _SENSITIVE_KEY_VALUE = re.compile(
     r"(?i)\b(token|secret|password|passwd|pwd|api[_-]?key|authorization|credential|"
@@ -103,3 +104,31 @@ def limit_value(value: Any, limit: int) -> Any:
             result.append(TRUNCATED)
         return result
     return truncate_text(str(cleaned), limit)
+
+
+def count_tokens(text: str) -> int:
+    try:
+        import tiktoken
+        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+    except Exception:
+        # 한국어를 과소 계산하지 않도록 문자 수를 그대로 보수적 token 수로 본다.
+        return len(text)
+
+
+def enforce_token_budget(text: str, max_tokens: int = MAX_CONTEXT_TOKENS) -> str:
+    """system 앞부분과 질문/최종 지시 뒷부분을 보존하며 중간 context를 줄인다."""
+    if count_tokens(text) <= max_tokens:
+        return text
+    try:
+        import tiktoken
+        encoding = tiktoken.get_encoding("cl100k_base")
+        tokens = encoding.encode(text)
+        marker = encoding.encode(f"\n{TRUNCATED}\n")
+        available = max(0, max_tokens - len(marker))
+        head_count = int(available * 0.65)
+        tail_count = available - head_count
+        return encoding.decode(tokens[:head_count] + marker + tokens[-tail_count:])
+    except Exception:
+        available = max(0, max_tokens - len(TRUNCATED))
+        head_count = int(available * 0.65)
+        return text[:head_count] + TRUNCATED + text[-(available - head_count):]

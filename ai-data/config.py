@@ -49,6 +49,10 @@ class AISettings:
     RAG_CHUNK_OVERLAP: int = 200
     CONTEXT_COLLECTION_TIMEOUT: float = 3.0
     RAG_SEARCH_TIMEOUT: float = 2.0
+    AI_MAX_CONTEXT_TOKENS: int = 9_000
+    AI_MAX_COMPLETION_TOKENS: int = 500
+    AI_MAX_RETRIEVED_CHUNKS: int = 5
+    AI_PROVIDER_MAX_ATTEMPTS: int = 2
 
     def __post_init__(self) -> None:
         if self.AI_BACKEND not in {"mock", "openai", "gemini"}:
@@ -57,6 +61,12 @@ class AISettings:
             raise ValueError("RAG_TOP_K는 0 이상이어야 합니다")
         if not 0 <= self.RAG_MIN_SIMILARITY <= 1:
             raise ValueError("RAG_MIN_SIMILARITY는 0과 1 사이여야 합니다")
+        for name in (
+            "AI_MAX_CONTEXT_TOKENS", "AI_MAX_COMPLETION_TOKENS",
+            "AI_MAX_RETRIEVED_CHUNKS", "AI_PROVIDER_MAX_ATTEMPTS",
+        ):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name}는 0보다 커야 합니다")
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> "AISettings":
@@ -87,6 +97,10 @@ class AISettings:
             RAG_CHUNK_OVERLAP=_env_int(values, "RAG_CHUNK_OVERLAP", 200),
             CONTEXT_COLLECTION_TIMEOUT=_env_float(values, "CONTEXT_COLLECTION_TIMEOUT", 3.0),
             RAG_SEARCH_TIMEOUT=_env_float(values, "RAG_SEARCH_TIMEOUT", 2.0),
+            AI_MAX_CONTEXT_TOKENS=_env_int(values, "AI_MAX_CONTEXT_TOKENS", 9_000),
+            AI_MAX_COMPLETION_TOKENS=_env_int(values, "AI_MAX_COMPLETION_TOKENS", 500),
+            AI_MAX_RETRIEVED_CHUNKS=_env_int(values, "AI_MAX_RETRIEVED_CHUNKS", 5),
+            AI_PROVIDER_MAX_ATTEMPTS=_env_int(values, "AI_PROVIDER_MAX_ATTEMPTS", 2),
         )
 
     @classmethod
@@ -122,6 +136,10 @@ class AISettings:
             RAG_CHUNK_OVERLAP=getattr(backend, "RAG_CHUNK_OVERLAP", 200),
             CONTEXT_COLLECTION_TIMEOUT=getattr(backend, "CONTEXT_COLLECTION_TIMEOUT", 3.0),
             RAG_SEARCH_TIMEOUT=getattr(backend, "RAG_SEARCH_TIMEOUT", 2.0),
+            AI_MAX_CONTEXT_TOKENS=getattr(backend, "AI_MAX_CONTEXT_TOKENS", 9_000),
+            AI_MAX_COMPLETION_TOKENS=getattr(backend, "AI_MAX_COMPLETION_TOKENS", 500),
+            AI_MAX_RETRIEVED_CHUNKS=getattr(backend, "AI_MAX_RETRIEVED_CHUNKS", 5),
+            AI_PROVIDER_MAX_ATTEMPTS=getattr(backend, "AI_PROVIDER_MAX_ATTEMPTS", 2),
         )
 
     @property
