@@ -567,3 +567,24 @@
   - AI pytest `179 passed, 3 deselected`
   - backend pytest `520 passed, 4 deselected`
 - 후속: AI-23 관측 메트릭 남은 범위
+
+## AI-23 관측 메트릭 완성
+
+- 상태: 완료 — metric 계약 PR #101 + AI 실행 경로 PR #102 + validation 일치도 PR #103
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-quality-metrics`, `feature/ai-hardening`, `feature/be-validation-metrics`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-22 PR #99~100 dev 반영 및 `TutorResult`/`ValidationJudgment` 계약 확인
+- 변경:
+  - tutor 성공·fallback을 provider/environment별로 계측
+  - retrieval 성공·empty·fallback, 결과 수, 환경 오염 문서 수를 계측
+  - scenario 후보 valid·reject·fallback과 제한된 사유 label을 계측
+  - validation advisory와 기계 판정의 agree·disagree·unavailable을 계측
+  - Qdrant ingestion added·updated·deleted·error를 계측
+  - 사용자 ID·namespace·질문 원문·source 전체 경로·시나리오 제목을 label에서 배제
+- 검증:
+  - AI pytest `181 passed, 3 deselected`
+  - backend pytest `522 passed, 4 deselected`
+  - PR #102·#103 소유 경로/백엔드/프론트엔드 CI 전체 통과
+- 후속: AI-24 failure taxonomy와 graceful fallback
