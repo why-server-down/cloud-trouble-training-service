@@ -153,11 +153,18 @@ class TestEnvironmentActivation:
             environments.SUPPORTED_ENVIRONMENTS
         )
 
-    def test_linux_advertises_only_what_it_provides(self):
+    def test_linux_advertises_what_it_provides(self):
+        """capabilities 는 구현과 함께 갱신해야 한다.
+
+        2026-09-02: ai_scenario·tutor·observability 가 모두 붙어
+        (static_mission, terminal) 표기가 낡았다. 각 capability 의 배선 확인은
+        test_environment_contract.py 가 담당한다.
+        """
         items = {item["id"]: item for item in environments.availability()}
         linux = items[environments.LINUX]
         assert linux["status"] == "available"
-        assert set(linux["capabilities"]) == {"static_mission", "terminal"}
+        assert "static_mission" in linux["capabilities"]
+        assert "terminal" in linux["capabilities"]
 
     def test_linux_missions_are_seeded(self):
         from app.services.seed_data import MISSIONS

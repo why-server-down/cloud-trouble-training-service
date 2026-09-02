@@ -248,3 +248,74 @@ class TestSandboxTargetIsServerResolved:
         await collector._observe_docker("user-42", None)
         assert seen["namespace"] == "user-42"
         assert seen["environment"] == environments.DOCKER
+
+
+class TestProbesWaitForTheSandbox:
+    """샌드박스가 아직 준비되지 않았으면 probe 를 하나도 시도하지 않는다.
+
+    세션 최초 생성 중에는 Pod 가 뜨는 동안 모든 probe 가 실패한다. Linux 는 7개라
+    호출마다 경고 7줄이 쌓였다(2026-09-02 프론트 보고: 21줄 = 7 x 3회). exec 실패는
+    websocket 핸드셰이크까지 갔다 오므로 느리기도 하다. 읽기 한 번으로 대신한다.
+    """
+
+    class _Service:
+        def __init__(self, ready):
+            self._ready = ready
+            self.execs = []
+
+        def reference_for(self, *, user_id, namespace, environment):
+            from app.services.sandbox_service import SandboxRef
+
+            return SandboxRef(
+                id="s1", namespace=namespace, pod_name="sandbox-s1",
+                container_name="shell", environment=environment,
+            )
+
+        def is_ready(self, sandbox):
+            return self._ready
+
+        def exec_in_sandbox(self, sandbox, argv):
+            self.execs.append(argv)
+            return "ok"
+
+    def _install(self, monkeypatch, service):
+        import app.services.sandbox_service as sandbox_module
+
+        monkeypatch.setattr(sandbox_module, "get_sandbox_service", lambda: service)
+
+    @pytest.mark.asyncio
+    async def test_no_probe_runs_before_the_sandbox_is_ready(
+        self, collector, monkeypatch
+    ):
+        service = self._Service(ready=False)
+        self._install(monkeypatch, service)
+
+        observations = await collector._observe_linux(NS, None)
+
+        assert observations == {}
+        assert service.execs == []
+
+    @pytest.mark.asyncio
+    async def test_probes_run_once_the_sandbox_is_ready(self, collector, monkeypatch):
+        service = self._Service(ready=True)
+        self._install(monkeypatch, service)
+
+        observations = await collector._observe_linux(NS, None)
+
+        assert observations
+        assert service.execs
+
+    @pytest.mark.asyncio
+    async def test_service_without_readiness_check_still_works(
+        self, collector, monkeypatch
+    ):
+        """준비 여부를 모르는 double 이면 예전처럼 시도한다."""
+
+        class _NoReadinessCheck(TestProbesWaitForTheSandbox._Service):
+            is_ready = None  # 속성 조회는 되지만 호출 가능한 검사가 없다
+
+        service = _NoReadinessCheck(ready=True)
+        self._install(monkeypatch, service)
+
+        assert await collector._observe_linux(NS, None)
+        assert service.execs

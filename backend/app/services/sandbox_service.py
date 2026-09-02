@@ -602,6 +602,23 @@ class SandboxService:
                 ),
             )
 
+    def is_ready(self, sandbox: "SandboxRef") -> bool:
+        """샌드박스가 지금 명령을 받을 수 있는 상태인가.
+
+        관측기가 이것을 먼저 보지 않으면, Pod 가 아직 뜨는 중인 동안 probe 마다
+        exec 을 시도해 전부 실패한다(Linux 는 7개 → 경고 7줄). exec 실패는
+        websocket 핸드셰이크까지 갔다 오므로 느리기도 하다. 읽기 한 번으로 대신한다.
+        """
+        try:
+            pod = self._core_api.read_namespaced_pod(sandbox.pod_name, sandbox.namespace)
+        except ApiException:
+            return False
+        conditions = getattr(getattr(pod, "status", None), "conditions", None) or []
+        return any(
+            condition.type == "Ready" and condition.status == "True"
+            for condition in conditions
+        )
+
     def _wait_until_ready(self, namespace: str, name: str) -> None:
         deadline = time.monotonic() + self.READINESS_TIMEOUT_SECONDS
         while time.monotonic() < deadline:

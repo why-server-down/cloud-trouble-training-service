@@ -206,3 +206,118 @@ class TestEnvironmentIsolation:
     def test_linux_is_implemented(self):
         """BE-18 에서 injector/validator 와 시드가 붙어 환경이 열렸다."""
         assert environments.is_implemented(environments.LINUX)
+
+
+def _confirmed(validator, command):
+    return validator.validate_delete(
+        command, NS, confirmed=True, environment=environments.LINUX
+    )
+
+
+class TestFlagValuesAreNotTargets:
+    """플래그 값을 경로·신호 대상으로 오인하면 정당한 복구가 막힌다.
+
+    Docker 정책에서 `docker update --memory 256m` 의 256m 을 대상으로 읽던 것과
+    같은 계열의 결함이다. Linux 는 명령마다 플래그 의미가 달라 명령별로 다룬다.
+    (2026-09-02 프론트 보고: `truncate -s 0` 이 막혀 truncate 가 복구 명령으로
+     기능하지 못했다)
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "tail -n 50 /tmp/afterfail/app.log",
+            "head -n 20 /proc/meminfo",
+            "head -c 200 /proc/loadavg",
+            "find /tmp/afterfail -name afterfail-fill.dat",
+            "stat -c %s /tmp/afterfail/fill.dat",
+        ],
+    )
+    def test_read_commands_accept_flag_values(self, validator, command):
+        result = _check(validator, command)
+        assert result.is_valid, result.error
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "truncate -s 0 /tmp/afterfail/fill.dat",
+            "truncate --size=0 /tmp/afterfail/fill.dat",
+            "kill -s TERM 4321",
+            "kill -9 4321",
+        ],
+    )
+    def test_recovery_commands_accept_flag_values(self, validator, command):
+        result = _confirmed(validator, command)
+        assert result.is_valid, result.error
+
+    def test_pkill_pattern_stays_a_target(self):
+        """`pkill -f afterfail-worker` 의 `-f` 값은 대상 그 자체다.
+
+        값 플래그로 취급하면 대상이 사라져 "requires a target" 으로 거절된다.
+        """
+        assert "-f" not in LinuxPolicy.VALUE_FLAGS.get("pkill", frozenset())
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "truncate -s 0 /etc/passwd",
+            "tail -n 50 /etc/shadow",
+            "head -c 100 /root/.ssh/id_rsa",
+            "find / -name id_rsa",
+            "rm -f /etc/hosts",
+        ],
+    )
+    def test_flag_handling_does_not_open_a_path_escape(self, validator, command):
+        """값 플래그를 건너뛰는 것이 경로 검사를 무력화하면 안 된다."""
+        result = _check(validator, command)
+        if result.requires_confirmation:
+            result = _confirmed(validator, command)
+        assert not result.is_valid
+
+    @pytest.mark.parametrize(
+        "command", ["pkill -f nginx", "kill -s TERM 1", "kill -9 1"]
+    )
+    def test_signal_targets_are_still_restricted(self, validator, command):
+        assert not _confirmed(validator, command).is_valid
+
+
+class TestTerminalBanner:
+    """접속 배너는 환경마다 달라야 한다.
+
+    Kubernetes 안내를 그대로 보내 Linux 세션에서도 kubectl 을 치라고 안내하고
+    있었다(2026-09-02 프론트 보고). 문구를 손으로 두 곳에 두지 않고 정책에서 만든다.
+    """
+
+    def test_linux_hint_does_not_mention_kubectl(self, validator):
+        hint = validator.usage_hint(environments.LINUX)
+        assert "kubectl" not in hint
+        assert "docker" not in hint
+
+    def test_linux_hint_lists_commands_the_policy_allows(self, validator):
+        hint = validator.usage_hint(environments.LINUX)
+        for command in ("ps", "df", "cat", "pkill"):
+            assert command in hint
+
+    @pytest.mark.parametrize(
+        "environment,expected",
+        [
+            (environments.KUBERNETES, "kubectl"),
+            (environments.DOCKER, "docker"),
+        ],
+    )
+    def test_binary_environments_name_their_binary(self, validator, environment, expected):
+        assert expected in validator.usage_hint(environment)
+
+    def test_unknown_environment_gets_no_hint(self, validator):
+        assert validator.usage_hint("windows") == ""
+
+    def test_banner_is_built_from_the_policy(self):
+        """websocket_handler 가 문구를 직접 갖고 있으면 정책과 따로 늙는다."""
+        import pathlib
+
+        source = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "app" / "services" / "websocket_handler.py"
+        ).read_text()
+        assert "usage_hint" in source
+        assert "Type 'kubectl'" not in source

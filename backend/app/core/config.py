@@ -76,7 +76,13 @@ class Settings(BaseSettings):
     # 운영 설정 (BE-23)
     # 쉼표로 구분한 허용 origin. 기본값은 로컬 개발용이며 배포에서는 반드시 지정한다.
     # wildcard 와 allow_credentials 를 함께 쓰면 브라우저가 자격 증명을 아무 곳에나 보낸다.
-    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    # localhost 와 127.0.0.1 은 브라우저가 서로 다른 origin 으로 본다. 개발 중
+    # 어느 쪽으로 열어도 막히지 않도록 둘 다 기본값에 넣는다. LAN IP 로 시연할
+    # 때는 그 origin 을 .env 에 추가해야 한다(vite host:true 인 경우).
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:3000,"
+        "http://127.0.0.1:5173,http://127.0.0.1:3000"
+    )
     SESSION_IDLE_TTL_SECONDS: int = 3600
     # chat 은 LLM 호출 비용과 직결된다. 사용자당 분당 허용 횟수.
     CHAT_RATE_LIMIT_PER_MINUTE: int = 12

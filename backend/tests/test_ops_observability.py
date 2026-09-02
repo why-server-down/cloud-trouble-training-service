@@ -15,6 +15,7 @@ import pytest
 from app.core import metrics
 from app.core.config import settings
 from app.core.rate_limit import RateLimiter
+from app.main import app
 
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 
@@ -32,6 +33,34 @@ class TestCorsIsNotWildcard:
 
         parsed = Settings(CORS_ORIGINS="https://a.io, https://b.io ,").cors_origin_list
         assert parsed == ["https://a.io", "https://b.io"]
+
+    def test_localhost_and_loopback_ip_are_both_allowed_by_default(self):
+        """브라우저는 localhost 와 127.0.0.1 을 다른 origin 으로 본다.
+
+        기본값에 한쪽만 있으면 같은 .env 로 한쪽만 동작한다(2026-09-02 프론트 보고).
+        """
+        origins = settings.cors_origin_list
+        assert any("localhost:3000" in origin for origin in origins)
+        assert any("127.0.0.1:3000" in origin for origin in origins)
+
+    def test_retry_after_is_exposed_to_the_browser(self):
+        """allow_headers 는 **요청** 헤더용이다.
+
+        Retry-After 는 CORS-safelisted 응답 헤더가 아니므로 expose_headers 에
+        넣지 않으면 cross-origin 호출에서 JS 가 null 로 읽는다. 429 를 받고도
+        언제 다시 시도할지 화면에 띄울 수 없다.
+        """
+        cors = [
+            middleware for middleware in app.user_middleware
+            if middleware.cls.__name__ == "CORSMiddleware"
+        ]
+        assert cors, "CORSMiddleware 가 등록돼 있지 않다"
+        assert "Retry-After" in cors[0].kwargs["expose_headers"]
+
+    def test_rate_limited_response_carries_retry_after(self):
+        """429 를 내는 쪽과 노출하는 쪽이 함께 있어야 의미가 있다."""
+        source = (APP_DIR / "api" / "chat.py").read_text()
+        assert "Retry-After" in source
 
 
 class TestMetricLabelsAreLowCardinality:

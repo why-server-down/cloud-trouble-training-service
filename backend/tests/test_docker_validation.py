@@ -157,16 +157,19 @@ class TestEnvironmentActivation:
     def test_docker_is_implemented(self):
         assert environments.is_implemented(environments.DOCKER)
 
-    def test_docker_advertises_only_what_it_provides(self):
-        """없는 기능을 광고하면 프론트가 열 수 없는 화면을 그린다."""
+    def test_docker_advertises_what_it_provides(self):
+        """capabilities 는 구현과 함께 갱신해야 한다.
+
+        2026-09-02: ai_scenario(환경별 fault type)·tutor(환경 전달)·observability
+        (환경별 관측기)가 모두 붙어 (static_mission, terminal) 표기가 낡았다.
+        각 capability 의 배선 확인은 test_environment_contract.py 가 담당한다.
+        """
         items = {item["id"]: item for item in environments.availability()}
         docker = items[environments.DOCKER]
 
         assert docker["status"] == "available"
-        assert set(docker["capabilities"]) == {"static_mission", "terminal"}
-        # 아직 제공하지 않는 기능
-        for missing in ("ai_scenario", "tutor", "observability"):
-            assert missing not in docker["capabilities"]
+        assert "static_mission" in docker["capabilities"]
+        assert "terminal" in docker["capabilities"]
 
     def test_docker_missions_are_seeded(self):
         from app.services.seed_data import MISSIONS

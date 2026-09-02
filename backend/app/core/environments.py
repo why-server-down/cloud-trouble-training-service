@@ -55,17 +55,21 @@ def assert_implemented(environment: str) -> str:
 
 # 환경별로 현재 제공되는 기능. 프론트가 탭을 그릴 때 쓰는 값이며
 # label/설명 같은 표시 문구는 프론트 책임이다.
+# 환경이 실제로 제공하는 기능. **광고이지 관문이 아니다.**
+# 요청을 막는 것은 assert_implemented 이고, 여기 값으로 400 을 내지 않는다.
+# 없는 기능을 광고하면 프론트가 열 수 없는 화면을 그리고, 있는 기능을 빼면
+# 프론트가 쓸 수 있는 화면을 잠근다. 둘 다 틀린 정보이므로 구현과 함께 갱신한다.
+#
+# 2026-09-02: docker/linux 가 (static_mission, terminal) 로 남아 있어 낡아 있었다.
+#   ai_scenario  : 환경별 fault type 과 프롬프트가 붙었다 (chaos_plan.FAULT_TYPES_BY_ENVIRONMENT)
+#   tutor        : tutor_service 가 attempt.environment 를 끝까지 넘긴다 (AI-18~20)
+#   observability: 세 환경 모두 관측기가 있다 (runtime_context._OBSERVERS)
+#                  단 Grafana 대시보드는 아직 Kubernetes 뿐이다. 여기서 말하는
+#                  observability 는 **런타임 관측**이고 대시보드 유무가 아니다.
 _CAPABILITIES: dict[str, tuple[str, ...]] = {
     KUBERNETES: ("static_mission", "ai_scenario", "terminal", "tutor", "observability"),
-    # Docker 는 고정 미션과 터미널만 제공한다. 없는 기능을 광고하면 프론트가
-    # 열 수 없는 화면을 그린다.
-    #   ai_scenario  : 시나리오 생성이 Kubernetes fault type 기준이다 (BE-20)
-    #   tutor        : RuntimeContext 는 BE-19 에서 환경별로 확장됐으나 tutor_service 가
-    #                  아직 environment 를 넘기지 않는다(AI 소유 경로)
-    #   observability: Grafana/Prometheus 대시보드가 K8s 메트릭 기준이다
-    DOCKER: ("static_mission", "terminal"),
-    # Linux 도 같은 이유로 고정 미션과 터미널만 제공한다.
-    LINUX: ("static_mission", "terminal"),
+    DOCKER: ("static_mission", "ai_scenario", "terminal", "tutor", "observability"),
+    LINUX: ("static_mission", "ai_scenario", "terminal", "tutor", "observability"),
 }
 
 AVAILABLE = "available"
