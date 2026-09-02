@@ -100,6 +100,34 @@ AI_ESTIMATED_COST = Counter(
     "Estimated provider cost in USD based on token usage.",
     ["provider", "purpose", "model"],
 )
+AI_TUTOR_RESULTS = Counter(
+    "ai_tutor_result_total", "Tutor results by environment.",
+    ["provider", "environment", "result"],
+)
+AI_RETRIEVALS = Counter(
+    "ai_retrieval_total", "Retrieval attempts and empty/error outcomes.",
+    ["provider", "environment", "result"],
+)
+AI_RETRIEVAL_RESULT_COUNT = Histogram(
+    "ai_retrieval_result_count", "Documents returned per retrieval.",
+    ["provider", "environment"], buckets=(0, 1, 2, 3, 5, 8, 10, 20),
+)
+AI_RETRIEVAL_CONTAMINATION = Counter(
+    "ai_retrieval_contamination_total", "Foreign-environment retrieval results.",
+    ["provider", "environment"],
+)
+AI_SCENARIO_CANDIDATES = Counter(
+    "ai_scenario_candidate_total", "Generated scenario candidate outcomes.",
+    ["provider", "environment", "result", "reason"],
+)
+AI_VALIDATION_AGREEMENT = Counter(
+    "ai_validation_agreement_total", "Advisory agreement with mechanical validation.",
+    ["provider", "environment", "agreement"],
+)
+AI_INGESTION_CHANGES = Counter(
+    "ai_ingestion_change_total", "Qdrant ingestion changes and errors.",
+    ["operation", "result"],
+)
 
 # ── 진행 상태 ─────────────────────────────────────────────────────────────
 ACTIVE_SESSIONS = Gauge(
