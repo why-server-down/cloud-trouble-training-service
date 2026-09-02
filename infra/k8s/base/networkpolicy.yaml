@@ -1,0 +1,47 @@
+# 애플리케이션 네임스페이스 네트워크 정책 (BE-25)
+#
+# 훈련용 사용자 네임스페이스에 거는 정책은 코드가 만든다(sandbox_service).
+# 이 파일은 **백엔드 자신**을 감싼다.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: afterfail-backend
+  namespace: afterfail
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: afterfail
+      app.kubernetes.io/component: backend
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Ingress 컨트롤러에서 오는 HTTP 만 받는다.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Kubernetes API. 샌드박스 생성·exec·장애 주입이 전부 여기로 나간다.
+    # (EKS 는 API 엔드포인트가 클러스터 밖 IP 라 cidr 로 열어야 한다.
+    #  배포 시 `kubectl get endpoints kubernetes -n default` 로 확인해 좁힌다)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # 데이터베이스와 벡터 DB
+    - ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6333

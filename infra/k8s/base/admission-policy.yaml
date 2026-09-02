@@ -1,0 +1,69 @@
+# 백엔드가 훈련용 네임스페이스 밖에 리소스를 만들지 못하게 막는다 (BE-25)
+#
+# 왜 필요한가: 백엔드는 사용자 네임스페이스 이름을 실행 시점에 정한다(user-{uuid}).
+# RBAC 은 네임스페이스 이름을 패턴으로 표현할 수 없어 ClusterRole 을 쓸 수밖에 없는데,
+# ClusterRole 은 **모든 네임스페이스**에 적용된다. 실측 결과 백엔드 ServiceAccount 가
+# `kube-system` 에도 Pod/Deployment 를 만들 수 있었다(2026-09-02). 그 자리에 특권 Pod 를
+# 만들 수 있으면 클러스터 전체를 잡는 경로가 된다.
+#
+# RBAC 으로는 좁힐 수 없으므로(resourceNames 는 create 에 쓸 수 없다) admission 단계에서
+# 네임스페이스를 검사한다. ValidatingAdmissionPolicy 는 Kubernetes 1.30+ 기능이며
+# EKS 1.30 이상에서 동작한다. 그보다 낮은 클러스터라면 같은 규칙을 웹훅(Kyverno,
+# OPA Gatekeeper 등)으로 옮겨야 한다 — 이 파일이 없으면 위 권한이 그대로 열려 있다.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: afterfail-backend-namespace-scope
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources:
+          - pods
+          - pods/exec
+          - services
+          - configmaps
+          - serviceaccounts
+          - persistentvolumeclaims
+          - resourcequotas
+          - limitranges
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["deployments"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["roles", "rolebindings"]
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["networkpolicies"]
+      - apiGroups: ["chaos-mesh.org"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["stresschaos"]
+  # 이 정책은 백엔드 ServiceAccount 에만 적용한다. 사람이 kubectl 로 하는 작업이나
+  # 컨트롤러의 동작을 막지 않는다.
+  matchConditions:
+    - name: only-the-backend-service-account
+      expression: >-
+        request.userInfo.username == 'system:serviceaccount:afterfail:afterfail-backend'
+  validations:
+    # 훈련용 사용자 네임스페이스와 Chaos Mesh 설치 네임스페이스만 허용한다.
+    - expression: >-
+        request.namespace.startsWith('user-') || request.namespace == 'chaos-mesh'
+      message: >-
+        afterfail backend may only touch training namespaces (user-*) and chaos-mesh
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: afterfail-backend-namespace-scope
+spec:
+  policyName: afterfail-backend-namespace-scope
+  validationActions: [Deny]

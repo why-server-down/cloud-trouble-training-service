@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import make_asgi_app
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
@@ -121,7 +121,18 @@ app.include_router(scenarios_router)
 app.include_router(chat_router)
 app.include_router(dashboard_router)
 app.include_router(environments_router)
-app.mount("/metrics", make_asgi_app())
+# `/metrics` 를 mount 로 붙이면 정확히 `/metrics` 로 온 요청이 `/metrics/` 로
+# 307 리다이렉트된다(실측 2026-09-02). Prometheus 는 리다이렉트를 따라가지만,
+# Location 이 절대 URL 이라 TLS 를 종료하는 프록시 뒤에서는 http 로 내려가고
+# 그것을 거부하는 수집기도 있다. 라우트로 직접 응답해 왕복을 없앤다.
+#
+# 단일 프로세스 기준이다. uvicorn --workers 로 늘리면 프로세스마다 값이 갈리므로
+# prometheus_client 의 multiprocess 모드로 바꿔야 한다.
+@app.get("/metrics")
+async def metrics():
+    # media_type 으로 주면 FastAPI 가 charset 을 한 번 더 붙여
+    # `charset=utf-8; charset=utf-8` 이 된다. 헤더로 직접 넣는다.
+    return Response(content=generate_latest(), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
 
 @app.get("/health")
