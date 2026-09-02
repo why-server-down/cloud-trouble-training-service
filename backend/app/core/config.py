@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     OPENAI_TIMEOUT: float = 10.0
     CONTEXT_COLLECTION_TIMEOUT: float = 3.0
     RAG_SEARCH_TIMEOUT: float = 2.0
+    AI_MAX_CONTEXT_TOKENS: int = 9_000
+    AI_MAX_COMPLETION_TOKENS: int = 500
+    AI_MAX_RETRIEVED_CHUNKS: int = 5
+    AI_PROVIDER_MAX_ATTEMPTS: int = 2
 
     # Gemini
     GEMINI_API_KEY: str = ""
