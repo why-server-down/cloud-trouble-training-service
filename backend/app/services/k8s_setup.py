@@ -1,10 +1,12 @@
-import logging
 import asyncio
-
-logger = logging.getLogger(__name__)
+import logging
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class K8sSetupService:
@@ -61,7 +63,10 @@ class K8sSetupService:
                                 containers=[
                                     client.V1Container(
                                         name="nginx",
-                                        image="nginx:latest",
+                                        image=settings.TRAINING_K8S_IMAGE,
+                                        # 태그가 움직이지 않으므로 이미 있으면 받지 않는다.
+                                        # (`:latest` 는 기본값이 Always 라 매번 다녀왔다)
+                                        image_pull_policy="IfNotPresent",
                                         ports=[client.V1ContainerPort(container_port=80)],
                                         resources=client.V1ResourceRequirements(
                                             requests={"memory": "64Mi", "cpu": "50m"},

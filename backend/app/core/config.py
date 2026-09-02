@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     SANDBOX_TRAINING_VOLUME: str = "training-data"
     SANDBOX_TRAINING_CPUS: str = "1"   # 훈련 컨테이너 정상 상태의 CPU 상한
 
+    # Kubernetes 환경의 훈련 대상 Deployment 이미지 (BE-25)
+    # `nginx:latest` 를 하드코딩하고 있었다. 태그가 움직이면 같은 미션이 다른
+    # 이미지 위에서 돌고, 게다가 `:latest` 는 imagePullPolicy 기본값이 Always 라
+    # 네임스페이스를 만들 때마다 레지스트리를 다시 다녀왔다.
+    # 배포에서는 아래 digest 형식으로 고정한다(.env.example 참고).
+    TRAINING_K8S_IMAGE: str = "nginx:1.29"
+
     # Linux 환경 샌드박스. 관측 도구가 미리 들어 있는 이미지를 쓴다.
     # (실측: journalctl/systemctl 은 systemd 부재로, dmesg 는 커널 버퍼 접근 제한으로
     #  어떤 이미지에서도 동작하지 않는다. 그래서 명령 정책에서 제외한다)

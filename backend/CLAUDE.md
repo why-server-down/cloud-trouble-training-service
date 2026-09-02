@@ -951,6 +951,31 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 이미지 고정 (BE-25 선행)
+
+**`nginx:latest` 가 코드에 박혀 있었다.** `k8s_setup._ensure_nginx_deployment` 가
+Kubernetes 훈련 대상 Deployment 를 `nginx:latest` 로 만들었다. 문제가 둘이다.
+
+1. 태그가 움직인다 → 같은 미션이 다른 이미지 위에서 돌고, 무엇이 돌았는지 나중에
+   재현할 수 없다. `configmap_misconfig` 처럼 이미지 내부 경로에 의존하는 미션은
+   업스트림 변경에 그대로 노출된다.
+2. **`:latest` 는 imagePullPolicy 기본값이 `Always` 다** → 네임스페이스를 만들 때마다
+   레지스트리를 다시 다녀왔다. 세션 최초 생성이 느린 이유 중 하나였고,
+   Docker Hub 가 흔들리면 훈련을 시작할 수 없다.
+
+`TRAINING_K8S_IMAGE`(기본 `nginx:1.29`) 설정으로 옮기고 `IfNotPresent` 를 명시했다.
+같은 데비안 계열을 유지해 미션 동작이 바뀌지 않게 했다(alpine 으로 바꾸면 이미지
+내부 경로에 의존하는 미션을 다시 검증해야 한다).
+
+실측(2026-09-02): `nginx:1.29` / `IfNotPresent` 로 Pod Running·Ready 확인.
+
+배포에서는 **digest 로 고정한다.** `.env.example` 의 이미지 고정 절에 5개 이미지의
+manifest list digest 를 적어 뒀다. manifest **list** digest 를 쓰는 이유: 플랫폼별
+manifest digest 로 고정하면 다른 아키텍처에서 뜨지 않는다.
+
+`test_ops_observability.py::TestImagesAreImmutable` 이 움직이는 태그와 코드 하드코딩,
+누락된 pull 정책을 막는다.
+
 ### 프론트 보고 대응 — 계층 간 계약 정리 (2026-09-02)
 
 프론트 담당이 라이브 검증에서 찾은 5건 + 추가 보고 2건. 전부 **실사용에서만 드러나는**
