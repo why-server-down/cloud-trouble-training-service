@@ -221,3 +221,90 @@ class TestImagesAreImmutable(object):
     def test_training_workload_does_not_repull_every_time(self):
         source = (APP_DIR / "services" / "k8s_setup.py").read_text()
         assert 'image_pull_policy="IfNotPresent"' in source
+
+
+class TestDeploymentManifestsAreLocked(object):
+    """배포 매니페스트의 보안 성질을 텍스트 수준에서 고정한다 (BE-25).
+
+    매니페스트는 백엔드 테스트가 아니지만, 여기서 막지 않으면 되돌아가도 아무도
+    모른다. 실제 클러스터 검증 결과는 infra/k8s/README.md 에 기록돼 있다.
+    """
+
+    MANIFESTS = pathlib.Path(__file__).resolve().parents[2] / "infra" / "k8s"
+
+    def _read(self, name: str) -> str:
+        path = self.MANIFESTS / name
+        assert path.exists(), f"{path} 가 없다"
+        return path.read_text()
+
+    def test_backend_rbac_has_no_wildcards(self):
+        """`*` 하나가 최소 권한을 전부 무의미하게 만든다."""
+        rbac = self._read("base/rbac.yaml")
+        for line in rbac.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("apiGroups:", "resources:", "verbs:")):
+                assert '"*"' not in stripped, f"와일드카드: {stripped}"
+
+    def test_backend_rbac_does_not_grant_escalation(self):
+        """escalate/bind 가 있으면 스스로 권한을 넓힐 수 있다."""
+        rbac = self._read("base/rbac.yaml")
+        for verb in ("escalate", "bind", "impersonate"):
+            assert f'"{verb}"' not in rbac
+
+    def test_secret_values_are_not_committed(self):
+        """커밋된 비밀은 지워도 히스토리에 남는다."""
+        template = self._read("base/secret.template.yaml")
+        assert "<배포 시점" in template
+        # 주석으로 언급하는 것은 괜찮다. `resources:` 목록에 없어야 한다.
+        resources = [
+            line.strip().lstrip("- ")
+            for line in self._read("base/kustomization.yaml").splitlines()
+            if line.strip().startswith("- ")
+        ]
+        assert "secret.template.yaml" not in resources
+
+    def test_app_namespace_enforces_restricted_pod_security(self):
+        namespace = self._read("base/namespace.yaml")
+        assert "pod-security.kubernetes.io/enforce: restricted" in namespace
+
+    def test_workloads_run_unprivileged(self):
+        for name in ("base/backend.yaml", "base/migration-job.yaml"):
+            manifest = self._read(name)
+            assert "runAsNonRoot: true" in manifest, name
+            assert "allowPrivilegeEscalation: false" in manifest, name
+            assert 'drop: ["ALL"]' in manifest, name
+            assert "privileged: true" not in manifest, name
+
+    def test_deployment_does_not_create_schema_on_startup(self):
+        """스키마의 단일 출처는 Alembic 이다. 배포에서 create_all 을 쓰지 않는다."""
+        assert 'AUTO_CREATE_SCHEMA: "false"' in self._read("base/config.yaml")
+
+    def test_admission_policy_scopes_the_backend_to_training_namespaces(self):
+        """ClusterRole 로는 좁힐 수 없는 부분을 admission 이 막는다."""
+        policy = self._read("base/admission-policy.yaml")
+        assert "ValidatingAdmissionPolicy" in policy
+        assert "request.namespace.startsWith('user-')" in policy
+        assert "validationActions: [Deny]" in policy
+
+
+class TestMetricsEndpointIsScrapable(object):
+    """수집기가 `/metrics` 를 그대로 긁을 수 있어야 한다 (BE-25).
+
+    mount 로 붙였을 때는 정확히 `/metrics` 로 온 요청이 `/metrics/` 로 307
+    리다이렉트됐다(실측 2026-09-02). Prometheus 는 따라가지만 Location 이 절대
+    URL 이라 TLS 종료 프록시 뒤에서 http 로 내려가고, 그것을 거부하는 수집기도 있다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_exact_path_answers_without_a_redirect(self):
+        import httpx
+
+        from app.main import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get("/metrics")
+
+        assert response.status_code == 200
+        assert "text/plain" in response.headers["content-type"]
+        assert "# HELP" in response.text

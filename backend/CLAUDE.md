@@ -951,6 +951,55 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 배포 보안 (BE-25)
+
+매니페스트는 `infra/k8s/`(비어 있었다). 검증 결과와 근거는 `infra/k8s/README.md` 에
+정리했고, 여기에는 **찾은 것**만 남긴다.
+
+**ClusterRole 로 kube-system 에 Pod 를 만들 수 있었다.**
+백엔드는 사용자 네임스페이스를 실행 시점에 만든다(`user-{uuid}`). RBAC 은 네임스페이스
+이름을 패턴으로 표현할 수 없고 `resourceNames` 는 `create` 에 쓸 수 없다. 그래서
+ClusterRole 을 쓸 수밖에 없는데 **ClusterRole 은 모든 네임스페이스에 적용된다.**
+
+```
+create pods -n kube-system              → yes
+create deployments.apps -n kube-system  → yes
+```
+
+`kube-system` 에는 보통 PSA 강제가 없어 특권 Pod 를 만들 수 있고, 그러면 노드를 잡는
+경로가 된다. RBAC 으로 좁힐 수 없으므로 **ValidatingAdmissionPolicy** 로 백엔드
+ServiceAccount 의 요청을 `user-*` 와 `chaos-mesh` 로 제한했다. 실측으로 kube-system
+Pod 생성과 default Deployment 생성이 Forbidden 이 되는 것을 확인했다.
+(Kubernetes 1.30+ 기능. 더 낮은 클러스터라면 Kyverno/Gatekeeper 로 옮겨야 하고,
+정책이 없으면 위 권한이 그대로 열려 있다.)
+
+**`/metrics` 가 307 리다이렉트였다.**
+`app.mount("/metrics", make_asgi_app())` 이라 정확히 `/metrics` 로 온 요청이
+`/metrics/` 로 리다이렉트됐다. Prometheus 는 따라가지만 Location 이 절대 URL 이라
+TLS 를 종료하는 프록시 뒤에서는 http 로 내려가고, 그것을 거부하는 수집기도 있다.
+라우트로 직접 응답하도록 바꿔 왕복을 없앴다(단일 프로세스 기준 — `--workers` 로
+늘리면 prometheus_client multiprocess 모드가 필요하다).
+
+**배포 경계: privileged 는 클라우드에 올리지 않는다.**
+Kubernetes·Linux 샌드박스는 비특권이라 올리고, **Docker(DinD)는 로컬 데모 한정**이다.
+privileged 컨테이너는 사실상 노드 권한이고, 클라우드에서는 탈출 시 IMDS 로 노드
+IAM 역할 자격증명까지 닿는다. 훈련 샌드박스는 사용자가 임의 명령을 치는 곳이므로
+그 경로를 열지 않는다. 명령 정책은 애플리케이션 계층 방어일 뿐 privileged 자체를
+막지 못한다. (BE-25 명세의 "별도 node pool 또는 local demo 한정 여부 확정" 에 대한 답)
+
+**실측 (2026-09-02, Docker Desktop k8s v1.34.3)**
+- PSA `restricted` 강제 확인: securityContext 없는 Pod 는 거절, 백엔드/Job 은 통과
+- ResourceQuota 강제 확인: limits 없는 Pod 는 `failed quota` 로 거절
+- 이미지를 실제로 빌드해 **uid 10001 + readOnlyRootFilesystem** 으로 기동 확인.
+  `/health` 200, `/ready` 503(kubeconfig 없음 → kubernetes 검사 실패 = 설계된 동작)
+- **migration Job 과 같은 명령**(`alembic upgrade head`)을 같은 이미지로 임시 DB 에
+  실행해 0001~0004 적용 확인
+- 검증에 쓴 네임스페이스·RBAC·정책·임시 DB·이미지는 모두 삭제했다
+
+**아직 안 한 것**: 실제 EKS 배포. 위 검증은 전부 로컬이다. EKS 에서 추가로 확인해야
+하는 것은 README 에 적어 뒀다(VPC CNI 의 NetworkPolicy 강제, API 서버 대역에 맞춘
+egress, IRSA, IMDSv2 hop limit).
+
 ### 이미지 고정 (BE-25 선행)
 
 **`nginx:latest` 가 코드에 박혀 있었다.** `k8s_setup._ensure_nginx_deployment` 가

@@ -1,0 +1,32 @@
+# 비밀이 아닌 설정 (BE-25)
+#
+# 비밀은 여기 두지 않는다. Secret 은 저장소에 커밋하지 않고 배포 시점에 만든다
+# (README 의 "Secret 주입" 참고).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afterfail-config
+  namespace: afterfail
+data:
+  # 스키마의 단일 출처는 Alembic 이다. 배포에서는 create_all 을 쓰지 않고
+  # migration Job 이 스키마를 맞춘다.
+  AUTO_CREATE_SCHEMA: "false"
+
+  # 실제 도메인으로 바꾼다. wildcard 를 쓰지 않는다.
+  CORS_ORIGINS: "https://afterfail.example.com"
+
+  CHAOS_BACKEND: "chaos_mesh"
+  VALIDATION_BACKEND: "k8s"
+  CHAOS_MESH_NAMESPACE: "chaos-mesh"
+  AI_BACKEND: "gemini"
+
+  # 이미지는 digest 로 고정한다. 값은 배포 시점에 뽑아 넣는다
+  # (.env.example 의 "이미지 고정" 절에 뽑는 명령이 있다).
+  SANDBOX_TOOLBOX_IMAGE: "alpine/k8s:1.34.1"
+  SANDBOX_DIND_IMAGE: "docker:27-dind"
+  SANDBOX_LINUX_IMAGE: "nicolaka/netshoot:v0.13"
+  TRAINING_K8S_IMAGE: "nginx:1.29"
+  SANDBOX_TRAINING_IMAGE: "nginx:alpine"
+
+  TUTOR_MESSAGE_RETENTION_DAYS: "30"
+  CHAT_RATE_LIMIT_PER_MINUTE: "12"
