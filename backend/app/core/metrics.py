@@ -89,6 +89,12 @@ AI_TOKENS = Counter(
     "LLM tokens consumed.",
     ["provider", "purpose", "kind"],
 )
+AI_STAGE_DURATION = Histogram(
+    "ai_stage_duration_seconds",
+    "Tutor pipeline stage duration.",
+    ["provider", "model", "environment", "hint_level", "stage", "result"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0),
+)
 
 # ── 진행 상태 ─────────────────────────────────────────────────────────────
 ACTIVE_SESSIONS = Gauge(
