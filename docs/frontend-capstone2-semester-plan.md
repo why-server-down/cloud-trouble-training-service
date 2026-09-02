@@ -174,17 +174,26 @@ Authorization: Bearer {token}
     },
     {
       "id": "docker",
-      "status": "preparing",
-      "capabilities": []
+      "status": "available",
+      "capabilities": ["static_mission", "ai_scenario", "terminal", "tutor", "observability"]
     },
     {
       "id": "linux",
-      "status": "preparing",
-      "capabilities": []
+      "status": "available",
+      "capabilities": ["static_mission", "ai_scenario", "terminal", "tutor", "observability"]
     }
   ]
 }
 ```
+
+> 정정(2026-09-02): 학기 시작 시점 예시는 docker/linux 가 `preparing` + 빈
+> capabilities 였다. 세 환경 모두 구현이 끝났고, 백엔드가 `_CAPABILITIES` 를
+> 구현에 맞춰 갱신했다(`backend/app/core/environments.py`). 위 값이 현재 응답이다.
+>
+> **주의: `capabilities` 의 `observability` 는 백엔드 관측 probe 가 배선됐다는
+> 뜻이고, Grafana 대시보드가 있다는 뜻이 아니다.** 대시보드는
+> `infra/monitoring/grafana/dashboards/` 에 k8s 것 하나뿐이므로 관측 패널 게이팅은
+> 여전히 대시보드 유무로 판단한다(FE-08). 두 개념을 정리하는 것은 FE-22 다.
 
 - `status`: `available | degraded | preparing | disabled`.
 - 라벨과 설명은 프론트 config가 담당하고, 서버는 실제 가용성과 capability만 제공한다.
@@ -737,9 +746,19 @@ ls -al /tmp/afterfail
 pkill -f afterfail-
 ```
 
-경로 인자를 받는 명령(`cat` `head` `tail` `wc` `ls` `stat` `find` `rm` `truncate`)에는
-값이 분리되는 플래그(`-n 50` 처럼)를 붙이지 않는다. `LinuxPolicy._check_paths` 가
-플래그 값을 경로로 오인해 거절한다.
+경로 인자를 받는 명령에 값이 분리되는 플래그(`-n 50`, `-s 0`)를 붙일 수 있다.
+`LinuxPolicy` 가 명령별 `VALUE_FLAGS` 표로 플래그 값을 걸러내기 때문이다.
+
+> 정정(2026-09-02): 원래 지시는 "값 분리 플래그를 붙이지 않는다" 였다.
+> `LinuxPolicy._check_paths` 가 `-` 로 시작하지 않는 토큰을 전부 경로로 봐서
+> `truncate -s 0 /tmp/afterfail/x` 의 `0` 이 경로로 판정돼 거절됐기 때문이다.
+> `truncate` 는 `-s` 없이 쓸 수 없어 RECOVERY_COMMANDS 에 있는데도 복구 명령으로
+> 기능하지 못했다. 백엔드가 `VALUE_FLAGS` 로 고쳤으므로 이 제약은 사라졌다.
+>
+> **표에 없는 플래그의 다음 토큰은 여전히 경로·대상으로 읽힌다.** 자동완성에 새
+> 값 분리 플래그를 넣기 전에 `LinuxPolicy.VALUE_FLAGS` 를 먼저 확인한다
+> (`pkill -f <이름>` 의 `-f` 값은 대상 그 자체라서 의도적으로 표에 없다).
+> 프론트 미러와 불변식은 `src/utils/terminal.test.ts` 에 있다.
 
 인수 조건:
 
@@ -789,7 +808,14 @@ Application/DB 착수 조건:
 구현 지시:
 
 - TutorChat에 environment prop을 추가하고 제목 옆에 환경 배지를 표시한다.
-- ChatResponse에 `sources`, `observations_used` 타입을 추가한다.
+- ChatResponse에 `sources`, `observations_used`, `environment` 타입을 추가한다.
+- 응답의 `environment` 가 요청 환경(활성 attempt)과 다르면 계약 불일치다.
+  **답변을 버리지 않고** 답변 위에 어느 환경 기준인지 밝히는 경고를 붙인다
+  (버리면 재전송해도 같은 결과라 사용자가 막힌다). 계약에 없는 값은 판정하지 않는다.
+
+> 정정(2026-09-02): 착수 시점 백엔드 `ChatResponse` 에는 `environment` 가 없어
+> (`TutorResult` 에만 있었다) 배지를 활성 attempt 의 환경으로만 그렸고 불일치를
+> 잡을 수 없었다. 백엔드가 필드를 추가해 판정이 가능해졌다.
 - 답변 본문 아래에 "사용한 관측 정보"와 "참고 자료" 접기 영역을 표시한다.
 - source path를 임의의 외부 링크로 만들지 않는다. 백엔드가 안전한 URL을 줄 때만 anchor로 렌더링한다.
 - attempt/environment 변경 시 대화 state를 초기화한다.
@@ -800,6 +826,7 @@ Application/DB 착수 조건:
 인수 조건:
 
 - Docker 질문에 Kubernetes 배지가 표시되거나 반대 상황이 발생하지 않는다.
+- 응답 환경이 요청 환경과 다르면 답변과 함께 두 환경 이름이 문구로 드러난다.
 - sources가 없어도 레이아웃이 깨지지 않는다.
 - 환경 전환 후 이전 AI 응답이 새 채팅에 추가되지 않는다.
 - 채팅 입력은 label이 있고 Enter 제출, Shift+Enter 정책이 명확하다. 현재 input을 유지하면 Enter 제출만 지원한다.
@@ -1044,6 +1071,48 @@ Application/DB 착수 조건:
 - README와 시연 대본이 현재 구현과 일치.
 - Application/DB 제외 시 그 이유와 후속 계획이 최종 발표 자료에 명시됨.
 
+### FE-22 capabilities 기반 기능 게이팅 (추가, 2026-09-02)
+
+선행: 백엔드 `_CAPABILITIES` 정합성 확보 (완료, 커밋 `6876c76`)
+
+배경:
+
+`GET /api/environments` 의 `capabilities` 는 FE-00 부터 계약에 있었지만 프론트는
+지금까지 아무것도 게이팅하지 않는다 — `EnvironmentItem.capabilities` 타입과
+테스트 픽스처에만 존재하고, 화면 분기는 전부 프론트 config 의 하드코딩이다.
+학기 중에는 그게 맞았다. 백엔드 `_CAPABILITIES` 가 docker/linux 를
+`(static_mission, terminal)` 로 방치해 실구현보다 좁게 광고하고 있었기 때문에,
+그 값을 믿으면 이미 붙어 있는 튜터·AI 시나리오를 프론트가 숨겼다.
+백엔드가 값을 구현에 맞췄으므로 이제 소비할 수 있다.
+
+수정 파일:
+
+- `src/config/environments.ts`
+- `src/App.tsx`
+- `src/components/Environment/EnvironmentTabs.tsx`
+
+구현 지시:
+
+- `capabilities` 로 판단할 것과 프론트 자산으로 판단할 것을 분리한다.
+  - `tutor` / `ai_scenario` / `terminal` / `static_mission` → 응답의 capabilities.
+  - **관측 패널은 capabilities 로 바꾸지 않는다.** `observability` 는 백엔드 관측
+    probe 가 배선됐다는 뜻이고, Grafana 대시보드 존재 여부와 다른 사실이다.
+    대시보드는 `infra/monitoring/grafana/dashboards/` 에 k8s 것 하나뿐이라
+    capabilities 를 근거로 열면 Docker/Linux 에서 Grafana 404 를 보여준다.
+    `hasObservabilityDashboard()` 를 유지하고, 두 조건을 AND 로 다룬다.
+- 계약에 없는 capability 문자열은 무시한다. 응답 전체를 실패시키지 않는다
+  (환경 id 를 다루는 `api.ts` 의 방식과 같게).
+- capabilities 가 빈 배열로 오면 "준비 중"으로 표시하고 기능을 숨긴다 —
+  없는 기능을 눌러 500 을 받게 하지 않는다.
+
+인수 조건:
+
+- 백엔드가 어떤 환경에서 `tutor` 를 빼면 그 환경에서 튜터 패널이 사라진다
+  (프론트 코드 수정 없이).
+- `observability` 가 있어도 대시보드가 없는 환경은 여전히 "관측 대시보드가 아직
+  없습니다" 안내를 보여준다. Grafana 404 가 노출되지 않는다.
+- 계약에 없는 capability 가 섞여 와도 환경 탭이 정상 렌더링된다.
+
 ---
 
 ## 7. 작업 의존성 및 우선순위
@@ -1061,6 +1130,7 @@ FE-00 API 계약
               -> FE-13/14/15 대시보드
                   -> FE-16/17/18 품질
                       -> FE-19/20/21 제출
+                          -> FE-22 capabilities 게이팅 (백엔드 _CAPABILITIES 정합 후)
 ```
 
 우선순위:
@@ -1087,6 +1157,8 @@ P0/P1이 남아 있으면 Application/DB, 추가 애니메이션, 신규 차트 
 | 7 | `feature/frontend-env-dashboard` | FE-13~15 |
 | 8 | `feature/frontend-hardening` | FE-16~18 |
 | 9 | `feature/frontend-release` | FE-19~21 문서·최종 수정 |
+| 10 | `feature/fe-backend-unblocked` | 백엔드 해제분 반영 (FE-09/FE-11 정정) |
+| 11 | `feature/fe-capabilities-gating` | FE-22 |
 
 PR 하나에서 백엔드 계약 변경과 대규모 UI 변경을 섞지 않는다. 단, 동일 계약을 맞추는 작은 타입 변경은 통합 PR에 포함할 수 있다.
 
