@@ -23,8 +23,18 @@ from app.services.scoring_service import ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
 from app.core.environments import DEFAULT_ENVIRONMENT
+from app.core.metrics import AI_VALIDATION_AGREEMENT
 
 logger = logging.getLogger(__name__)
+
+
+def _record_validation_agreement(*, provider, environment, mechanical, judgment):
+    agreement = "unavailable"
+    if judgment is not None:
+        agreement = "agree" if judgment.resolved == mechanical else "disagree"
+    AI_VALIDATION_AGREEMENT.labels(
+        provider=provider, environment=environment, agreement=agreement,
+    ).inc()
 
 
 class ScenarioService:
@@ -384,6 +394,12 @@ class ScenarioService:
             except Exception:
                 # advisory 계층의 실패가 mechanical 검증 결과나 점수 처리를 막지 않는다.
                 logger.exception("validation advisory collection failed")
+            _record_validation_agreement(
+                provider=settings.AI_BACKEND,
+                environment=scenario.environment,
+                mechanical=resolved,
+                judgment=ai_judgment,
+            )
 
         attempt.last_validation_result = {
             "resolved": resolved,
