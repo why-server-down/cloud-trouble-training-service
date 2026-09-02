@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.ai.observability import record_ai_call
+from app.ai.observability import record_ai_call, record_ai_stage
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class TutorService:
     ):
         from app.schemas import TutorResult
 
+        total_started = time.perf_counter()
         self._init_engine()
 
         # 같은 attempt의 최근 user/assistant 대화쌍 로드 (세션 간 연속성)
@@ -92,6 +93,7 @@ class TutorService:
 
         # DB attempt가 결정한 환경과 sandbox 범위에서 RuntimeContext 수집
         runtime_ctx: dict | None = None
+        runtime_factory = None
         attempt_environment = "kubernetes"
         if db is not None:
             try:
@@ -120,14 +122,10 @@ class TutorService:
                         environment=attempt_environment,
                     )
                     collector = get_runtime_context_collector()
-                    runtime_ctx = await collector.collect(
-                        user_id=user_id,
-                        namespace=namespace,
-                        db=db,
-                        scenario_title=mission_name,
-                        difficulty=str(mission_level),
-                        scenario_id=scenario_id,
-                        environment=attempt_environment,
+                    runtime_factory = lambda: collector.collect(
+                        user_id=user_id, namespace=namespace, db=db,
+                        scenario_title=mission_name, difficulty=str(mission_level),
+                        scenario_id=scenario_id, environment=attempt_environment,
                         sandbox=sandbox,
                     )
             except Exception:
@@ -142,6 +140,19 @@ class TutorService:
                 error_code="mock_backend",
             )
         else:
+            retrieval_request = self._retrieval_request(
+                user_question, hint_level, chaos_type, attempt_environment
+            )
+            runtime_result, retrieval_result = await asyncio.gather(
+                self._collect_runtime_with_timeout(
+                    runtime_factory, attempt_environment, hint_level
+                ),
+                self._retrieve_with_timeout(
+                    retrieval_request, attempt_environment, hint_level
+                ),
+            )
+            runtime_ctx, context_ms, context_error = runtime_result
+            retrieval, retrieval_ms, retrieval_error = retrieval_result
             response = await self._call_engine(
                 user_question=user_question,
                 hint_level=hint_level,
@@ -154,6 +165,25 @@ class TutorService:
                 runtime_ctx=runtime_ctx,
                 fault_type=chaos_type,
                 environment=attempt_environment,
+                retrieval_result=retrieval,
+            )
+            breakdown = dict(response.latency_breakdown or {})
+            breakdown.update({
+                "context_ms": context_ms,
+                "retrieval_ms": retrieval_ms,
+                "total_ms": (time.perf_counter() - total_started) * 1000,
+            })
+            response.latency_breakdown = breakdown
+            response.latency_ms = round(breakdown["total_ms"])
+            pipeline_error = retrieval_error or context_error
+            if pipeline_error and not response.error_code:
+                response.error_code = pipeline_error
+                response.fallback_used = True
+            record_ai_stage(
+                provider=settings.AI_BACKEND, model=self._engine.model,
+                environment=attempt_environment, hint_level=hint_level,
+                stage="total", result="fallback" if response.fallback_used else "success",
+                duration_ms=breakdown["total_ms"],
             )
 
         # TutorMessage DB 저장
@@ -161,6 +191,69 @@ class TutorService:
             await self._save_messages(db, attempt_id, user_question, response.message, hint_level)
 
         return response
+
+    def _retrieval_request(self, question, hint_level, fault_type, environment):
+        from ai_engine import TutorRequest
+        return TutorRequest(
+            user_question=question, hint_level=hint_level,
+            chaos_type=fault_type, environment=environment,
+        )
+
+    async def _collect_runtime_with_timeout(self, factory, environment, hint_level):
+        if factory is None:
+            return None, 0.0, "runtime_unavailable"
+        started = time.perf_counter()
+        result = "success"
+        error = None
+        try:
+            context = await asyncio.wait_for(
+                factory(), timeout=settings.CONTEXT_COLLECTION_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            context, result, error = None, "timeout", "runtime_timeout"
+        except Exception:
+            context, result, error = None, "error", "runtime_failed"
+            logger.exception("AI tutor runtime context collection failed")
+        elapsed = (time.perf_counter() - started) * 1000
+        record_ai_stage(
+            provider=settings.AI_BACKEND, model=self._engine.model,
+            environment=environment, hint_level=hint_level,
+            stage="context", result=result, duration_ms=elapsed,
+        )
+        return context, elapsed, error
+
+    async def _retrieve_with_timeout(self, request, environment, hint_level):
+        started = time.perf_counter()
+        result = "success"
+        error = None
+        try:
+            retrieval = await asyncio.wait_for(
+                asyncio.to_thread(self._engine.retrieve, request),
+                timeout=settings.RAG_SEARCH_TIMEOUT,
+            )
+            if retrieval.error_code:
+                result, error = "fallback", retrieval.error_code
+        except asyncio.TimeoutError:
+            from ai_engine import RetrievalResult
+            retrieval = RetrievalResult([], [], 0.0, error_code="retrieval_timeout")
+            result, error = "timeout", "retrieval_timeout"
+        except Exception:
+            from ai_engine import RetrievalResult
+            retrieval = RetrievalResult([], [], 0.0, error_code="retrieval_failed")
+            result, error = "error", "retrieval_failed"
+            logger.exception("AI tutor retrieval failed")
+        elapsed = (time.perf_counter() - started) * 1000
+        record_ai_stage(
+            provider=settings.AI_BACKEND, model=self._engine.model,
+            environment=environment, hint_level=hint_level,
+            stage="retrieval", result=result, duration_ms=elapsed,
+        )
+        record_ai_stage(
+            provider=settings.AI_BACKEND, model=self._engine.model,
+            environment=environment, hint_level=hint_level,
+            stage="rerank", result=result, duration_ms=retrieval.rerank_ms,
+        )
+        return retrieval, elapsed, error
 
     async def _load_conversation(
         self, attempt_id: uuid.UUID, db: AsyncSession | None
@@ -253,6 +346,7 @@ class TutorService:
         runtime_ctx: dict | None,
         fault_type: str | None = None,
         environment: str = "kubernetes",
+        retrieval_result=None,
     ):
         started = time.perf_counter()
         try:
@@ -302,9 +396,19 @@ class TutorService:
                 training_ctx=training_ctx,
             )
 
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, lambda: self._engine.get_response(request)
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._engine.get_response, request,
+                    retrieval_result=retrieval_result,
+                ),
+                timeout=settings.OPENAI_TIMEOUT,
+            )
+            llm_ms = response.latency_breakdown.get("llm_ms", response.latency_ms)
+            record_ai_stage(
+                provider=settings.AI_BACKEND, model=self._engine.model,
+                environment=environment, hint_level=hint_level,
+                stage="llm", result="fallback" if response.fallback_used else "success",
+                duration_ms=llm_ms,
             )
             record_ai_call(
                 provider=settings.AI_BACKEND,
@@ -324,8 +428,27 @@ class TutorService:
                 latency_ms=response.latency_ms,
                 fallback_used=response.fallback_used,
                 error_code=response.error_code,
+                latency_breakdown=response.latency_breakdown,
             )
 
+        except asyncio.TimeoutError:
+            elapsed = (time.perf_counter() - started) * 1000
+            record_ai_stage(
+                provider=settings.AI_BACKEND, model=self._engine.model,
+                environment=environment, hint_level=hint_level,
+                stage="llm", result="timeout", duration_ms=elapsed,
+            )
+            record_ai_call(
+                provider=settings.AI_BACKEND, purpose="tutor", result="fallback",
+                duration_seconds=elapsed / 1000,
+            )
+            from app.schemas import TutorResult
+            return TutorResult(
+                message="AI 튜터 응답 시간이 초과되었습니다. 잠시 후 다시 질문해 주세요.",
+                hint_level=hint_level, environment=environment,
+                fallback_used=True, error_code="provider_timeout",
+                latency_ms=round(elapsed), latency_breakdown={"llm_ms": elapsed},
+            )
         except Exception:
             record_ai_call(
                 provider=settings.AI_BACKEND,

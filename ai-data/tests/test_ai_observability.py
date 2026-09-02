@@ -55,6 +55,20 @@ def test_record_ai_call_accepts_openai_usage_object(monkeypatch):
     assert tokens.values == [3, 2, 5]
 
 
+def test_stage_metric_has_only_bounded_pipeline_labels(monkeypatch):
+    duration = _Metric()
+    monkeypatch.setattr(observability, "AI_STAGE_DURATION", duration)
+    observability.record_ai_stage(
+        provider="openai", model="gpt-4o-mini", environment="docker",
+        hint_level=9, stage="retrieval", result="success", duration_ms=125,
+    )
+    assert duration.labels_seen == [{
+        "provider": "openai", "model": "gpt-4o-mini", "environment": "docker",
+        "hint_level": "3", "stage": "retrieval", "result": "success",
+    }]
+    assert duration.values == [0.125]
+
+
 def test_ai_owned_code_has_no_print_calls():
     offenders = []
     for path in (BACKEND / "app" / "ai").glob("*.py"):

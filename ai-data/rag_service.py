@@ -561,6 +561,7 @@ class RAGService:
         min_similarity: Optional[float] = None,
         filter_source: Optional[str] = None,
         rerank: bool = True,
+        timing: Optional[dict] = None,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
@@ -645,7 +646,8 @@ class RAGService:
                     score_threshold=min_similarity,
                 )
 
-            # Format results
+            # Format + hybrid rerank
+            rerank_started = time.perf_counter()
             documents = []
             for result in search_results:
                 payload = dict(result.payload or {})
@@ -688,6 +690,8 @@ class RAGService:
                     str(document.metadata.get("content_hash", "")),
                 )
             )
+            if timing is not None:
+                timing["rerank_ms"] = (time.perf_counter() - rerank_started) * 1000
             return documents[:top_k]
             
         except SearchError:
