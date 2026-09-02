@@ -587,4 +587,30 @@
   - AI pytest `181 passed, 3 deselected`
   - backend pytest `522 passed, 4 deselected`
   - PR #102·#103 소유 경로/백엔드/프론트엔드 CI 전체 통과
-- 후속: AI-24 failure taxonomy와 graceful fallback
+- 후속: AI-24 자동 평가 회귀 기준
+
+## AI-24 자동 평가 회귀 기준
+
+- 상태: 완료 — offline 회귀 게이트 PR #105 + 필수 CI 연결 PR #106
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/ai-hardening`, `feature/be-ai-eval-ci`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-23 PR #101~104 dev 반영 및 `TutorResult`/`ValidationJudgment` 계약 확인
+- 변경:
+  - retrieval/tutor/scenario/offline contract 평가를 단일 명령으로 실행
+  - 저장된 기준 대비 Recall@5, MRR, source/observation grounding, prompt contract,
+    scenario schema/environment/compiler/validation 지표의 3%p 초과 하락 차단
+  - environment contamination과 unsafe scenario acceptance는 한 건도 허용하지 않음
+  - `ai-data` 변경 시 기존 필수 `백엔드 테스트` CI check에서 AI offline suite와 회귀 게이트 실행
+- 프롬프트 재검토:
+  - 소크라테스식 hint level 0~3, untrusted data 경계, redaction 규칙 일치
+  - Kubernetes/Docker/Linux 명령 vocabulary 분리 일치
+  - scenario 정확히 3개 후보, environment allowlist, declarative schema 규칙 일치
+  - 문구 변경 없이 기존 prompt security/hint/schema 평가로 회귀 고정
+- 검증:
+  - AI pytest `185 passed, 3 deselected`
+  - backend pytest `522 passed, 4 deselected`
+  - 통합 회귀 게이트 `success=true`, contamination 0, unsafe acceptance 0
+  - PR #105~106 CI 전체 통과
+- 후속: AI-25 세 환경 end-to-end
