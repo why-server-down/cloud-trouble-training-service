@@ -168,22 +168,62 @@ describe('Linux 터미널 설정 (FE-09)', () => {
     }
   })
 
-  it('경로를 받는 명령에 값이 분리되는 플래그를 붙이지 않는다', () => {
-    /*
-     * LinuxPolicy._check_paths 는 argv 에서 `-` 로 시작하지 않는 토큰을 전부
-     * 경로로 본다. `tail -n 50 <path>` 의 `50` 이 경로로 오인돼 거절된다.
-     */
-    const pathCommands = ['cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find', 'rm', 'truncate']
+  /*
+   * 백엔드 `LinuxPolicy.VALUE_FLAGS` 의 미러 (2026-09-02 기준).
+   *
+   * `_check_paths` / `_check_signal_target` 는 argv 에서 `-` 로 시작하지 않는
+   * 토큰을 경로·대상으로 본다. 이 표에 있는 플래그의 다음 토큰만 값으로 인정해
+   * 건너뛴다. 그래서 표에 없는 플래그 뒤에 값을 붙이면 그 값이 경로로 읽혀
+   * 거절된다 — 자동완성을 넓히려면 백엔드 표를 먼저 넓혀야 한다.
+   *
+   * `pkill` 이 없는 것은 누락이 아니다. `pkill -f afterfail-worker` 의 `-f` 값은
+   * **대상 그 자체**라서 건너뛰면 대상이 사라진다.
+   */
+  const VALUE_FLAGS: Record<string, readonly string[]> = {
+    truncate: ['-s', '--size', '-r', '--reference'],
+    tail: ['-n', '-c', '--lines', '--bytes'],
+    head: ['-n', '-c', '--lines', '--bytes'],
+    find: [
+      '-name', '-iname', '-type', '-maxdepth', '-mindepth',
+      '-size', '-mtime', '-newer', '-path', '-regex',
+    ],
+    stat: ['-c', '--format', '--printf'],
+    du: ['-d', '--max-depth', '--block-size', '-B', '--threshold'],
+    df: ['--block-size', '-B', '-t', '--type', '-x', '--exclude-type'],
+    ps: ['-o', '-eo', '--format', '-p', '--pid', '-u', '-U', '-C'],
+    kill: ['-s', '--signal', '-n'],
+    wc: [],
+  }
+
+  it('값이 분리되는 플래그는 백엔드 VALUE_FLAGS 에 있는 것만 쓴다', () => {
+    // 경로·대상 검사를 받는 명령만 본다. pkill 은 위 주석의 이유로 제외한다.
+    const checked = ['cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find', 'rm', 'truncate', 'kill']
     for (const candidate of linux.completions) {
       const [head, ...rest] = candidate.trim().split(/\s+/)
-      if (!pathCommands.includes(head)) continue
-      const flagIndexes = rest.flatMap((token, i) => (token.startsWith('-') ? [i] : []))
-      for (const i of flagIndexes) {
-        const next = rest[i + 1]
-        if (next === undefined) continue
+      if (!checked.includes(head)) continue
+      const valueFlags = VALUE_FLAGS[head] ?? []
+      rest.forEach((token, index) => {
+        // `--size=0` 은 값이 붙어 있어 다음 토큰을 먹지 않는다.
+        if (!token.startsWith('-') || token.includes('=')) return
+        const next = rest[index + 1]
+        if (next === undefined) return
+        if (valueFlags.includes(token)) return
+        // 값을 받지 않는 플래그의 다음 토큰은 경로로 읽힌다 — 경로여야 한다.
         expect(next.startsWith('/') || next.startsWith('.'), candidate).toBe(true)
-      }
+      })
     }
+  })
+
+  it('백엔드가 VALUE_FLAGS 로 고친 뒤 풀린 명령을 제안한다', () => {
+    /*
+     * 2026-09-02 이전에는 `truncate -s 0 <path>` 의 `0` 과 `kill -s TERM <pid>` 의
+     * `TERM` 이 경로·대상으로 오인돼 거절됐다. truncate 는 `-s` 없이 쓸 수 없어
+     * RECOVERY_COMMANDS 에 있는데도 복구 명령으로 기능하지 못했다.
+     */
+    expect(linux.completions).toContain('truncate -s 0 /tmp/afterfail/')
+    expect(linux.completions).toContain('kill -s TERM ')
+    expect(linux.completions).toContain('tail -n 50 /tmp/afterfail/')
+    expect(linux.completions).toContain('head -n 50 /tmp/afterfail/')
   })
 
   it('신호 명령은 훈련 프로세스 접두어를 붙여 제안한다', () => {

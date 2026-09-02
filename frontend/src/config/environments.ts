@@ -150,18 +150,24 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
      * LinuxPolicy 가 셋 다 배제한다 — 이 이미지에 systemd 가 없고 커널 링 버퍼도
      * 막혀 있다(BE-16 실측). 제안하면 사용자가 그것을 정답으로 착각한다.
      *
-     * 경로 인자를 받는 명령에는 값이 분리되는 플래그(-n 50 처럼)를 넣지 않는다.
-     * LinuxPolicy._check_paths 가 플래그 값을 경로로 오인해 거절한다.
+     * 값이 분리되는 플래그(`-n 50`, `-s 0`)는 예전에 넣을 수 없었다 —
+     * `LinuxPolicy._check_paths` 가 플래그 값을 경로로 오인해 거절했다. 백엔드가
+     * 명령별 `VALUE_FLAGS` 표로 고쳤으므로(2026-09-02) 이제 넣는다. 아래 항목은
+     * `CommandValidator.validate_command(..., environment='linux')` 에 그대로 넣어
+     * OK / CONFIRM 을 확인한 것만 남겼다. 표에 없는 플래그는 여전히 값이 경로로
+     * 읽히므로, 새 항목을 넣기 전에 `VALUE_FLAGS` 를 먼저 본다.
      */
     completions: [
       'ps aux',
       'ps -ef',
+      'ps -o pid,rss,comm',
       'pstree -p',
       'top -b -n 1',
       'uptime',
       'free -m',
       'df -h',
       'du -sh /tmp/afterfail',
+      'du -d 1 /tmp/afterfail',
       'iostat',
       'ss -lntp',
       'netstat -lntp',
@@ -173,13 +179,20 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'cat /proc/meminfo',
       'ls -al /tmp/afterfail',
       'find /tmp/afterfail',
+      'find /tmp/afterfail -type f',
       'stat ',
+      'stat -c %s /tmp/afterfail/',
       'head ',
+      'head -n 50 /tmp/afterfail/',
       'tail ',
+      'tail -n 50 /tmp/afterfail/',
       'wc -l ',
+      // 복구 계열. 전부 확인 계약을 거친다(LinuxPolicy.CONFIRM_SUBCOMMANDS).
       'kill ',
+      'kill -s TERM ',
       'pkill -f afterfail-',
       'rm /tmp/afterfail/',
+      'truncate -s 0 /tmp/afterfail/',
       'clear',
     ],
   },
