@@ -1,7 +1,7 @@
 """AI 호출 관측 헬퍼. 저카디널리티 label만 사용한다."""
 from __future__ import annotations
 
-from app.core.metrics import AI_CALL_DURATION, AI_CALLS, AI_TOKENS
+from app.core.metrics import AI_CALL_DURATION, AI_CALLS, AI_STAGE_DURATION, AI_TOKENS
 
 
 def record_ai_call(
@@ -26,3 +26,17 @@ def record_ai_call(
     for kind, value in values.items():
         if value is not None:
             AI_TOKENS.labels(provider=provider, purpose=purpose, kind=kind).inc(value)
+
+
+def record_ai_stage(
+    *, provider: str, model: str, environment: str, hint_level: int,
+    stage: str, result: str, duration_ms: float,
+) -> None:
+    AI_STAGE_DURATION.labels(
+        provider=provider,
+        model=model,
+        environment=environment,
+        hint_level=str(max(0, min(3, hint_level))),
+        stage=stage,
+        result=result,
+    ).observe(max(0.0, duration_ms) / 1000)

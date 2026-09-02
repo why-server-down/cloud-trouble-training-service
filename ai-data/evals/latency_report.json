@@ -1,0 +1,18 @@
+{
+  "task": "AI-21",
+  "measured_at": "2026-09-02",
+  "mode": "offline_deterministic",
+  "samples": 30,
+  "parallel_context_and_retrieval": {
+    "simulated_context_ms": 50,
+    "simulated_retrieval_ms": 50,
+    "p50_ms": 51.646,
+    "p95_ms": 55.55,
+    "max_ms": 55.699
+  },
+  "official_total_target_ms": 1500,
+  "offline_parallel_stage_target_met": true,
+  "live_provider_total_verified": false,
+  "live_provider_note": "API key와 실제 provider/network가 없는 offline 측정이므로 1.5초 end-to-end 목표 달성 여부는 운영 메트릭 p50/p95로 별도 확인해야 한다.",
+  "cache_decision": "측정 전 TTL cache를 도입하지 않는다. 운영 retrieval p95가 목표를 초과할 때만 재검토한다."
+}

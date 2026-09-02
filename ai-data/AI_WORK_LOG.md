@@ -510,3 +510,30 @@
   - AI pytest `169 passed, 3 deselected`
   - backend pytest `515 passed, 4 deselected`
 - 후속: AI-21 latency 최적화
+
+## AI-21 latency 최적화
+
+- 상태: 완료 — backend latency 계약 PR #97 + AI 실행 경로 PR
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-latency-contract`, `feature/ai-hardening`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-20 PR #88 및 TutorResult backend 계약 dev 반영 확인
+- 변경:
+  - RuntimeContext collection과 동기 RAG retrieval을 `asyncio.gather` + `to_thread`로 병렬 실행
+  - context/RAG/LLM에 각각 독립 timeout 적용
+  - RAG 실패·timeout은 문서 없는 튜터 응답으로 계속하고 error_code로 구분
+  - runtime 실패·timeout은 관측 없음 fallback으로 구분
+  - provider timeout 뒤 늦게 끝난 thread 결과는 응답/저장 경로에서 무시
+  - context/retrieval/rerank/llm/total latency breakdown과 저카디널리티 Histogram 추가
+  - prompt 문서는 기존 RAG top-k와 `DOCS_MAX_CHARS` 상한 유지
+- 측정:
+  - offline deterministic 30회, context 50ms + retrieval 50ms 병렬 조건
+  - 병렬 구간 p50 `51.646ms`, p95 `55.550ms`, max `55.699ms`
+  - 공식 end-to-end 1.5초 목표는 실제 provider/network 없이 검증하지 않았으며 운영 Histogram으로 별도 판정
+  - 측정 전 TTL cache 도입은 보류; 운영 retrieval p95 초과 시 재검토
+- 검증:
+  - event loop 비차단, 독립 timeout, late response 무시 테스트 통과
+  - AI pytest `174 passed, 3 deselected`
+  - backend pytest `518 passed, 4 deselected`
+- 후속: AI-22 token·cost 제한

@@ -112,7 +112,7 @@ def test_observations_used_contains_only_values_included_in_prompt_context():
     assert AITutorEngine._observation_keys(context) == ["exit"]
 
 
-def test_rag_failure_returns_safe_fallback_without_exception_text():
+def test_rag_failure_continues_without_rag_and_marks_fallback():
     engine = object.__new__(AITutorEngine)
     engine.settings = AISettings(AI_BACKEND="mock")
     engine.model = "fake-model"
@@ -128,6 +128,7 @@ def test_rag_failure_returns_safe_fallback_without_exception_text():
     assert response.fallback_used is True
     assert response.error_code == "retrieval_failed"
     assert response.sources == []
+    assert response.message
     assert "secret" not in response.message
     assert "traceback" not in response.message
 

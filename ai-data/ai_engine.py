@@ -4,6 +4,7 @@ Main interface for AI tutoring functionality
 Integrates RAG, Prompt Engineering, and LLM
 """
 
+import inspect
 import os
 import time
 from typing import Dict, Optional
@@ -46,10 +47,22 @@ class TutorResponse:
     latency_ms: int = 0
     fallback_used: bool = False
     error_code: Optional[str] = None
+    latency_breakdown: Dict[str, float] = None
 
     def __post_init__(self):
         if self.observations_used is None:
             self.observations_used = []
+        if self.latency_breakdown is None:
+            self.latency_breakdown = {}
+
+
+@dataclass
+class RetrievalResult:
+    sources: list
+    context: list
+    latency_ms: float
+    rerank_ms: float = 0.0
+    error_code: Optional[str] = None
 
 
 class AITutorEngine:
@@ -98,6 +111,7 @@ class AITutorEngine:
         request: TutorRequest,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        retrieval_result: Optional[RetrievalResult] = None,
     ) -> TutorResponse:
         """
         Get AI tutor response
@@ -117,24 +131,9 @@ class AITutorEngine:
             temperature = self.settings.OPENAI_TEMPERATURE
 
         # Augment with RAG if enabled and hint level >= 1
-        sources = []
-        retrieved_context = []
-        if self.use_rag and request.hint_level >= 1:
-            try:
-                retrieved_docs = self.rag_service.search_knowledge(
-                    request.user_question,
-                    environment=request.environment,
-                    fault_type=request.chaos_type,
-                )
-            except Exception:
-                return self._fallback_response(request, started, "retrieval_failed")
-
-            if retrieved_docs:
-                sources = [self._safe_source(doc, request.environment) for doc in retrieved_docs]
-                retrieved_context = [
-                    {"source": source, "content": doc.content}
-                    for source, doc in zip(sources, retrieved_docs)
-                ]
+        retrieval_result = retrieval_result or self.retrieve(request)
+        sources = retrieval_result.sources
+        retrieved_context = retrieval_result.context
 
         training_ctx = request.training_ctx
         if training_ctx is not None:
@@ -162,6 +161,7 @@ class AITutorEngine:
         )
         
         # Call LLM
+        llm_started = time.perf_counter()
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -183,7 +183,8 @@ class AITutorEngine:
             
         except Exception:
             return self._fallback_response(request, started, "provider_failed")
-        
+        llm_ms = (time.perf_counter() - llm_started) * 1000
+        total_ms = (time.perf_counter() - started) * 1000
         return TutorResponse(
             message=message,
             hint_level=request.hint_level,
@@ -191,7 +192,45 @@ class AITutorEngine:
             token_usage=token_usage,
             environment=request.environment,
             observations_used=self._observation_keys(training_ctx),
-            latency_ms=int((time.perf_counter() - started) * 1000),
+            latency_ms=int(total_ms),
+            latency_breakdown={
+                "retrieval_ms": retrieval_result.latency_ms,
+                "rerank_ms": retrieval_result.rerank_ms,
+                "llm_ms": llm_ms,
+                "total_ms": total_ms,
+            },
+            fallback_used=bool(retrieval_result.error_code),
+            error_code=retrieval_result.error_code,
+        )
+
+    def retrieve(self, request: TutorRequest) -> RetrievalResult:
+        """동기 RAG 단계를 LLM 호출과 분리해 adapter가 thread로 병렬 실행할 수 있게 한다."""
+        started = time.perf_counter()
+        if not self.use_rag or request.hint_level < 1:
+            return RetrievalResult([], [], 0.0)
+        try:
+            timing = {}
+            search = self.rag_service.search_knowledge
+            kwargs = {
+                "environment": request.environment,
+                "fault_type": request.chaos_type,
+            }
+            if "timing" in inspect.signature(search).parameters:
+                kwargs["timing"] = timing
+            retrieved_docs = search(request.user_question, **kwargs)
+        except Exception:
+            return RetrievalResult(
+                [], [], (time.perf_counter() - started) * 1000,
+                error_code="retrieval_failed",
+            )
+        sources = [self._safe_source(doc, request.environment) for doc in retrieved_docs]
+        context = [
+            {"source": source, "content": doc.content}
+            for source, doc in zip(sources, retrieved_docs)
+        ]
+        return RetrievalResult(
+            sources, context, (time.perf_counter() - started) * 1000,
+            rerank_ms=timing.get("rerank_ms", 0.0),
         )
 
     @staticmethod
@@ -242,6 +281,7 @@ class AITutorEngine:
             latency_ms=int((time.perf_counter() - started) * 1000),
             fallback_used=True,
             error_code=code,
+            latency_breakdown={"total_ms": (time.perf_counter() - started) * 1000},
         )
     
     def initialize_knowledge_base(self, force_reload: bool = False):
