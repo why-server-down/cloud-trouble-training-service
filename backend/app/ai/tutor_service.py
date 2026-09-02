@@ -14,7 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.ai.observability import record_ai_call, record_ai_stage
+from app.ai.observability import (
+    record_ai_call, record_ai_stage, record_retrieval, record_tutor_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +188,11 @@ class TutorService:
                 duration_ms=breakdown["total_ms"],
             )
 
+        record_tutor_result(
+            provider=settings.AI_BACKEND, environment=attempt_environment,
+            result="fallback" if response.fallback_used else "success",
+        )
+
         # TutorMessage DB 저장
         if db is not None:
             await self._save_messages(db, attempt_id, user_question, response.message, hint_level)
@@ -243,6 +250,20 @@ class TutorService:
             result, error = "error", "retrieval_failed"
             logger.exception("AI tutor retrieval failed")
         elapsed = (time.perf_counter() - started) * 1000
+        contamination = sum(
+            source.get("environment") not in (None, environment)
+            for source in retrieval.sources
+        )
+        retrieval_result = (
+            result if result != "success"
+            else "empty" if not retrieval.sources
+            else "success"
+        )
+        record_retrieval(
+            provider=settings.AI_BACKEND, environment=environment,
+            result=retrieval_result, result_count=len(retrieval.sources),
+            contamination_count=contamination,
+        )
         record_ai_stage(
             provider=settings.AI_BACKEND, model=self._engine.model,
             environment=environment, hint_level=hint_level,
