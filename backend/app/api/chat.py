@@ -107,6 +107,8 @@ async def chat_with_tutor(
     return ChatResponse(
         response=tutor_result.message,
         hint_level=body.hint_level,
+        # 튜터가 실제로 어느 환경을 보고 답했는지 그대로 전달한다.
+        environment=tutor_result.environment,
         mission_name=mission_name,
         sources=[source.model_dump(exclude_none=True) for source in tutor_result.sources],
         observations_used=tutor_result.observations_used,

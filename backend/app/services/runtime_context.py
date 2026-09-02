@@ -207,6 +207,19 @@ class RuntimeContextCollector:
             )
 
         loop = asyncio.get_event_loop()
+
+        # 샌드박스가 아직 준비되지 않았으면 probe 를 하나도 시도하지 않는다.
+        # 세션 최초 생성 중에는 Pod 가 뜨는 동안 모든 probe 가 실패해, Linux 는
+        # 경고 7줄이 호출마다 쌓였다(2026-09-02 프론트 보고: 21줄 = 7 x 3회).
+        # 관측이 없는 것은 정상 동작이므로 경고가 아니라 debug 로 한 줄만 남긴다.
+        ready = await loop.run_in_executor(None, lambda: self._sandbox_ready(service, sandbox))
+        if not ready:
+            logger.debug(
+                "sandbox not ready, skipping observations",
+                extra={"environment": environment, "probes": len(probes)},
+            )
+            return {}
+
         observations = {}
         for key, argv in probes.items():
             try:
@@ -220,6 +233,17 @@ class RuntimeContextCollector:
                     extra={"environment": environment, "probe": key},
                 )
         return observations
+
+    @staticmethod
+    def _sandbox_ready(service, sandbox) -> bool:
+        """준비 여부를 알 수 없으면 시도해 본다(구형 double 호환)."""
+        checker = getattr(service, "is_ready", None)
+        if checker is None:
+            return True
+        try:
+            return bool(checker(sandbox))
+        except Exception:
+            return False
 
     # ── K8s state ─────────────────────────────────────────────────────────────
 

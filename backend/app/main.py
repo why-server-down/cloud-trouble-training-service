@@ -96,7 +96,12 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
+    # allow_headers 는 **요청** 헤더 허용 목록이다. 응답 헤더를 브라우저 JS 가 읽게
+    # 하려면 expose_headers 에 따로 적어야 한다. Retry-After 는 CORS-safelisted
+    # 응답 헤더가 아니므로, 이게 없으면 cross-origin 호출에서 429 의 재시도 시각을
+    # JS 가 null 로 읽는다(같은 origin 프록시 경로에서만 보이던 이유).
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 
 @app.middleware("http")

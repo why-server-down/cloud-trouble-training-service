@@ -95,9 +95,11 @@ class WebSocketHandler:
 
         await self._send_output(
             websocket,
+            # 첫 줄의 "Connected to namespace:" 는 프론트가 연결 성립 판정에 쓰므로
+            # 문구를 바꾸지 않는다(useTerminalWebSocket).
             f"Connected to namespace: {session.namespace}\n"
             f"Environment: {session.environment}\n"
-            f"Type 'kubectl' commands to interact with your cluster.\n\n",
+            f"{self.command_validator.usage_hint(session.environment)}\n\n",
         )
 
         try:

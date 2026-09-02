@@ -34,6 +34,8 @@ def _invalid(error: str) -> ValidationResult:
 
 class _PolicyBase:
     binary: str | None = None
+    # 터미널 접속 배너에 보여줄 예시. 환경마다 칠 수 있는 명령이 다르다.
+    EXAMPLE = ""
     MIN_ARGV = 2
 
     # 하위 명령 위치가 환경마다 다르다. kubectl/docker 는 argv[1], Linux 는 argv[0].
@@ -51,6 +53,7 @@ class KubectlPolicy(_PolicyBase):
     """Kubernetes 환경 정책."""
 
     binary = "kubectl"
+    EXAMPLE = "kubectl get pods"
 
     FORBIDDEN_COMMANDS = [
         "cluster-info", "cordon", "uncordon", "drain", "proxy",
@@ -135,6 +138,7 @@ class DockerPolicy(_PolicyBase):
     """
 
     binary = "docker"
+    EXAMPLE = "docker ps"
 
     # 조회 계열. 대상이 없어도 되고 상태를 바꾸지 않는다.
     READ_COMMANDS = {
@@ -309,6 +313,7 @@ class LinuxPolicy(_PolicyBase):
     """
 
     binary = None
+    EXAMPLE = "ps aux"
     MIN_ARGV = 1
     CONFIRM_INDEX = 0
     CONFIRM_SUBCOMMANDS = ("kill", "pkill", "rm", "truncate")
@@ -327,6 +332,28 @@ class LinuxPolicy(_PolicyBase):
     READABLE_PREFIXES = ("/proc", "/sys/fs/cgroup", "/tmp/afterfail", ".")
     # 쓰기·삭제가 허용된 경로
     WRITABLE_PREFIXES = ("/tmp/afterfail",)
+
+    # 뒤에 값을 하나 받는 플래그. 그 값을 경로나 신호 대상으로 오인하면 안 된다.
+    # (`truncate -s 0 /tmp/afterfail/x` 의 0 은 경로가 아니다)
+    #
+    # kubectl/docker 와 달리 명령별로 다르다. 특히 `pkill -f afterfail-worker` 의
+    # `-f` 값은 **대상 그 자체**이므로 값 플래그로 넣으면 안 된다. 넣으면 대상이
+    # 사라져 "This command requires a target" 으로 거절된다.
+    VALUE_FLAGS: dict[str, frozenset[str]] = {
+        "truncate": frozenset({"-s", "--size", "-r", "--reference"}),
+        "tail": frozenset({"-n", "-c", "--lines", "--bytes"}),
+        "head": frozenset({"-n", "-c", "--lines", "--bytes"}),
+        "find": frozenset({
+            "-name", "-iname", "-type", "-maxdepth", "-mindepth",
+            "-size", "-mtime", "-newer", "-path", "-regex",
+        }),
+        "stat": frozenset({"-c", "--format", "--printf"}),
+        "du": frozenset({"-d", "--max-depth", "--block-size", "-B", "--threshold"}),
+        "df": frozenset({"--block-size", "-B", "-t", "--type", "-x", "--exclude-type"}),
+        "ps": frozenset({"-o", "-eo", "--format", "-p", "--pid", "-u", "-U", "-C"}),
+        "kill": frozenset({"-s", "--signal", "-n"}),
+        "wc": frozenset(),
+    }
 
     def validate(self, argv: list[str], namespace: str, allowed_targets) -> ValidationResult:
         command = argv[0]
@@ -352,13 +379,27 @@ class LinuxPolicy(_PolicyBase):
             return self._check_paths(argv, self.WRITABLE_PREFIXES, "modify")
         return self._check_signal_target(argv)
 
-    def _positional(self, tokens: list[str]) -> list[str]:
-        return [t for t in tokens if not t.startswith("-")]
+    def _positional(self, tokens: list[str], command: str = "") -> list[str]:
+        """플래그와 그 값을 제외한 실제 대상만 뽑는다."""
+        value_flags = self.VALUE_FLAGS.get(command, frozenset())
+        positional: list[str] = []
+        skip_next = False
+        for token in tokens:
+            if skip_next:
+                skip_next = False
+                continue
+            if token.startswith("-"):
+                # `--size=0` 은 값이 붙어 있으므로 다음 토큰을 건너뛰지 않는다
+                if "=" not in token and token in value_flags:
+                    skip_next = True
+                continue
+            positional.append(token)
+        return positional
 
     def _check_paths(
         self, argv: list[str], prefixes: tuple[str, ...], action: str
     ) -> ValidationResult:
-        paths = self._positional(argv[1:])
+        paths = self._positional(argv[1:], argv[0])
         for path in paths:
             if ".." in path:
                 return _invalid("Relative paths that escape the directory are not allowed")
@@ -371,7 +412,7 @@ class LinuxPolicy(_PolicyBase):
 
     def _check_signal_target(self, argv: list[str]) -> ValidationResult:
         """신호를 보낼 대상은 PID 나 훈련 프로세스 이름만 허용한다."""
-        targets = self._positional(argv[1:])
+        targets = self._positional(argv[1:], argv[0])
         if not targets:
             return _invalid("This command requires a target")
         for target in targets:
@@ -408,6 +449,23 @@ class CommandValidator:
         DOCKER: DockerPolicy(),
         LINUX: LinuxPolicy(),
     }
+
+    def usage_hint(self, environment: EnvironmentId = DEFAULT_ENVIRONMENT) -> str:
+        """터미널 배너에 넣을 안내. 정책에서 만들어 문구가 따로 늙지 않게 한다.
+
+        (Kubernetes 안내를 모든 환경에 그대로 보내 Linux 세션에서도 kubectl 을
+        치라고 안내하던 문제를 여기서 없앤다)
+        """
+        policy = self._POLICIES.get(environment)
+        if policy is None:
+            return ""
+        if policy.binary:
+            return f"'{policy.binary}' 명령을 입력하세요. 예: {policy.EXAMPLE}"
+
+        available = ", ".join(
+            sorted(policy.READ_COMMANDS | policy.FILE_READ_COMMANDS | policy.RECOVERY_COMMANDS)
+        )
+        return f"사용 가능한 명령: {available}\n예: {policy.EXAMPLE}"
 
     def validate_command(
         self,

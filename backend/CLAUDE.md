@@ -951,6 +951,79 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 프론트 보고 대응 — 계층 간 계약 정리 (2026-09-02)
+
+프론트 담당이 라이브 검증에서 찾은 5건 + 추가 보고 2건. 전부 **실사용에서만 드러나는**
+종류였다.
+
+**1. `Retry-After` 가 브라우저에 안 보였다**
+`allow_headers=["*"]` 는 **요청** 헤더 허용 목록이다. 응답 헤더를 JS 가 읽게 하려면
+`expose_headers` 에 따로 적어야 하고, `Retry-After` 는 CORS-safelisted 응답 헤더가
+아니다. 그래서 same-origin(Vite proxy) 경로에서만 카운트다운이 보였다.
+429 를 내는 것과 그 값을 읽게 하는 것은 별개의 일이다.
+
+**2. `localhost` 와 `127.0.0.1` 은 다른 origin**
+같은 `.env` 로 한쪽만 동작했다. 기본값에 둘 다 넣었다. LAN IP 시연은 여전히
+그 origin 을 `.env` 에 추가해야 한다(vite `host:true`).
+
+**3. `_CAPABILITIES` 가 낡아 있었다**
+docker/linux 가 `(static_mission, terminal)` 에 멈춰 있었지만 그 사이
+ai_scenario(환경별 fault type)·tutor(환경 전달)·observability(환경별 관측기)가
+모두 붙었다. **capabilities 는 광고이지 관문이 아니다** — 요청을 막는 것은
+`assert_implemented` 이고 capabilities 값으로 400 을 내지 않는다. 그래서 틀려도
+서버는 아무 일 없이 돌고, 대신 프론트가 잘못된 화면을 그린다.
+
+값을 손으로 맞추는 대신 **각 capability 가 정말 배선돼 있는지 구현에서 끌어와
+확인한다**(`test_environment_contract.py::TestCapabilitiesMatchImplementation`):
+terminal↔명령 정책, observability↔관측기, static_mission↔시드, ai_scenario↔주입기가
+아는 fault type, tutor↔환경 전달. 이제 구현이 늘면 테스트가 갱신을 요구한다.
+
+**4. `LinuxPolicy` 가 플래그 값을 경로로 오인했다**
+`truncate -s 0 /tmp/afterfail/x` 의 `0` 이 경로로 판정돼 거절됐다. Docker 의
+`docker update --memory 256m` 과 같은 계열의 결함이다.
+
+Linux 는 명령마다 플래그 의미가 달라 **명령별 값 플래그 표**로 다룬다. 특히
+`pkill -f afterfail-worker` 의 `-f` 값은 **대상 그 자체**라서 값 플래그로 넣으면
+대상이 사라져 "requires a target" 으로 거절된다. 표에 `pkill` 항목이 없는 이유다.
+덤으로 `kill -s TERM <pid>` 도 같은 이유로 막혀 있었는데 함께 풀렸다.
+
+실측(2026-09-02, netshoot v0.13): `truncate -s 0` 로 204800 → 0 bytes. 명령 자체는
+되는데 검증기만 막고 있었다.
+
+**5. `ChatResponse` 에 environment 가 없었다**
+`TutorResult` 에는 있는데 응답 스키마가 안 내보내서, 프론트가 "요청 환경 != 응답
+환경" 을 계약 오류로 잡을 수 없었다. 튜터가 실제로 본 환경을 그대로 전달한다.
+
+**6. 터미널 배너가 환경과 무관하게 kubectl 을 안내했다**
+Linux 세션에서도 "Type 'kubectl' commands" 가 나갔다. 문구를 두 곳에 두면 또
+따로 늙으므로 **명령 정책에서 만든다**(`CommandValidator.usage_hint`). Linux 는
+단일 바이너리가 없어 허용 명령 목록을 그대로 보여준다.
+
+> 첫 줄 `Connected to namespace:` 는 프론트가 연결 성립 판정에 쓴다
+> (`useTerminalWebSocket`). 이 문구는 바꾸지 않는다.
+
+**7. 세션 생성 중 `sandbox probe failed` 경고 21줄**
+관측기가 Pod 가 뜨는 동안 probe 를 하나씩 시도해 전부 실패했다(Linux probe 7개
+x 호출 3회 = 21줄). exec 실패는 websocket 핸드셰이크까지 갔다 오므로 느리기도 하다.
+`SandboxService.is_ready()` 로 **읽기 한 번** 먼저 보고, 준비 안 됐으면 probe 를
+아예 시도하지 않는다. 관측이 없는 것은 정상이므로 경고가 아니라 debug 한 줄이다.
+
+**체감 대기의 원인은 이미지 pull 이다.** 실측(2026-09-02, 이미지 캐시된 상태):
+cold ensure 1.1초 / warm 0.0초 / probe 7개 0.23초. 캐시가 없으면
+`nicolaka/netshoot:v0.13` 189MB 를 받는 동안 기다린다(readiness 상한 90초).
+태그가 `:latest` 가 아니므로 pull 정책은 기본 `IfNotPresent` 이고 재pull 은 없다.
+시연 전에 노드에 이미지를 미리 받아두는 것이 가장 확실하다.
+
+**Docker/Linux Grafana 대시보드 — 아직 없다(미수행)**
+프론트는 대시보드가 없는 환경에 `null` 을 주고 "관측 없음" 을 표시한다(정상 동작).
+붙일 근거는 실측으로 확인해 뒀다(2026-09-02):
+- `container_processes{namespace,pod,container}` 존재 → Linux process_flood 관측 가능
+- `container_cpu_usage_seconds_total{namespace=~"user-.*"}` 존재 → cpu_saturation 관측 가능
+- Docker 는 **DinD 안쪽 컨테이너 상태가 클러스터 메트릭에 보이지 않는다.**
+  `container_stopped` 를 대시보드로 진단할 방법이 현재 없다.
+
+즉 Linux 대시보드는 진단 가치가 있고 Docker 는 없다. 별도 작업으로 다룬다.
+
 ### 튜터 대화 보존 정책 (BE-29)
 
 `models.py`의 `TODO(phase7)`을 해소했다. 튜터 대화에는 사용자가 친 명령과 장애

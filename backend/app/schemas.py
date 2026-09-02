@@ -138,6 +138,9 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     hint_level: int
+    # 이 답변이 어느 환경을 근거로 만들어졌는지. TutorResult 에만 있고 여기서
+    # 빠져 있어, 프론트가 "요청 환경 != 응답 환경" 을 계약 오류로 잡을 수 없었다.
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     mission_name: Optional[str] = None
     sources: Optional[list[dict]] = None
     observations_used: Optional[list[str]] = None
