@@ -16,6 +16,9 @@ REQUIRED_FAULT_TYPES = {
     "linux_oom", "disk_io_stress", "zombie_process",
     "orphan_process", "service_failure",
 }
+PRODUCTION_FAULT_TYPES = {
+    "linux_disk_pressure", "linux_cpu_saturation", "linux_process_flood",
+}
 REQUIRED_SECTIONS = (
     "## Symptoms", "## Observations", "## Hypotheses", "## Safe commands",
     "## Recovery validation", "## Hint-level concepts",
@@ -49,6 +52,7 @@ def test_seven_linux_documents_cover_required_faults():
 
     assert len(documents) == 7
     assert REQUIRED_FAULT_TYPES <= covered_faults
+    assert PRODUCTION_FAULT_TYPES <= covered_faults
     assert all(document.metadata["version"] == "2026-08-29" for document in documents)
 
 
