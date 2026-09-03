@@ -28,11 +28,17 @@ python -m pytest -q
 python evals/run_evals.py
 # stdout: JSON summary, 전체 성공 0 / 실패 포함 1
 python evals/run_regression_gate.py
+python evals/run_environment_e2e.py --output evals/environment_e2e_report.json
 ```
 
 회귀 게이트는 retrieval/tutor/scenario의 저장된 기준 보고서와 현재 offline
 결과를 비교한다. 품질 지표가 3%p를 초과해 하락하거나 environment contamination
 또는 unsafe scenario acceptance가 한 건이라도 있으면 실패한다.
+
+환경 E2E 평가는 production scenario compiler, mock injector, in-memory RAG,
+prompt/tutor adapter, advisory validator를 연결해 Kubernetes/Docker/Linux를 각각
+5회 실행한다. 보고서의 `execution_mode`와 `live_infrastructure_verified`를 확인해
+실제 클러스터/provider 검증과 offline 검증을 구분한다.
 
 ### Integration test
 
