@@ -132,8 +132,8 @@ async def run() -> dict:
     )
     return {
         "task": "AI-25", "execution_mode": "offline_production_components",
-        "live_infrastructure_verified": False,
-        "live_blocker": "Docker credential helper가 PostgreSQL/Qdrant image pull에서 응답하지 않음",
+        "live_infrastructure_verified": None,
+        "live_note": "이 runner는 외부 인프라/provider를 평가하지 않으며 integration suite 결과와 함께 판정한다.",
         "runs": len(runs), "by_environment": dict(sorted(counts.items())),
         "environment_contamination_count": sum(run["environment_contamination"] for run in runs),
         "success": success, "results": runs,
