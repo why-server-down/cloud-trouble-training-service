@@ -617,7 +617,7 @@
 
 ## AI-25 세 환경 end-to-end
 
-- 상태: 부분 완료 — offline production-component E2E PR #114 완료, live 인프라 검증 대기
+- 상태: 부분 완료 — offline E2E와 live DB/Qdrant/Kubernetes 확인 완료, provider 검증 대기
 - 작업일: 2026-09-03
 - 작업 브랜치: `feature/ai-release`
 - Wave: Wave 4
@@ -635,8 +635,11 @@
   - AI pytest `187 passed, 3 deselected`
   - backend pytest `588 passed, 4 deselected`
   - 기존 통합 회귀 게이트 `success=true`, PR #114 CI 전체 통과
+- 추가 live 검증(2026-09-04):
+  - Docker credential helper 정상 응답 및 PostgreSQL/Qdrant image pull 성공
+  - PostgreSQL health check와 Alembic `0004`까지 migration 성공
+  - Qdrant `/healthz` 및 integration test 통과
+  - Kubernetes API/CoreDNS 연결 확인
 - 남은 검증:
-  - Docker credential helper가 PostgreSQL/Qdrant image pull에서 응답하지 않아
-    live DB/Qdrant 기반 E2E 미실행
-  - OpenAI/Gemini API key가 없어 실제 provider 호출 미실행
-- 후속: 로컬 image pull 문제 해소 후 live E2E 보고서를 갱신하고 AI-25 완료 판정
+  - OpenAI/Gemini API key가 없어 실제 provider 호출 2건 skip
+- 후속: provider key가 준비되면 integration sample을 실행하고 AI-25 완료 판정
