@@ -951,6 +951,71 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 환경별 end-to-end 와 성능 (BE-26, BE-27)
+
+하니스는 `tests/integration/test_environment_matrix.py`, 보고서는
+`backend/reports/environment_matrix.json`(커밋한다 — "돌려봤다" 가 아니라 몇 ms
+걸렸는지가 제출물이고 다음에 느려졌을 때 비교 대상이 된다).
+
+계획서가 요구한 반복을 그대로 돈다: Kubernetes 2x4, Docker 2x3, Linux 2x3 = 20회.
+**세 환경 모두 사용자가 실제로 칠 복구 명령**을 `CommandValidator` 에 통과시켜
+실행한다. 정책이 막는 명령으로만 고칠 수 있는 장애는 여기서 걸린다.
+
+처음에는 Kubernetes 만 `injector.revert()` 로 복구했는데 `service_misconfig` 에서
+막혔다. 그 미션의 revert 는 검증기가 들여다보는 Service 를 지우므로 되돌린 뒤에는
+검증이 영원히 404 를 본다. 실제 흐름에서 revert 는 훈련이 끝난 뒤의 정리라 문제가
+없지만, "revert 를 복구로 쓴다" 는 가정이 틀렸다는 뜻이다.
+
+**찾은 결함 1 — Docker `network_disconnect` 미션은 완주할 수 없었다.**
+`ensure_training_workload` 가 훈련 네트워크를 만들지도, 컨테이너를 붙이지도 않아
+`training-net` 이 존재하지 않았다. 사용자가 정답 명령을 쳐도
+`network training-net not found` 로 실패한다. **장애는 나는데 아무도 못 고치는 미션**
+이므로 Docker/Linux 환경의 등록 기준("사용자가 복구할 수 있는 장애만")을 스스로
+어기고 있었다. 네트워크를 멱등 생성하고 컨테이너를 붙이도록 고쳤다.
+
+**찾은 결함 2 — 주입기가 실패를 성공으로 보고했다(결함 1이 드러나지 않은 이유).**
+`SandboxService.exec_in_sandbox` 가 exec 의 error 채널(종료 코드)을 보지 않고
+stdout·stderr 를 합친 문자열만 돌려줬다. 그래서 `docker network disconnect` 가
+실패해도 주입기는 **오류 문구를 정상 출력으로 받아** `success=True` 를 반환했다.
+아무것도 깨뜨리지 못한 주입이 성공으로 기록되고, 사용자는 멀쩡한 환경에서 장애를
+찾는다.
+
+`command_executor` 는 이미 error 채널에서 종료 코드를 뽑고 있었다(터미널이 exit
+code 를 표시해야 하므로). 샌드박스 exec 경로만 그러지 않았다.
+
+`exec_in_sandbox(..., check=True)` 를 추가하고 주입기가 쓰게 했다. **기본값은
+False 다** — 검증기는 실패하는 명령을 일부러 쓴다(`grep -c` 는 0건일 때 1을 낸다).
+일괄로 켜면 모든 검증이 깨진다.
+
+> 유닛 테스트가 못 잡은 이유: 테스트 double 이 실패 시 **예외를 던지도록** 돼 있었다.
+> 실제 exec 은 예외를 던지지 않고 문자열을 돌려준다. double 이 실물보다 친절했다.
+
+**찾은 결함 3 — 복구 경로가 `nginx:latest` 로 되돌렸다.**
+BE-25 에서 `k8s_setup` 만 고치고 주입기를 빼먹어, 미션을 한 바퀴 돌면 이미지 고정이
+무효화됐다. 복구·생성 경로 4곳을 `settings.TRAINING_K8S_IMAGE` 로 바꿨다.
+고의로 깨뜨리는 태그(`nginx:wrongtag`, `private.registry.internal/...`)는 장애 그
+자체이므로 그대로 둔다.
+
+**실측 (2026-09-15, Docker Desktop k8s v1.34.3, 20/20 통과, 80초)**
+
+| 지표 | median | p95 | max | 목표 |
+|---|---:|---:|---:|---|
+| 검증 1회 | 33.8ms | **60.4ms** | 285.2ms | 300ms |
+| inject | 225.6ms | 394.7ms | 451.1ms | — |
+| 사용자 복구 명령 | 123.8ms | 439.0ms | 543.8ms | — |
+| revert | 46.8ms | 100.2ms | 136.2ms | — |
+| WebSocket 서버 오버헤드 | 0.3ms | — | 15.1ms | — |
+
+- 샌드박스 신규 생성: Kubernetes 2.1초 / Linux 2.1초 / **Docker 21.3초**.
+  Docker 만 느린 것은 DinD 데몬 기동 때문이다. 시연에서 Docker 탭을 처음 열 때
+  그만큼 기다리므로 미리 열어 둔다.
+- 장애 관측까지(detect) p95 2.2초 — Linux 는 supervisor 폴링 주기(2초)가 하한이다.
+- WebSocket 오버헤드는 핸들러 전체(정책 검증 → 실행 → 로깅 → 기록)를 태운 뒤
+  명령 실행 시간을 뺀 값이다. 처음에는 executor 가 재는 값을 그대로 빼서 0.0ms 가
+  나왔는데, 그건 exec 왕복 그 자체라 분리가 되지 않았다.
+
+**남은 것**: 3명 동시 사용자 x 3환경 자원 사용량 측정(BE-27 마지막 항목).
+
 ### 배포 보안 (BE-25)
 
 매니페스트는 `infra/k8s/`(비어 있었다). 검증 결과와 근거는 `infra/k8s/README.md` 에

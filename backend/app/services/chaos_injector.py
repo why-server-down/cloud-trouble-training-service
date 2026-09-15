@@ -211,7 +211,7 @@ class ChaosMeshInjector(BaseChaosInjector):
 
     def _apply_pod_chaos(self, _chaos_id: str, namespace: str):
         # nginx 이미지를 존재하지 않는 태그로 패치 → ImagePullBackOff 유발
-        # 사용자 Fix: kubectl set image deployment/nginx nginx=nginx:latest -n {namespace}
+        # 사용자 Fix: kubectl set image deployment/nginx nginx={TRAINING_K8S_IMAGE} -n {namespace}
         self._patch_nginx_container(namespace, image="nginx:wrongtag")
 
     def _apply_stress_chaos(self, chaos_id: str, namespace: str):
@@ -303,7 +303,7 @@ class ChaosMeshInjector(BaseChaosInjector):
                         containers=[
                             client.V1Container(
                                 name="nginx",
-                                image="nginx:latest",
+                                image=settings.TRAINING_K8S_IMAGE,
                                 ports=[client.V1ContainerPort(container_port=80)],
                             )
                         ]
@@ -430,7 +430,7 @@ class ChaosMeshInjector(BaseChaosInjector):
     def _apply_wrong_image_registry(self, _chaos_id: str, namespace: str):
         # 접근 불가한 private registry 이미지로 패치 → unauthorized ImagePullBackOff
         # image_pull_error(태그 오류)와 다름: Events에 "unauthorized" 메시지
-        # 사용자 Fix: kubectl set image deployment/nginx nginx=nginx:latest
+        # 사용자 Fix: kubectl set image deployment/nginx nginx={TRAINING_K8S_IMAGE}
         self._patch_nginx_container(namespace, image="private.registry.internal/nginx:latest")
 
     def _apply_secret_ref_missing(self, _chaos_id: str, namespace: str):
@@ -546,7 +546,7 @@ class ChaosMeshInjector(BaseChaosInjector):
 
     def _revert_pod_failure(self, _chaos_id: str, namespace: str):
         # 이미지를 정상으로 복구
-        self._patch_nginx_container(namespace, image="nginx:latest")
+        self._patch_nginx_container(namespace, image=settings.TRAINING_K8S_IMAGE)
 
     def _revert_memory_stress(self, chaos_id: str, namespace: str):
         # StressChaos 삭제 + 메모리 limit 복구
@@ -593,7 +593,7 @@ class ChaosMeshInjector(BaseChaosInjector):
 
     def _revert_compound_probe_cascade(self, _chaos_id: str, namespace: str):
         # 이미지 복구 + readinessProbe 제거
-        self._patch_nginx_container(namespace, image="nginx:latest", readinessProbe=None)
+        self._patch_nginx_container(namespace, image=settings.TRAINING_K8S_IMAGE, readinessProbe=None)
 
     def _revert_compound_crash_service(self, _chaos_id: str, namespace: str):
         self._patch_nginx_container(namespace, command=None)
@@ -601,7 +601,7 @@ class ChaosMeshInjector(BaseChaosInjector):
         self._delete_ignore_404(self._core_api.delete_namespaced_service, name="webapp-svc", namespace=namespace)
 
     def _revert_wrong_image_registry(self, _chaos_id: str, namespace: str):
-        self._patch_nginx_container(namespace, image="nginx:latest")
+        self._patch_nginx_container(namespace, image=settings.TRAINING_K8S_IMAGE)
 
     def _revert_secret_ref_missing(self, _chaos_id: str, namespace: str):
         dep = self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)

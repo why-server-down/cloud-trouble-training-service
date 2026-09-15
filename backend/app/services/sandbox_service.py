@@ -38,6 +38,22 @@ class SandboxNotReadyError(RuntimeError):
     """제한 시간 안에 샌드박스가 준비되지 않은 경우."""
 
 
+class SandboxCommandError(RuntimeError):
+    """샌드박스 안에서 실행한 명령이 0 이 아닌 코드로 끝난 경우.
+
+    exec 채널은 실패한 명령의 오류 문구도 그냥 출력으로 돌려준다. 종료 코드를
+    보지 않으면 실패를 성공으로 읽는다(2026-09-15 BE-26 실행에서 드러났다).
+    """
+
+    def __init__(self, argv: list[str], exit_code: int, output: str):
+        self.argv = argv
+        self.exit_code = exit_code
+        self.output = output
+        super().__init__(
+            f"{' '.join(argv)} 가 종료 코드 {exit_code} 로 끝났습니다: {output.strip()[:200]}"
+        )
+
+
 class SandboxService:
     TOOLBOX_CONTAINER = "toolbox"
     DIND_CONTAINER = "dind"
@@ -185,14 +201,24 @@ class SandboxService:
         self._ensure_dind_pod(namespace, name, labels)
         return self.DIND_CONTAINER
 
-    def exec_in_sandbox(self, sandbox: "SandboxRef", argv: list[str]) -> str:
+    def exec_in_sandbox(
+        self, sandbox: "SandboxRef", argv: list[str], *, check: bool = False
+    ) -> str:
         """샌드박스 안에서 argv 를 실행하고 출력을 돌려준다.
 
         실행 대상은 서버가 만든 SandboxRef 로만 지정된다.
+
+        `check=True` 면 종료 코드가 0 이 아닐 때 예외를 낸다. 기본값이 False 인
+        이유: 검증기는 실패하는 명령을 일부러 쓴다(`grep -c` 는 0건일 때 1을 낸다).
+        **장애를 주입하는 쪽은 반드시 check=True 를 쓴다** — 그러지 않으면 실패한
+        명령의 오류 문구를 정상 출력으로 받아 "주입 성공" 이라고 답하게 된다.
         """
-        return self._exec_in_sandbox(
+        output, exit_code = self._exec_in_sandbox(
             sandbox.namespace, sandbox.pod_name, sandbox.container_name, argv
         )
+        if check and exit_code != 0:
+            raise SandboxCommandError(argv, exit_code, output)
+        return output
 
     @staticmethod
     def _supervisor_script() -> str:
@@ -316,10 +342,17 @@ class SandboxService:
         )
         return self.LINUX_CONTAINER
 
-    def _exec_in_sandbox(self, namespace: str, pod: str, container: str, argv: list[str]) -> str:
+    def _exec_in_sandbox(
+        self, namespace: str, pod: str, container: str, argv: list[str]
+    ) -> tuple[str, int]:
+        """exec 하고 (출력, 종료 코드) 를 돌려준다.
+
+        종료 코드는 exec 의 error 채널에서 읽는다. 이 채널을 보지 않으면 실패한
+        명령의 오류 문구가 정상 출력과 구분되지 않는다.
+        """
         from kubernetes.stream import stream
 
-        return stream(
+        response = stream(
             self._core_api.connect_get_namespaced_pod_exec,
             pod,
             namespace,
@@ -329,7 +362,43 @@ class SandboxService:
             stdin=False,
             stdout=True,
             tty=False,
+            _preload_content=False,
         )
+
+        chunks: list[str] = []
+        try:
+            while response.is_open():
+                response.update(timeout=1)
+                if response.peek_stdout():
+                    chunks.append(response.read_stdout())
+                if response.peek_stderr():
+                    chunks.append(response.read_stderr())
+            exit_code = self._exit_code(response)
+        finally:
+            response.close()
+
+        return "".join(chunks), exit_code
+
+    @staticmethod
+    def _exit_code(response) -> int:
+        """exec 결과 채널에서 종료 코드를 읽는다(command_executor 와 같은 규칙)."""
+        try:
+            import yaml
+
+            raw = response.read_channel(3)
+            if not raw:
+                return 0
+            status = yaml.safe_load(raw)
+            if not isinstance(status, dict):
+                return 0
+            if status.get("status") == "Success":
+                return 0
+            for cause in (status.get("details") or {}).get("causes") or []:
+                if cause.get("reason") == "ExitCode":
+                    return int(cause.get("message", 1))
+            return 1
+        except Exception:
+            return 1
 
     def ensure_training_workload(self, sandbox: SandboxRef) -> None:
         """Docker 샌드박스 안에 훈련 대상 컨테이너를 멱등 생성한다.
@@ -341,34 +410,41 @@ class SandboxService:
             return
 
         name = settings.SANDBOX_TRAINING_CONTAINER
-        existing = self._exec_in_sandbox(
-            sandbox.namespace,
-            sandbox.pod_name,
-            sandbox.container_name,
-            ["docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}} {{.State}}"],
-        ).strip()
+        network = settings.SANDBOX_TRAINING_NETWORK
+
+        def run(argv: list[str]) -> str:
+            return self.exec_in_sandbox(sandbox, argv, check=True).strip()
+
+        # 훈련 네트워크를 먼저 만든다(멱등). 이게 없으면 network_disconnect 미션의
+        # 정답 명령(`docker network connect ...`)이 "network not found" 로 실패해
+        # 사용자가 풀 수 없는 미션이 된다(2026-09-15 BE-26 실행에서 드러났다).
+        if network not in run(["docker", "network", "ls", "--format", "{{.Name}}"]).split():
+            run(["docker", "network", "create", network])
+
+        existing = run(
+            ["docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}} {{.State}}"]
+        )
 
         if not existing:
-            self._exec_in_sandbox(
-                sandbox.namespace,
-                sandbox.pod_name,
-                sandbox.container_name,
-                [
-                    "docker", "run", "-d",
-                    "--name", name,
-                    "--restart", "unless-stopped",
-                    settings.SANDBOX_TRAINING_IMAGE,
-                ],
-            )
+            run([
+                "docker", "run", "-d",
+                "--name", name,
+                "--network", network,
+                "--restart", "unless-stopped",
+                settings.SANDBOX_TRAINING_IMAGE,
+            ])
             return
 
         if "running" not in existing:
-            self._exec_in_sandbox(
-                sandbox.namespace,
-                sandbox.pod_name,
-                sandbox.container_name,
-                ["docker", "start", name],
-            )
+            run(["docker", "start", name])
+
+        # 이미 있던 컨테이너가 훈련 네트워크에 붙어 있지 않으면 붙인다.
+        attached = run([
+            "docker", "inspect", name,
+            "--format", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}",
+        ]).split()
+        if network not in attached:
+            run(["docker", "network", "connect", network, name])
 
     @staticmethod
     def _is_not_found(exc: ApiException) -> bool:

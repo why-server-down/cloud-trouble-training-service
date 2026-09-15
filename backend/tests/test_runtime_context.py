@@ -109,7 +109,7 @@ class TestObserverRegistry:
             def reference_for(self, **kwargs):
                 return type("S", (), {"id": "s1"})()
 
-            def exec_in_sandbox(self, sandbox, argv):
+            def exec_in_sandbox(self, sandbox, argv, *, check=False):
                 return "training-app running" if argv[1] == "ps" else "summary"
 
         monkeypatch.setattr(
@@ -125,7 +125,7 @@ class TestObserverRegistry:
             def reference_for(self, **kwargs):
                 return type("S", (), {"id": "s1"})()
 
-            def exec_in_sandbox(self, sandbox, argv):
+            def exec_in_sandbox(self, sandbox, argv, *, check=False):
                 return "summary"
 
         monkeypatch.setattr(
@@ -172,7 +172,7 @@ class TestPartialFailureIsTolerated:
             def reference_for(self, **kwargs):
                 return type("S", (), {"id": "s1"})()
 
-            def exec_in_sandbox(self, sandbox, argv):
+            def exec_in_sandbox(self, sandbox, argv, *, check=False):
                 if "df" in " ".join(argv):
                     raise RuntimeError("boom")
                 return "ok"
@@ -239,7 +239,7 @@ class TestSandboxTargetIsServerResolved:
                 seen.update(kwargs)
                 return type("S", (), {"id": "s1"})()
 
-            def exec_in_sandbox(self, sandbox, argv):
+            def exec_in_sandbox(self, sandbox, argv, *, check=False):
                 return ""
 
         monkeypatch.setattr(
@@ -274,7 +274,7 @@ class TestProbesWaitForTheSandbox:
         def is_ready(self, sandbox):
             return self._ready
 
-        def exec_in_sandbox(self, sandbox, argv):
+        def exec_in_sandbox(self, sandbox, argv, *, check=False):
             self.execs.append(argv)
             return "ok"
 

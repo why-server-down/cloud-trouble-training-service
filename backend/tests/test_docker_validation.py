@@ -33,7 +33,7 @@ class _FakeSandboxService:
             container_name="dind", environment=environment,
         )
 
-    def exec_in_sandbox(self, sandbox, argv):
+    def exec_in_sandbox(self, sandbox, argv, *, check=False):
         self.calls.append((sandbox.namespace, argv))
         if self.fail:
             raise RuntimeError("boom")

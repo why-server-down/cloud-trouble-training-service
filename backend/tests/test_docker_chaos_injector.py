@@ -44,7 +44,7 @@ class _FakeSandboxService:
             environment=environment,
         )
 
-    def exec_in_sandbox(self, sandbox, argv):
+    def exec_in_sandbox(self, sandbox, argv, *, check=False):
         self.calls.append(argv)
         if self.fail_on and argv[:len(self.fail_on)] == self.fail_on:
             raise RuntimeError("boom")
