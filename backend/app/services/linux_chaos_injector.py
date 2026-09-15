@@ -138,7 +138,9 @@ class LinuxChaosInjector(BaseChaosInjector):
         )
 
     def _run(self, sandbox: SandboxRef, argv: list[str]) -> str:
-        return self._sandboxes.exec_in_sandbox(sandbox, argv)
+        # check=True: exec 채널은 실패한 명령의 오류 문구도 정상 출력처럼 돌려준다.
+        # 종료 코드를 보지 않으면 아무것도 깨뜨리지 못한 주입을 "성공" 으로 보고한다.
+        return self._sandboxes.exec_in_sandbox(sandbox, argv, check=True)
 
     @property
     def _workdir(self) -> str:

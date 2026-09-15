@@ -212,6 +212,23 @@ class TestImagesAreImmutable(object):
         assert not value.endswith(":latest"), f"{name} 이 움직이는 태그다: {value}"
         assert ":" in value or "@" in value, f"{name} 에 태그가 없다(=latest): {value}"
 
+    def test_chaos_revert_restores_the_pinned_image(self):
+        """복구 경로가 `nginx:latest` 로 되돌리면 고정이 무의미해진다.
+
+        BE-25 에서 k8s_setup 만 고치고 주입기를 빼먹어, pod_failure 를 한 번
+        되돌리면 Deployment 가 움직이는 태그로 돌아갔다(2026-09-15 BE-26 실행에서 발견).
+        고의로 깨뜨리는 태그(nginx:wrongtag, private.registry.internal/...)는 장애
+        그 자체이므로 대상이 아니다.
+        """
+        source = (APP_DIR / "services" / "chaos_injector.py").read_text()
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#") or "image=" not in stripped:
+                continue
+            if "wrongtag" in stripped or "private.registry" in stripped:
+                continue  # 장애 그 자체
+            assert "nginx:latest" not in stripped, f"움직이는 태그: {stripped}"
+
     def test_no_image_is_hardcoded_in_the_cluster_setup(self):
         """설정을 우회해 코드에 이미지를 박으면 배포에서 고정할 수 없다."""
         source = (APP_DIR / "services" / "k8s_setup.py").read_text()
