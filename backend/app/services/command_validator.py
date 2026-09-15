@@ -465,7 +465,9 @@ class CommandValidator:
         available = ", ".join(
             sorted(policy.READ_COMMANDS | policy.FILE_READ_COMMANDS | policy.RECOVERY_COMMANDS)
         )
-        return f"사용 가능한 명령: {available}\n예: {policy.EXAMPLE}"
+        # 목록을 그대로 두는 이유: 터미널 클라이언트가 자동완성을 갖고 있지 않아도
+        # 배너만으로 무엇을 칠 수 있는지 알 수 있어야 한다. Tab 안내는 그 위에 얹는다.
+        return f"사용 가능한 명령(Tab 으로 자동완성): {available}\n예: {policy.EXAMPLE}"
 
     def validate_command(
         self,

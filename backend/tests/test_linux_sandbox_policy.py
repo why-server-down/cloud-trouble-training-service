@@ -298,6 +298,15 @@ class TestTerminalBanner:
         for command in ("ps", "df", "cat", "pkill"):
             assert command in hint
 
+    def test_linux_hint_mentions_tab_completion(self, validator):
+        """프론트 터미널이 Tab(코드 9)으로 자동완성한다(Terminal.tsx).
+
+        목록도 함께 남긴다 — 자동완성이 없는 클라이언트에서도 배너만으로
+        무엇을 칠 수 있는지 알 수 있어야 한다.
+        """
+        hint = validator.usage_hint(environments.LINUX)
+        assert "Tab" in hint
+
     @pytest.mark.parametrize(
         "environment,expected",
         [
