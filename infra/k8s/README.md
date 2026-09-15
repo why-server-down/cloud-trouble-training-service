@@ -24,12 +24,25 @@ kubectl -n afterfail wait --for=condition=complete job/afterfail-migrate --timeo
 | Linux | 클라우드 | BE-17 에서 hostPID/hostNetwork/SA 토큰 없이 설계했다 |
 | **Docker(DinD)** | **로컬 데모 한정** | privileged 가 필요하다 |
 
-privileged 컨테이너는 사실상 노드와 같은 권한이다. 탈출에 성공하면 노드를 잡고,
-클라우드에서는 거기서 인스턴스 메타데이터(IMDS)로 노드 IAM 역할의 자격증명까지
-닿는다. 훈련 샌드박스는 **사용자가 임의 명령을 치는 곳**이므로 그 경로를 열지 않는다.
+**privileged 컨테이너는 탈출하지 않아도 이미 노드 권한을 갖는다.** 취약점이 아니라
+설계된 기능이다. 모든 capability(`CAP_SYS_ADMIN`, `CAP_SYS_MODULE`, `CAP_SYS_RAWIO` …),
+호스트 디바이스 전체 접근, seccomp/AppArmor unconfined 가 붙는다. 그 안에서는
+`mount /dev/sda1` 로 노드 디스크를 직접 읽거나 커널 모듈을 적재할 수 있다. 컨테이너와
+노드를 가르는 것은 네임스페이스뿐이고 `CAP_SYS_ADMIN` 은 그것도 넘나든다.
 
-명령 정책(`command_validator`)이 좁혀 두긴 하지만 그건 애플리케이션 계층 방어이고,
-privileged 자체를 막지 못한다.
+클라우드에서는 거기서 인스턴스 메타데이터(IMDS)로 노드 IAM 역할의 자격증명까지 닿는다.
+
+**그래서 이 환경의 실질적 방어선은 명령 정책 하나뿐이다.** 사용자는 DinD 컨테이너에
+셸을 받지 않고 `command_validator` 의 argv allowlist 를 통과한 docker 부명령만
+실행한다. 그러나 그건 애플리케이션 계층 방어이고 privileged 자체를 되돌리지 못한다.
+검증기가 한 번 뚫리면 **그 즉시** 노드다.
+
+역설적으로 Linux 환경은 사용자에게 더 넓은 명령(25개)을 주면서도 더 안전하다.
+비특권이라 다 뚫려도 컨테이너 안에서 끝난다.
+
+> 로컬 macOS 에서는 "노드" 가 Docker Desktop 의 LinuxKit VM 이라 그 위에 하이퍼바이저
+> 경계가 한 겹 더 있다. 자체 호스팅 Linux VM 에는 그 겹이 없다 — 같은 privileged 라도
+> 실질 반경이 다르다.
 
 별도 node group + taint 로 격리하는 선택지도 있으나, Docker 환경 미션 3개를 위해
 전용 노드를 상시 띄우는 비용이 이득보다 크다고 판단했다.
