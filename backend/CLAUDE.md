@@ -964,6 +964,35 @@ python -m pytest -m integration -q       # 실제 클러스터가 있을 때만
 클러스터 없이 어디서나 돌아야 하고(CI 포함), privileged/DinD가 필요한 검증은
 `-m integration`으로 따로 돌린다. `--strict-markers`는 마커 오타를 실패로 만든다.
 
+### 배포별 환경 개방 (ENABLED_ENVIRONMENTS)
+
+**구현 여부와 이 배포에서 여는지는 다른 사실이다.** 하나로 섞으면 둘 다 거짓이 된다
+— 구현이 끝난 환경을 "준비 중" 이라고 말하거나, 이 호스트에 올리지 않기로 한 환경을
+열어버린다. 그래서 상수를 둘로 나눴다.
+
+| 값 | 뜻 | 바뀌는 시점 |
+|---|---|---|
+| `IMPLEMENTED_ENVIRONMENTS` | 코드에 주입기·검증기·시드가 있다 | 구현을 붙일 때 |
+| `ENABLED_ENVIRONMENTS` | 이 배포에서 연다 | 배포 설정(`ENABLED_ENVIRONMENTS`) |
+
+요청을 막는 관문은 `ENABLED` 쪽이다(`assert_implemented` 는 호출부 호환을 위해
+이름만 유지한다). 정리·복구 경로는 `IMPLEMENTED` 를 본다 — 환경을 닫아도 그 전에
+주입해 둔 장애는 되돌려야 하기 때문이다.
+
+- 값을 비우면 구현된 환경을 모두 연다(기존 동작과 같다).
+- **잘못된 이름은 기동 시점에 실패한다.** 조용히 무시하면 운영자는 열었다고 믿는데
+  실제로는 닫혀 있다.
+- 닫힌 환경의 400 문구를 이유에 따라 나눈다. 구현이 끝난 환경에 "준비 중" 이라고
+  하면 거짓말이고, 사용자는 기다리면 열린다고 오해한다.
+  → `'docker' 환경은 이 배포에서 제공되지 않습니다.`
+- `GET /api/environments` 는 `status` 를 계약된 두 값(available/preparing)으로
+  유지하고, 닫힌 이유를 **선택 필드 `reason`** 으로 덧붙인다
+  (`not_deployed` / `not_implemented`). 프론트가 무시해도 동작은 같다.
+
+**동기**: Docker 환경은 privileged DinD 가 필요하다. privileged 컨테이너는 탈출하지
+않아도 이미 노드 권한을 가지므로, 다른 네트워크에 닿는 호스트에는 올리지 않는다.
+같은 이미지를 배포처마다 다르게 열 수 있어야 한다.
+
 ### 환경별 end-to-end 와 성능 (BE-26, BE-27)
 
 하니스는 `tests/integration/test_environment_matrix.py`, 보고서는

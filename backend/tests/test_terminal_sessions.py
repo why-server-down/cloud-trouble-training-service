@@ -126,20 +126,19 @@ class TestTerminalSessionApi:
         sandbox.ensure.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_preparing_environment_returns_concrete_400(
+    async def test_unimplemented_environment_returns_concrete_400(
         self, terminal_client, monkeypatch
     ):
-        """계약에는 있지만 아직 구현되지 않은 환경은 400 과 구체적인 이유를 준다.
+        """계약에는 있지만 구현이 없는 환경은 400 과 "준비 중" 을 준다.
 
-        현재는 세 환경이 모두 구현돼 있으므로, 하나를 임시로 미구현으로 돌려 검증한다.
+        현재는 세 환경이 모두 구현돼 있으므로 하나를 임시로 미구현으로 돌린다.
         """
         from app.core import environments as env_module
 
-        monkeypatch.setattr(
-            env_module,
-            "IMPLEMENTED_ENVIRONMENTS",
-            tuple(e for e in env_module.IMPLEMENTED_ENVIRONMENTS if e != "linux"),
-        )
+        remaining = tuple(e for e in env_module.IMPLEMENTED_ENVIRONMENTS if e != "linux")
+        monkeypatch.setattr(env_module, "IMPLEMENTED_ENVIRONMENTS", remaining)
+        monkeypatch.setattr(env_module, "ENABLED_ENVIRONMENTS", remaining)
+
         client, _, db, sandbox = terminal_client
         async with client:
             response = await client.post(
@@ -149,6 +148,34 @@ class TestTerminalSessionApi:
         assert response.status_code == 400
         assert "준비 중" in response.json()["detail"]
         db.execute.assert_not_awaited()
+        sandbox.ensure.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_disabled_environment_does_not_claim_to_be_preparing(
+        self, terminal_client, monkeypatch
+    ):
+        """구현은 끝났는데 이 배포에서 닫아둔 환경은 다른 문구를 준다.
+
+        "준비 중" 이라고 하면 사용자는 기다리면 열린다고 오해한다. 실제로는
+        이 배포에서 열지 않기로 한 것이고, 기다려도 열리지 않는다.
+        """
+        from app.core import environments as env_module
+
+        monkeypatch.setattr(
+            env_module,
+            "ENABLED_ENVIRONMENTS",
+            tuple(e for e in env_module.IMPLEMENTED_ENVIRONMENTS if e != "docker"),
+        )
+        client, _, db, sandbox = terminal_client
+        async with client:
+            response = await client.post(
+                "/api/terminal/sessions", json={"environment": "docker"}
+            )
+
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert "이 배포에서 제공되지 않습니다" in detail
+        assert "준비 중" not in detail
         sandbox.ensure.assert_not_awaited()
 
     @pytest.mark.asyncio

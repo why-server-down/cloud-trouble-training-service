@@ -15,6 +15,10 @@ data:
   # 실제 도메인으로 바꾼다. wildcard 를 쓰지 않는다.
   CORS_ORIGINS: "https://afterfail.example.com"
 
+  # 이 배포에서 열 환경. Docker 환경은 privileged DinD 가 필요하므로, 다른
+  # 네트워크에 닿는 호스트에서는 빼고 연다(infra/k8s/README.md 의 배포 경계).
+  ENABLED_ENVIRONMENTS: "kubernetes,linux"
+
   CHAOS_BACKEND: "chaos_mesh"
   VALIDATION_BACKEND: "k8s"
   CHAOS_MESH_NAMESPACE: "chaos-mesh"
