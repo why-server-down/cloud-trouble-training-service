@@ -297,3 +297,79 @@ class TestChatResponseCarriesEnvironment:
 
         source = inspect.getsource(chat_with_tutor)
         assert "environment=tutor_result.environment" in source
+
+
+class TestEnabledEnvironmentsAreConfigurable:
+    """배포처마다 여는 환경이 다를 수 있다 (BE-25 후속).
+
+    구현 여부(IMPLEMENTED)와 이 배포에서 여는지(ENABLED)는 **다른 사실**이다.
+    섞으면 둘 다 거짓이 된다 — 구현이 끝난 환경을 "준비 중" 이라고 말하거나,
+    이 호스트에 올리지 않기로 한 환경을 열어버린다.
+
+    실제 동기: Docker 환경은 privileged DinD 가 필요해서, 다른 네트워크에 닿는
+    호스트에는 올리지 않는다. 같은 이미지를 배포처마다 다르게 열 수 있어야 한다.
+    """
+
+    def _resolve(self, monkeypatch, value):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "ENABLED_ENVIRONMENTS", value)
+        return environments._resolve_enabled()
+
+    def test_empty_value_opens_every_implemented_environment(self, monkeypatch):
+        assert self._resolve(monkeypatch, "") == environments.IMPLEMENTED_ENVIRONMENTS
+
+    def test_subset_is_honoured(self, monkeypatch):
+        assert self._resolve(monkeypatch, "kubernetes,linux") == ("kubernetes", "linux")
+
+    def test_whitespace_and_duplicates_are_tolerated(self, monkeypatch):
+        assert self._resolve(monkeypatch, " linux , linux ,kubernetes ") == (
+            "linux",
+            "kubernetes",
+        )
+
+    def test_unknown_environment_fails_at_startup(self, monkeypatch):
+        """조용히 무시하면 운영자는 열었다고 믿는데 실제로는 닫혀 있다."""
+        with pytest.raises(RuntimeError, match="구현되지 않은 환경"):
+            self._resolve(monkeypatch, "kubernetes,windows")
+
+    def test_typo_of_a_real_environment_also_fails(self, monkeypatch):
+        with pytest.raises(RuntimeError):
+            self._resolve(monkeypatch, "kubernets")
+
+    def test_value_with_only_separators_fails(self, monkeypatch):
+        with pytest.raises(RuntimeError, match="읽어낸 환경이 없습니다"):
+            self._resolve(monkeypatch, " , , ")
+
+
+class TestAvailabilityDistinguishesWhyAnEnvironmentIsClosed:
+    def _items(self, monkeypatch, enabled):
+        monkeypatch.setattr(environments, "ENABLED_ENVIRONMENTS", enabled)
+        return {item["id"]: item for item in environments.availability()}
+
+    def test_enabled_environment_reports_no_reason(self, monkeypatch):
+        items = self._items(monkeypatch, environments.IMPLEMENTED_ENVIRONMENTS)
+        assert items["docker"]["status"] == environments.AVAILABLE
+        assert "reason" not in items["docker"]
+        assert items["docker"]["capabilities"]
+
+    def test_disabled_but_implemented_says_not_deployed(self, monkeypatch):
+        items = self._items(monkeypatch, ("kubernetes", "linux"))
+        docker = items["docker"]
+        assert docker["status"] == environments.PREPARING
+        assert docker["reason"] == environments.NOT_DEPLOYED
+        # 닫힌 환경의 기능을 광고하면 프론트가 열 수 없는 화면을 그린다
+        assert docker["capabilities"] == []
+
+    def test_unimplemented_says_not_implemented(self, monkeypatch):
+        monkeypatch.setattr(environments, "IMPLEMENTED_ENVIRONMENTS", ("kubernetes",))
+        items = self._items(monkeypatch, ("kubernetes",))
+        assert items["linux"]["reason"] == environments.NOT_IMPLEMENTED
+
+    def test_status_stays_within_the_two_contracted_values(self, monkeypatch):
+        """프론트 타입은 available/preparing 둘뿐이다. 늘리면 타입이 깨진다."""
+        items = self._items(monkeypatch, ("kubernetes",))
+        assert {item["status"] for item in items.values()} <= {
+            environments.AVAILABLE,
+            environments.PREPARING,
+        }

@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
     COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
 
+    # 이 배포에서 열 훈련 환경 (쉼표 구분). 비우면 구현된 환경을 모두 연다.
+    # 배포처마다 여는 환경이 다를 수 있어 설정으로 둔다 — 예를 들어 Docker 환경은
+    # privileged DinD 가 필요해서, 다른 네트워크에 닿는 호스트에는 올리지 않는다.
+    # 구현되지 않은 환경 이름을 넣으면 기동 시점에 실패한다(조용히 무시하지 않는다).
+    ENABLED_ENVIRONMENTS: str = ""
+
     # 보존 정책 (BE-29)
     # 튜터 대화에는 사용자가 친 명령과 장애 상황이 그대로 남는다. 훈련이 끝난 뒤에도
     # 무기한 보관할 이유가 없으므로 기간을 정해 지운다. 0 이하로 두면 정리하지 않는다.

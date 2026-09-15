@@ -6,6 +6,8 @@
 
 from typing import Literal, get_args
 
+from app.core.config import settings
+
 KUBERNETES = "kubernetes"
 DOCKER = "docker"
 LINUX = "linux"
@@ -20,8 +22,47 @@ SUPPORTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER, LINUX)
 
 DEFAULT_ENVIRONMENT = KUBERNETES
 
-# 실제 장애 주입/검증이 구현된 환경. 새 환경 구현체를 붙일 때마다 여기에 추가한다.
+# 실제 장애 주입/검증이 **코드에 구현된** 환경. 새 환경 구현체를 붙일 때 추가한다.
+# 이건 코드의 사실이라 배포 설정으로 바뀌지 않는다.
 IMPLEMENTED_ENVIRONMENTS: tuple[str, ...] = (KUBERNETES, DOCKER, LINUX)
+
+
+def _resolve_enabled() -> tuple[str, ...]:
+    """이 배포에서 실제로 열 환경.
+
+    구현 여부(IMPLEMENTED)와 배포에서 여는지(ENABLED)는 다른 사실이다. 섞으면
+    둘 다 거짓이 된다 — 구현이 끝난 환경을 "준비 중" 이라고 말하거나, 반대로
+    이 호스트에 올리지 않기로 한 환경을 열어버린다.
+
+    비우면 구현된 환경을 모두 연다. 잘못된 값은 **기동 시점에 실패**시킨다.
+    조용히 무시하면 운영자는 열었다고 믿는데 실제로는 닫혀 있다.
+    """
+    raw = (settings.ENABLED_ENVIRONMENTS or "").strip()
+    if not raw:
+        return IMPLEMENTED_ENVIRONMENTS
+
+    requested = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    if not requested:
+        raise RuntimeError(
+            "ENABLED_ENVIRONMENTS 가 비어 있지 않은데 읽어낸 환경이 없습니다. "
+            "쉼표로 구분한 환경 이름을 지정하거나 값을 비우세요."
+        )
+
+    unknown = [env for env in requested if env not in IMPLEMENTED_ENVIRONMENTS]
+    if unknown:
+        raise RuntimeError(
+            f"ENABLED_ENVIRONMENTS 에 구현되지 않은 환경이 있습니다: {', '.join(unknown)} "
+            f"(구현된 환경: {', '.join(IMPLEMENTED_ENVIRONMENTS)})"
+        )
+    return requested
+
+
+# 이 배포에서 여는 환경. 요청을 막는 관문은 이 값이다.
+ENABLED_ENVIRONMENTS: tuple[str, ...] = _resolve_enabled()
+
+# 환경이 닫혀 있는 이유. 프론트가 문구를 고를 수 있게 계약에 덧붙인다(선택 필드).
+NOT_IMPLEMENTED = "not_implemented"   # 코드에 구현이 없다
+NOT_DEPLOYED = "not_deployed"         # 구현은 됐지만 이 배포에서 열지 않았다
 
 
 def is_supported(environment: str) -> bool:
@@ -29,7 +70,13 @@ def is_supported(environment: str) -> bool:
 
 
 def is_implemented(environment: str) -> bool:
+    """코드에 구현이 있는가. 배포에서 열려 있는지와는 다른 질문이다."""
     return environment in IMPLEMENTED_ENVIRONMENTS
+
+
+def is_enabled(environment: str) -> bool:
+    """이 배포에서 쓸 수 있는가. 요청을 막는 기준은 이쪽이다."""
+    return environment in ENABLED_ENVIRONMENTS
 
 
 def validate(environment: str) -> str:
@@ -43,14 +90,25 @@ def validate(environment: str) -> str:
 
 
 def assert_implemented(environment: str) -> str:
-    """지원은 하지만 아직 구현 전인 환경이면 ValueError."""
+    """이 배포에서 쓸 수 없는 환경이면 ValueError.
+
+    이름은 호출부 호환을 위해 유지한다. 판정 기준은 ENABLED 다.
+    닫힌 이유에 따라 문구를 나눈다 — 구현이 끝난 환경을 "준비 중" 이라고 하면
+    거짓말이고, 사용자는 기다리면 열린다고 오해한다.
+    """
     validate(environment)
-    if environment not in IMPLEMENTED_ENVIRONMENTS:
+    if environment in ENABLED_ENVIRONMENTS:
+        return environment
+
+    available = ", ".join(ENABLED_ENVIRONMENTS) or "없음"
+    if environment in IMPLEMENTED_ENVIRONMENTS:
         raise ValueError(
-            f"'{environment}' 환경은 아직 준비 중입니다. "
-            f"현재 이용 가능: {', '.join(IMPLEMENTED_ENVIRONMENTS)}"
+            f"'{environment}' 환경은 이 배포에서 제공되지 않습니다. "
+            f"현재 이용 가능: {available}"
         )
-    return environment
+    raise ValueError(
+        f"'{environment}' 환경은 아직 준비 중입니다. 현재 이용 가능: {available}"
+    )
 
 
 # 환경별로 현재 제공되는 기능. 프론트가 탭을 그릴 때 쓰는 값이며
@@ -80,14 +138,19 @@ def availability() -> list[dict]:
     """지원 환경의 가용 상태 목록. `GET /api/environments` 의 원본이다."""
     items = []
     for environment in SUPPORTED_ENVIRONMENTS:
-        implemented = is_implemented(environment)
-        items.append(
-            {
-                "id": environment,
-                "status": AVAILABLE if implemented else PREPARING,
-                "capabilities": list(_CAPABILITIES.get(environment, ())) if implemented else [],
-            }
-        )
+        enabled = is_enabled(environment)
+        item = {
+            "id": environment,
+            "status": AVAILABLE if enabled else PREPARING,
+            "capabilities": list(_CAPABILITIES.get(environment, ())) if enabled else [],
+        }
+        if not enabled:
+            # status 는 프론트와 계약된 두 값뿐이라 늘리지 않는다. 대신 이유를
+            # 선택 필드로 덧붙여, 문구를 고를 수 있게 한다(무시해도 동작은 같다).
+            item["reason"] = (
+                NOT_DEPLOYED if is_implemented(environment) else NOT_IMPLEMENTED
+            )
+        items.append(item)
     return items
 
 
