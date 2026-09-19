@@ -793,6 +793,21 @@ Application/DB 착수 조건:
 - Linux OOM 또는 disk I/O 미션 전체 흐름.
 - 3개 환경을 오가며 미션 목록과 대시보드가 올바르게 바뀌는 화면.
 
+> **판정 결과 (사후 기록, 2026-09-19).** 8주차에 이 절을 채우지 못한 채 진행돼
+> FE-11 이후 작업이 먼저 끝났다. 지금 시점의 근거로 각 항목을 판정해 남긴다.
+>
+> | 검토 항목 | 판정 | 근거 |
+> |---|---|---|
+> | Kubernetes 회귀 없음 | 통과 | 백엔드 환경 매트릭스 20/20 (`backend/reports/environment_matrix.json`, Kubernetes 8회) |
+> | Docker end-to-end 2개 이상 | 통과 | 같은 보고서 Docker 6회. 주입·복구·검증까지 실제 클러스터에서 수행 |
+> | Linux end-to-end 2개 이상 | 통과 | 같은 보고서 Linux 6회 |
+> | 자동 채점과 UI 반영 지연 측정 | 통과 | FE-20 실측 — check API 16ms, 화면 반영 80ms (목표 300ms). 서버측 검증 median 33.8ms / p95 60.4ms |
+> | 환경 탭·세션·attempt 불일치 0건 | **미확정** | 자동화 테스트(`App.test.tsx` FE-03/04/05)는 통과하지만 실제 브라우저 반복 시나리오는 FE-19 에서 확인한다 |
+> | Application/DB 조건부 범위 착수 여부 | **착수하지 않음** | 백엔드가 `application` environment·sandbox·명령 정책·injector·validation 을 제공하지 않는다. `SUPPORTED_ENVIRONMENTS` 는 3종이며 UI 는 후속 연구로 표기한다 |
+>
+> 착수 조건 중 "백엔드가 `application` 을 제공한다"가 충족되지 않았으므로 Application
+> 탭은 추가하지 않는다. 남은 범위는 안정화와 FE-19 통합 검증이다.
+
 ---
 
 ## Sprint 4 - 9~10주차: 크로스 레이어 AI 튜터 UX
