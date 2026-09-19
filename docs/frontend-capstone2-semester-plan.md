@@ -1131,6 +1131,50 @@ capabilities 는 탭 **안**의 기능을 정한다. 두 판정을 섞으면 준
 - `terminal` 이 없으면 세션 생성 요청 자체가 나가지 않는다.
 - 응답에 `capabilities` 가 없으면 이번 변경 이전과 똑같이 동작한다.
 
+### FE-23 닫힌 환경의 이유 구분 (추가, 2026-09-19)
+
+선행: 백엔드 `ENABLED_ENVIRONMENTS` 도입 (완료, 커밋 `c2b70a3`)
+
+배경:
+
+백엔드가 "코드에 구현이 있다"(`IMPLEMENTED_ENVIRONMENTS`)와 "이 배포에서 연다"
+(`ENABLED_ENVIRONMENTS`)를 분리하면서, `GET /api/environments` 가 닫힌 환경에
+`reason` 을 선택 필드로 붙이기 시작했다 — `not_implemented` 또는 `not_deployed`.
+`status` 는 계약된 두 값(`available` / `preparing`)으로 유지된다.
+
+프론트는 이 필드를 무시하고 `status` 만 보고 "준비 중"을 적고 있었다. 그래서
+구현이 끝난 Docker 를 배포 설정으로 닫으면 화면이 두 번 거짓말을 한다. 탭에는
+"준비 중"이라고 적어 기다리면 열린다고 믿게 하고, 로드맵에는 이미 동작하는 기능을
+"열릴 예정"으로 광고한다. Docker 는 privileged DinD 가 필요해 다른 네트워크에
+닿는 호스트에는 올리지 않기로 했으므로, 이 조합은 가정이 아니라 예정된 배포 형태다.
+
+수정 파일:
+
+- `src/types/training.ts` — `ENVIRONMENT_DISABLED_REASONS` 계약, `EnvironmentItem.reason`
+- `src/config/environments.ts` — 판정 규칙(`closedReason` / `unavailableNote` / `showsRoadmap`)
+- `src/services/api.ts` — 모르는 이유 경고
+- `src/components/Environment/EnvironmentTabs.tsx` — 탭 안 문구
+- `src/components/Environment/EnvironmentRoadmap.tsx` — 닫힌 환경을 이유별 두 목록으로
+- `src/App.tsx` — 모든 환경이 닫혔을 때의 안내 문구
+
+구현 지시:
+
+- 판정 규칙은 `config/environments.ts` 한 곳에 둔다 (FE-22 의 `hasCapability` 와 같게).
+- **모르는 이유는 status 문구로 되돌린다.** 서버 내부 식별자를 화면에 그대로 내보내지
+  않고, 없는 사실을 단정하지도 않는다. 경고만 남긴다.
+- **`reason` 이 없는 응답은 이번 변경 이전과 똑같이 동작한다.** 이 계약 이전 배포에서
+  화면이 달라지면 안 된다.
+- 활성 attempt 잠금이 닫힌 이유보다 앞선다. 둘 다 해당하면 사용자가 지금 할 수 있는
+  일을 정하는 쪽을 보여준다.
+
+인수 조건:
+
+- `ENABLED_ENVIRONMENTS=kubernetes,linux` 로 띄운 배포에서 Docker 탭이 "준비 중"이
+  아니라 닫힌 배포임을 알리는 문구를 보여준다.
+- 그 Docker 가 "열릴 예정" 목록에 들어가지 않는다. 아직 만들지 않은 환경만 그 목록에 남는다.
+- 계약에 없는 `reason` 이 와도 탭이 정상 렌더링되고 문구는 status 기준으로 나온다.
+- 응답에 `reason` 이 없으면 이번 변경 이전과 똑같이 동작한다.
+
 ---
 
 ## 7. 작업 의존성 및 우선순위
@@ -1149,6 +1193,7 @@ FE-00 API 계약
                   -> FE-16/17/18 품질
                       -> FE-19/20/21 제출
                           -> FE-22 capabilities 게이팅 (백엔드 _CAPABILITIES 정합 후)
+                          -> FE-23 닫힌 이유 구분 (백엔드 ENABLED_ENVIRONMENTS 후)
 ```
 
 우선순위:
@@ -1177,6 +1222,7 @@ P0/P1이 남아 있으면 Application/DB, 추가 애니메이션, 신규 차트 
 | 9 | `feature/frontend-release` | FE-19~21 문서·최종 수정 |
 | 10 | `feature/fe-backend-unblocked` | 백엔드 해제분 반영 (FE-09/FE-11 정정) |
 | 11 | `feature/fe-capabilities-gating` | FE-22 |
+| 12 | `feature/fe-env-reason` | FE-23 |
 
 PR 하나에서 백엔드 계약 변경과 대규모 UI 변경을 섞지 않는다. 단, 동일 계약을 맞추는 작은 타입 변경은 통합 PR에 포함할 수 있다.
 
