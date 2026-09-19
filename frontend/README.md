@@ -269,6 +269,7 @@ config 조회로 환경을 처리한다.
 | 증상 | 먼저 볼 것 |
 |---|---|
 | 로그인은 되는데 탭이 안 보임 | `GET /api/environments` 응답. 백엔드 `core/environments.py` |
+| 있어야 할 환경 탭이 "이 서버에서 열지 않음" | 백엔드 `ENABLED_ENVIRONMENTS`. 구현이 아니라 배포 설정이 닫은 것이다 |
 | CORS 오류 | 브라우저 주소창의 **origin**. [ENV_SETUP.md](ENV_SETUP.md) 판정 표 |
 | "터미널 세션을 준비하는 중"이 오래 지속 | 백엔드 로그의 `sandbox probe failed`. Linux 최초 생성은 20여 회 반복 후 성공한다 |
 | 터미널 명령이 거절됨 | `command_validator.py` 의 해당 환경 정책. 서버 detail 이 이유를 담고 있다 |
@@ -289,6 +290,9 @@ config 조회로 환경을 처리한다.
 
 - **Docker 샌드박스는 privileged DinD 다.** 사용자가 칠 수 있는 명령을 좁히는 것이
   실질적 방어선이므로 자동완성이 백엔드 정책보다 넓어지면 안 된다.
+- **배포마다 열리는 환경이 다를 수 있다.** 백엔드 `ENABLED_ENVIRONMENTS` 가 비어
+  있으면 구현된 환경이 모두 열린다. 위 privileged 이유로 Docker 를 닫은 배포에서는
+  그 탭이 "준비 중"이 아니라 닫힌 배포임을 알리는 문구로 나온다 (FE-23).
 - **Application / Database 환경은 캡스톤2 스코프에서 제외**됐다. 탭이 아니라
   "후속 연구"로 표기한다 (`RESEARCH_TOPICS`).
 - **Docker / Linux 관측 대시보드가 없다.** `infra/monitoring` 은 백엔드 소유 경로다.
@@ -300,14 +304,16 @@ config 조회로 환경을 처리한다.
 
 ---
 
-## 9. 백엔드에 요청해 둔 것
+## 9. 백엔드와 맞춘 계약
 
-프론트가 우회해 둬서 화면은 동작하지만, 반영되면 우회를 걷어내야 한다.
+프론트가 우회해 두고 요청했던 것은 **모두 반영됐다** (백엔드 `6876c76`, `c2b70a3`).
+지금 대기 중인 요청은 없다. 우회를 걷어내면서 무엇이 달라졌는지만 남긴다.
 
-| 내용 | 영향 |
+| 계약 | 반영 뒤 프론트가 한 일 |
 |---|---|
-| `CORSMiddleware` 에 `expose_headers=["Retry-After"]` | cross-origin 에서 429 남은 초를 못 읽어 "잠시 후"로만 안내한다 |
-| `ChatResponse` 에 `environment` 추가 | 튜터 환경 배지를 응답으로 교차 검증할 수 없다 |
-| `_CAPABILITIES` 갱신 | docker/linux 의 `ai_scenario`·`tutor` 가 실제로 동작하는데 목록에 없다 |
-| `LinuxPolicy._check_paths` 플래그 값 오인 | `truncate -s 0 <path>` 가 거절돼 복구 명령으로 못 쓴다 |
-| `websocket_handler.py` 의 kubectl 배너 | Linux 터미널에도 "Type 'kubectl' commands" 가 출력된다 |
+| `CORSMiddleware` 의 `expose_headers=["Retry-After"]` | 429 카운트다운이 cross-origin 에서도 보인다. 5초 fallback 은 남겼다 — 중간 프록시가 헤더를 떨어뜨리는 배포에서는 다시 null 이 된다 |
+| `ChatResponse.environment` | 요청 환경과 응답 환경의 불일치를 판정한다. 불일치여도 답변을 버리지 않고 어느 환경 기준인지 밝힌다 (FE-11) |
+| `_CAPABILITIES` 를 구현에 맞춤 | 화면 분기를 프론트 하드코딩에서 응답 `capabilities` 로 옮겼다. 관측 패널만은 예외다 — `observability` 는 백엔드 probe 가 배선됐다는 뜻이고 Grafana 대시보드 유무와 다른 사실이다 (FE-22) |
+| `LinuxPolicy` 의 값 플래그 오인 수정 | `truncate -s 0` · `kill -s TERM` 이 풀려 Linux 자동완성에 복원했다 (FE-09) |
+| 환경별 터미널 배너 | Linux 세션에서 kubectl 안내가 사라졌다. 첫 줄 `Connected to namespace:` 는 프론트가 연결 판정에 쓰므로 그대로 유지된다 |
+| `GET /api/environments` 의 `reason` | 닫힌 환경을 "준비 중"(아직 안 만듦)과 "이 서버에서 열지 않음"(만들었지만 이 배포에서 닫음)으로 나눠 표시한다 (FE-23) |
