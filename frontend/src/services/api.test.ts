@@ -229,6 +229,34 @@ describe('getEnvironments', () => {
     expect(warn.mock.calls.flat().join(' ')).toContain('quantum_debugger')
     warn.mockRestore()
   })
+
+  it('닫힌 이유를 그대로 실어 온다 (FE-23)', async () => {
+    stubFetchOnce({
+      items: [
+        { id: 'kubernetes', status: 'available', capabilities: ['terminal'] },
+        { id: 'docker', status: 'preparing', capabilities: [], reason: 'not_deployed' },
+      ],
+    })
+
+    const items = await getEnvironments(TOKEN)
+
+    // 열린 환경에는 백엔드가 아예 붙이지 않는 필드다.
+    expect(items[0].reason).toBeUndefined()
+    expect(items[1].reason).toBe('not_deployed')
+  })
+
+  it('모르는 비활성 사유는 응답을 죽이지 않고 경고만 남긴다 (FE-23)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    stubFetchOnce({
+      items: [{ id: 'docker', status: 'preparing', capabilities: [], reason: 'on_fire' }],
+    })
+
+    const items = await getEnvironments(TOKEN)
+
+    expect(items).toHaveLength(1)
+    expect(warn.mock.calls.flat().join(' ')).toContain('on_fire')
+    warn.mockRestore()
+  })
 })
 
 describe('createTerminalSession', () => {

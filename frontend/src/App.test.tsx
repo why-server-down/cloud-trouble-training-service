@@ -129,7 +129,12 @@ describe('환경 가용성 화면 (FE-03)', () => {
 
     await screen.findByRole('tablist')
     expect(screen.getAllByRole('tab')).toHaveLength(3)
-    expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true')
+    /*
+     * 탭 목록이 뜨는 것과 활성 환경이 정해지는 것은 다른 응답에 달려 있다
+     * (환경 목록 / 저장된 환경을 담은 프로필). 느린 실행에서는 목록만 먼저 그려진
+     * 순간을 보게 되므로 선택이 확정될 때까지 기다린다.
+     */
+    await waitFor(() => expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true'))
     expect(screen.getByRole('tabpanel')).toBeTruthy()
     // Application 은 탭이 아니라 후속 연구 영역으로 내려갔다.
     expect(screen.queryByRole('tab', { name: /Application/ })).toBeNull()
@@ -144,7 +149,7 @@ describe('환경 가용성 화면 (FE-03)', () => {
     render(<App />)
 
     await screen.findByRole('tablist')
-    expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true'))
     expect(screen.getByRole('alert').textContent).toContain('일부 기능이 불안정')
     expect(screen.getByRole('tabpanel')).toBeTruthy()
   })

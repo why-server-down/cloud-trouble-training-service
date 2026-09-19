@@ -4,6 +4,7 @@ import {
   EnvironmentItem,
   EnvironmentListResponse,
   isEnvironmentCapability,
+  isEnvironmentDisabledReason,
   isEnvironmentId,
   MissionAttemptResponse,
   MissionCompleteResponse,
@@ -19,6 +20,7 @@ import {
 export type {
   AttemptType,
   EnvironmentCapability,
+  EnvironmentDisabledReason,
   EnvironmentId,
   EnvironmentItem,
   EnvironmentListResponse,
@@ -631,6 +633,25 @@ export const getEnvironments = async (token: string): Promise<EnvironmentItem[]>
   ]
   if (unknownCapabilities.length > 0) {
     console.warn(`프론트가 모르는 capability: ${unknownCapabilities.join(', ')}`)
+  }
+
+  /*
+   * 닫힌 이유도 같다 (FE-23). 모르는 값은 `unavailableNote()` 가 status 문구로
+   * 되돌리므로 화면은 멀쩡하지만, 백엔드가 이유를 추가했는데 프론트가 그 문구를
+   * 못 고르는 상태를 아무도 모르게 두지 않는다.
+   */
+  const unknownReasons = [
+    ...new Set(
+      known
+        .map((item) => item.reason)
+        .filter(
+          (reason): reason is string =>
+            typeof reason === 'string' && !isEnvironmentDisabledReason(reason),
+        ),
+    ),
+  ]
+  if (unknownReasons.length > 0) {
+    console.warn(`프론트가 모르는 환경 비활성 사유: ${unknownReasons.join(', ')}`)
   }
 
   return known

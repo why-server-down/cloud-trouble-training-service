@@ -64,6 +64,39 @@ describe('환경 탭 상태 표시', () => {
     fireEvent.click(tab('Docker'))
     expect(onSelect).not.toHaveBeenCalled()
   })
+
+  it('구현이 끝났지만 이 배포에서 닫은 환경을 준비 중이라고 하지 않는다 (FE-23)', () => {
+    renderTabs({
+      items: [
+        { id: 'kubernetes', status: 'available', capabilities: ['terminal'] },
+        { id: 'docker', status: 'preparing', capabilities: [], reason: 'not_deployed' },
+        { id: 'linux', status: 'preparing', capabilities: [], reason: 'not_implemented' },
+      ],
+    })
+
+    expect(tab('Docker').textContent).not.toContain('준비 중')
+    expect(tab('Docker').textContent).toContain('이 서버에서 열지 않음')
+    expect(tab('Linux').textContent).toContain('준비 중')
+  })
+
+  it('이유가 없으면 이 계약 이전과 같은 status 문구를 쓴다 (FE-23)', () => {
+    renderTabs()
+
+    expect(tab('Docker').textContent).toContain('준비 중')
+  })
+
+  it('활성 attempt 잠금이 닫힌 이유보다 앞선다', () => {
+    // 둘 다 해당하면 사용자가 지금 할 수 있는 일을 정하는 쪽을 보여준다.
+    renderTabs({
+      items: [
+        { id: 'kubernetes', status: 'available', capabilities: [] },
+        { id: 'docker', status: 'preparing', capabilities: [], reason: 'not_deployed' },
+      ],
+      lockedTo: 'kubernetes',
+    })
+
+    expect(tab('Docker').textContent).toContain('진행 중인 미션 환경으로 고정')
+  })
 })
 
 describe('선택 동작', () => {
