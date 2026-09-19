@@ -1,6 +1,6 @@
 import React, { useRef } from 'react'
 
-import { getEnvironmentMeta, isSelectableStatus, statusNote } from '../../config/environments'
+import { getEnvironmentMeta, isSelectableStatus, unavailableNote } from '../../config/environments'
 import { EnvironmentId, EnvironmentItem } from '../../types/training'
 
 interface EnvironmentTabsProps {
@@ -26,7 +26,9 @@ const EnvironmentTabs: React.FC<EnvironmentTabsProps> = ({ items, active, locked
 
   const disabledReason = (item: EnvironmentItem): string | null => {
     if (lockedTo && lockedTo !== item.id) return '진행 중인 미션 환경으로 고정'
-    if (!isSelectableStatus(item.status)) return statusNote(item.status)
+    // 닫힌 이유는 서버가 말한다 (FE-23). 구현이 끝났지만 이 배포에서 열지 않은
+    // 환경까지 "준비 중"으로 부르면 기다리면 열린다고 오해하게 된다.
+    if (!isSelectableStatus(item.status)) return unavailableNote(item)
     return null
   }
 

@@ -1,10 +1,12 @@
 import {
   ENVIRONMENT_IDS,
   EnvironmentCapability,
+  EnvironmentDisabledReason,
   EnvironmentId,
   EnvironmentItem,
   EnvironmentStatus,
   isEnvironmentCapability,
+  isEnvironmentDisabledReason,
   isEnvironmentStatus,
 } from '../types/training'
 
@@ -341,6 +343,45 @@ export const ENVIRONMENT_STATUS_NOTES: Record<EnvironmentStatus, string> = {
 
 export const statusNote = (status: string): string =>
   isEnvironmentStatus(status) ? ENVIRONMENT_STATUS_NOTES[status] : '상태 확인 불가'
+
+/**
+ * 닫힌 이유별 문구 (FE-23).
+ *
+ * `not_deployed` 를 "준비 중"이라고 쓰지 않는다. 구현이 끝난 환경을 그렇게 부르면
+ * 사용자는 기다리면 열린다고 믿는데 이 배포에서는 영영 열리지 않는다.
+ */
+export const ENVIRONMENT_REASON_NOTES: Record<EnvironmentDisabledReason, string> = {
+  not_implemented: '준비 중',
+  not_deployed: '이 서버에서 열지 않음',
+}
+
+/**
+ * 서버가 말한 닫힌 이유. 계약에 있는 값일 때만 돌려준다.
+ *
+ * 모르는 값을 그대로 화면에 쓰면 서버 내부 식별자가 사용자에게 노출되고, 없는
+ * 이유를 단정하게 된다 — 그때는 null 을 주고 호출부가 status 문구로 되돌린다
+ * (`api.ts` 가 모르는 capability 를 다루는 방식과 같다).
+ */
+export const closedReason = (item: EnvironmentItem): EnvironmentDisabledReason | null =>
+  isEnvironmentDisabledReason(item.reason) ? item.reason : null
+
+/**
+ * 선택할 수 없는 환경의 이유 문구. 이유 필드가 우선이고, 없거나 모르는 값이면
+ * status 문구로 되돌린다 — 필드가 없는 배포에서 이번 변경 이전과 같게 동작한다.
+ */
+export const unavailableNote = (item: EnvironmentItem): string => {
+  const reason = closedReason(item)
+  return reason ? ENVIRONMENT_REASON_NOTES[reason] : statusNote(item.status)
+}
+
+/**
+ * "열릴 예정" 목록을 보여줄 환경인가.
+ *
+ * `not_deployed` 는 이미 구현된 환경이므로 로드맵을 보여주면 끝난 일을 예정으로
+ * 광고하게 된다. 이유를 모를 때는(필드 없음) 기존 동작을 유지한다.
+ */
+export const showsRoadmap = (item: EnvironmentItem): boolean =>
+  closedReason(item) !== 'not_deployed'
 
 /**
  * 선택 가능한 상태. degraded 는 경고를 띄우되 진입은 허용한다.

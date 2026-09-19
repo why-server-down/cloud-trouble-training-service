@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   ENVIRONMENT_CAPABILITIES,
+  ENVIRONMENT_DISABLED_REASONS,
   ENVIRONMENT_IDS,
   ENVIRONMENT_STATUSES,
   EnvironmentItem,
@@ -11,6 +12,7 @@ import {
 } from '../types/training'
 import {
   capabilityList,
+  closedReason,
   ENVIRONMENT_META,
   ENVIRONMENT_OBSERVABILITY,
   ENVIRONMENT_ORDER,
@@ -21,7 +23,9 @@ import {
   hasCapability,
   hasObservabilityDashboard,
   isSelectableStatus,
+  showsRoadmap,
   statusNote,
+  unavailableNote,
 } from './environments'
 
 describe('환경 표시 설정', () => {
@@ -111,6 +115,49 @@ describe('환경 상태 해석 (FE-03)', () => {
     // 아직 열리지 않은 환경은 무엇이 열릴지 보여줄 항목이 있어야 한다.
     expect(ENVIRONMENT_ROADMAP.docker.length).toBeGreaterThan(0)
     expect(ENVIRONMENT_ROADMAP.linux.length).toBeGreaterThan(0)
+  })
+})
+
+describe('닫힌 이유 판정 (FE-23)', () => {
+  const closed = (reason?: string): EnvironmentItem => ({
+    id: 'docker',
+    status: 'preparing',
+    capabilities: [],
+    ...(reason === undefined ? {} : { reason }),
+  })
+
+  it('계약에 있는 이유마다 사용자에게 보여줄 문구가 있다', () => {
+    for (const reason of ENVIRONMENT_DISABLED_REASONS) {
+      expect(unavailableNote(closed(reason)).length, `${reason} 문구 누락`).toBeGreaterThan(0)
+    }
+  })
+
+  it('구현이 끝난 환경을 준비 중이라고 부르지 않는다', () => {
+    // 이 구분이 이 작업의 이유다. 같은 문구를 쓰면 기다리면 열린다고 오해한다.
+    expect(unavailableNote(closed('not_deployed'))).not.toBe(
+      unavailableNote(closed('not_implemented')),
+    )
+    expect(unavailableNote(closed('not_implemented'))).toBe('준비 중')
+    expect(unavailableNote(closed('not_deployed'))).not.toContain('준비 중')
+  })
+
+  it('이유가 없으면 status 문구로 되돌린다 — 이 계약 이전 배포와 같게 동작한다', () => {
+    expect(closedReason(closed())).toBeNull()
+    expect(unavailableNote(closed())).toBe(statusNote('preparing'))
+    expect(showsRoadmap(closed())).toBe(true)
+  })
+
+  it('모르는 이유는 서버 식별자를 노출하지 않고 status 문구로 되돌린다', () => {
+    expect(closedReason(closed('on_fire'))).toBeNull()
+    expect(unavailableNote(closed('on_fire'))).toBe(statusNote('preparing'))
+    expect(unavailableNote(closed('on_fire'))).not.toContain('on_fire')
+  })
+
+  it('이미 구현된 환경에는 열릴 예정 목록을 붙이지 않는다', () => {
+    expect(showsRoadmap(closed('not_deployed'))).toBe(false)
+    expect(showsRoadmap(closed('not_implemented'))).toBe(true)
+    // 모르는 이유로 로드맵을 감추면 없는 사실을 단정하게 된다.
+    expect(showsRoadmap(closed('on_fire'))).toBe(true)
   })
 })
 

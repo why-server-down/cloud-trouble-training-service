@@ -60,6 +60,23 @@ export type EnvironmentCapability = (typeof ENVIRONMENT_CAPABILITIES)[number]
 export const isEnvironmentCapability = (value: unknown): value is EnvironmentCapability =>
   typeof value === 'string' && (ENVIRONMENT_CAPABILITIES as readonly string[]).includes(value)
 
+/**
+ * 환경이 닫혀 있는 이유. 백엔드 `NOT_IMPLEMENTED` / `NOT_DEPLOYED`
+ * (`backend/app/core/environments.py`) 와 같은 값이다.
+ *
+ * **두 이유는 사용자에게 서로 다른 사실이다.** `not_implemented` 는 아직 만들지
+ * 않았다는 뜻이라 기다리면 열리지만, `not_deployed` 는 구현이 끝났는데 이 배포에서
+ * 열지 않기로 한 것이라 기다려도 열리지 않는다 (예: Docker 는 privileged DinD 가
+ * 필요해서 다른 네트워크에 닿는 호스트에는 올리지 않는다). 둘을 같은 "준비 중"으로
+ * 묶으면 후자에서 거짓말이 된다 — 백엔드가 status 를 늘리는 대신 이 필드를 나눈 이유다.
+ */
+export const ENVIRONMENT_DISABLED_REASONS = ['not_implemented', 'not_deployed'] as const
+
+export type EnvironmentDisabledReason = (typeof ENVIRONMENT_DISABLED_REASONS)[number]
+
+export const isEnvironmentDisabledReason = (value: unknown): value is EnvironmentDisabledReason =>
+  typeof value === 'string' && (ENVIRONMENT_DISABLED_REASONS as readonly string[]).includes(value)
+
 export interface EnvironmentItem {
   id: EnvironmentId
   /**
@@ -76,6 +93,15 @@ export interface EnvironmentItem {
    * 그래서 계약에 있는 필드지만 optional 로 받는다.
    */
   capabilities?: string[]
+  /**
+   * 닫힌 이유. **열린 환경에는 아예 없는 필드다** — 백엔드가 `status != available`
+   * 일 때만 붙인다.
+   *
+   * status 와 같은 이유로 string 으로 받는다. 백엔드가 이유를 추가해도 화면이
+   * 깨지지 않아야 하고, 모르는 값은 `unavailableNote()` 가 status 문구로 되돌린다.
+   * 필드가 없는 응답(이 계약 이전 배포)에서는 이번 변경 이전과 똑같이 동작한다.
+   */
+  reason?: string
 }
 
 export interface EnvironmentListResponse {

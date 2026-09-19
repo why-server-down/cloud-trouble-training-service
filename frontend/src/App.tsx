@@ -582,7 +582,8 @@ function App() {
                 {!activeEnvironment ? (
                   <section className="env-notice env-notice-empty" id="env-panel" role="tabpanel">
                     <span className="env-notice-title">지금 선택할 수 있는 훈련 환경이 없습니다</span>
-                    <p>모든 환경이 준비 중이거나 사용 중지 상태입니다.</p>
+                    {/* 닫힌 이유는 환경마다 다르므로 여기서 단정하지 않는다 — 아래 목록이 이유별로 나눠 말한다 (FE-23). */}
+                    <p>서버가 이 배포에서 열어 둔 환경이 없습니다.</p>
                     <EnvironmentRoadmap items={environments} />
                   </section>
                 ) : activeEnvironmentCapabilities?.length === 0 ? (
