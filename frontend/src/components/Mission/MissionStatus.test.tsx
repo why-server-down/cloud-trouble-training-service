@@ -95,6 +95,13 @@ describe('미션 상태 폴링 (FE-16)', () => {
 
     expect(await screen.findByText('10:00')).toBeTruthy()
 
+    /*
+     * 1초 tick 타이머는 서버 값이 들어온 뒤 effect 에서 붙는데, act 는 콜백을 다
+     * 돌리고 나서야 effect 를 flush 한다. 그래서 곧바로 시간을 밀면 타이머가 아직
+     * 없어 아무 일도 일어나지 않는다. 빈 act 로 effect 를 먼저 붙인다.
+     */
+    await act(async () => {})
+
     // 서버를 다시 부르지 않은 2초 사이에도 표시가 내려간다.
     await advance(2000)
     expect(screen.getByText('9:58')).toBeTruthy()
