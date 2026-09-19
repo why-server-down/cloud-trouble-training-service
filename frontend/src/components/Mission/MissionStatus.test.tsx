@@ -84,6 +84,13 @@ describe('미션 상태 폴링 (FE-16)', () => {
   })
 
   it('서버 폴링이 느려도 남은 시간은 1초마다 줄어든다', async () => {
+    /*
+     * 이 테스트만 자동 진행(shouldAdvanceTime)을 끈다. 켜두면 fake timer 가 실제로
+     * 흐른 시간만큼 함께 진행해서, 실행이 느린 날에는 advance(2000) 이 2 tick 이
+     * 아니라 3 tick 이 된다(9:58 대신 9:57). 표시 값을 정확히 보는 테스트는 부하에
+     * 따라 답이 달라지면 안 된다.
+     */
+    vi.useFakeTimers({ shouldAdvanceTime: false })
     renderStatus()
 
     expect(await screen.findByText('10:00')).toBeTruthy()
