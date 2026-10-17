@@ -1089,6 +1089,85 @@ competency = round(0.5*score + 0.3*speed + 0.2*hint)
 
 ---
 
+## 후속 - 프론트 개편에서 드러난 계약 보완 (2026-10-17)
+
+프론트 개편(FE-23~28) 중 화면은 준비됐는데 백엔드 응답이 받쳐 주지 못한 항목이다.
+
+### BE-30 끝난 시도 조회 API
+
+배경: 미션이 시간 초과되면 `MissionService.get_active_attempt`가 attempt를
+`failed`·`final_score=MIN_SCORE`·`end_time`으로 정리한 뒤 `None`을 돌려주고,
+`GET /api/missions/status`는 404가 된다. 결과 화면은 서버가 확정한 점수를 볼 길이 없다.
+AI 시나리오도 `ScenarioCheckResponse`·abandon 응답에 시간 정보가 없다.
+
+수정 파일:
+
+- `backend/app/api/attempts.py` (신규), `backend/app/main.py`
+- `backend/tests/test_attempt_lookup.py`
+
+구현 지시:
+
+- `GET /api/attempts/{attempt_id}` → 기존 `MissionAttemptResponse`.
+- 조회는 `attempt_id + user_id`로 건다. 남의 시도와 없는 시도는 똑같이 404.
+- `static_mission`·`ai_scenario` 공통. 조회만 하고 만료 처리를 하지 않는다.
+
+인수 조건:
+
+- 내 시도는 status·final_score·start_time·end_time·hints_used를 돌려준다.
+- 다른 사용자의 시도와 없는 id는 404, 형식이 틀린 id는 422.
+
+### BE-31 AI 잠금 조건을 이 배포에서 열린 환경 기준으로
+
+배경: `ScenarioService.check_unlock_status`가 모든 환경의 시드 미션(10개)을 센다.
+`ENABLED_ENVIRONMENTS=kubernetes,linux`인 배포에서는 Docker 미션을 풀 수 없으므로
+AI 모드가 영영 열리지 않는다.
+
+수정 파일:
+
+- `backend/app/services/scenario_service.py`
+- tests
+
+구현 지시:
+
+- 전체·완료 미션 수 모두 `core/environments.ENABLED_ENVIRONMENTS`에 속한 환경만 센다.
+- 응답 형태 `{unlocked, completed_static, total_static}`와 `DEMO_UNLOCK_AI_SCENARIOS`는 유지한다.
+
+인수 조건:
+
+- docker가 닫힌 배포에서 total에 Docker 미션이 빠지고, 열린 환경 미션을 모두 깨면 열린다.
+
+### BE-32 환경 목록 응답에 reason 싣기
+
+배경: `core/environments.availability()`는 닫힌 환경에 `reason`
+(`not_deployed` / `not_implemented`)을 붙이지만 `schemas.EnvironmentItem`에 필드가 없어
+Pydantic이 버린다. 프론트(FE-23)는 준비돼 있는데 항상 "준비 중"으로 떨어진다.
+
+수정 파일:
+
+- `backend/app/schemas.py` (공유 계약 파일, AGENTS §2)
+- `backend/tests/test_environment_contract.py`
+
+인수 조건:
+
+- `ENABLED_ENVIRONMENTS=kubernetes,linux`에서 `GET /api/environments`의 docker 항목이
+  `status: preparing, reason: not_deployed`. 열린 환경은 `reason: null`.
+
+### BE-33 Grafana "데이터 없음"을 0으로 보이지 않게
+
+배경: `k8s-survival-overview.json`의 stat 패널이 `"noValue": "0"`이라, 쿼리가 비면
+장애 중에도 "Problem Pods 0"처럼 보인다. 거짓 안심이다.
+
+수정 파일:
+
+- `infra/monitoring/grafana/dashboards/k8s-survival-overview.json`
+
+인수 조건:
+
+- stat 패널의 `noValue` 덮어쓰기를 없애 Grafana 기본 "No data"가 보인다.
+- 쿼리·레이아웃·패널 id는 그대로이고 JSON이 파싱된다.
+
+---
+
 ## 7. 작업 의존성
 
 ```text
@@ -1149,6 +1228,8 @@ AI·프론트 계획서가 백엔드에 요구하지만 이 문서의 작업 ID�
 | AI §8 | chat rate limit | BE-23 |
 | AI §8 | AI metrics endpoint/registry | BE-23 |
 | AI §8 | TutorMessage retention job | **BE-29 신설** |
+| 프론트 FE-23 | 환경 목록의 닫힌 이유(`reason`) | **BE-32 신설** |
+| 프론트 결과 화면 | 시간 초과로 끝난 시도의 서버 점수 조회 | **BE-30 신설** |
 | 프론트 API-08 | 환경별 Grafana UID 조회 API | 조건부. 초기에는 프론트 config를 쓰고, 운영에서 UID가 자주 바뀌면 `GET /api/environments` 응답에 `observability` 객체를 추가한다 |
 | 프론트 5.1 | `EnvironmentStatus`의 `degraded` / `disabled` | 백엔드는 현재 `available` / `preparing`만 내보낸다. 프론트는 화면을 먼저 갖췄으므로, 이 값을 실제로 쓰려면 백엔드가 판정 기준(무엇을 degraded로 볼 것인가)을 먼저 정해야 한다. BE-23의 health/readiness 작업과 함께 결정한다 |
 
@@ -1175,6 +1256,8 @@ AI·프론트 계획서가 백엔드에 요구하지만 이 문서의 작업 ID�
 | 8 | `feature/backend-hardening` | BE-22~24, BE-29 |
 | 9 | `feature/aws-migration` | BE-25 |
 | 10 | `feature/backend-release` | BE-26~28 |
+| 11 | `feature/be-api-contract-followups` | BE-30, BE-32 |
+| 12 | `fix/be-unlock-and-grafana` | BE-31, BE-33 |
 
 ---
 

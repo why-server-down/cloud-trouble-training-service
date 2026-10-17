@@ -6,7 +6,7 @@ FastAPI 기반 백엔드. 웹 터미널, AI 튜터, 게임 로직, 채점 시스
 ## 캡스톤2 작업 기준
 
 구현은 [docs/backend-capstone2-semester-plan.md](../docs/backend-capstone2-semester-plan.md)의
-작업 ID(`BE-00`~`BE-28`) 단위로 진행한다. **한 번에 하나의 `BE-xx`만** 구현하고,
+작업 ID(`BE-00`~`BE-33`) 단위로 진행한다. **한 번에 하나의 `BE-xx`만** 구현하고,
 선행 조건과 API 계약을 먼저 확인한다. 로드맵 표와 팀 협업·Git 규칙은 루트 [AGENTS.md](../AGENTS.md) 참고.
 
 ### 현재 P0 결손
@@ -58,6 +58,7 @@ app/
 │   ├── scenarios.py     # AI 시나리오 API (/api/scenarios/*)
 │   ├── dashboard.py     # 대시보드/리더보드/업적 API
 │   ├── environments.py  # GET /api/environments (환경 가용 상태)
+│   ├── attempts.py      # GET /api/attempts/{id} (끝난 시도 포함 내 시도 조회)
 │   └── chat.py          # AI 튜터 채팅 API (정적 미션 + AI 시나리오 모두 지원)
 ├── core/
 │   ├── config.py        # Settings (환경변수, AI 백엔드 선택 - mock/openai/gemini)
@@ -110,8 +111,9 @@ app/
 
 ### 환경
 - `GET /api/environments` - 훈련 환경 가용 상태 목록 🔒
-  - Response: `{"items":[{"id":"kubernetes","status":"available","capabilities":[...]}, ...]}`
-  - `available`은 실제로 세션 생성·주입·검증이 가능한 환경, `preparing`은 계약상 존재하나 미구현
+  - Response: `{"items":[{"id":"kubernetes","status":"available","capabilities":[...],"reason":null}, {"id":"docker","status":"preparing","capabilities":[],"reason":"not_deployed"}, ...]}`
+  - `available`은 실제로 세션 생성·주입·검증이 가능한 환경, `preparing`은 이 배포에서 쓸 수 없는 환경
+  - `reason`(BE-32)은 닫힌 환경에만 붙는다: `not_deployed`(구현됐지만 이 배포에서 닫음, `ENABLED_ENVIRONMENTS`) / `not_implemented`. 열린 환경은 `null`
   - source of truth는 `core/environments.py`. label·설명 문구는 프론트 책임
 
 ### 터미널
@@ -129,6 +131,13 @@ app/
   | 4003 | 세션 소유자 불일치 또는 비활성 |
   | 4004 | 세션·샌드박스 없음 (세션 id 형식 오류 포함) |
   | 4010 | 환경 미가용 |
+
+### 시도 조회
+- `GET /api/attempts/{attempt_id}` - 내 시도 하나 (끝난 시도 포함, 고정 미션·AI 시나리오 공통) 🔒 (BE-30)
+  - Response: `MissionAttemptResponse` — `{"id","user_id","mission_id","attempt_type","scenario_id","environment","status","start_time","end_time","final_score","hints_used"}`
+  - 시간 초과로 정리된 시도는 `/api/missions/status`가 404를 주므로, 결과 화면은 시작 때 받은 id로 이 API를 부른다
+  - `attempt_id + user_id`로 조회한다. 남의 시도·없는 id는 404, UUID 형식이 아니면 422
+  - 조회만 한다. 만료 처리는 status/check 경로(및 기동 시 reconciliation)가 맡는다
 
 ### 고정 미션 (4개 레벨 튜토리얼)
 > AI 시나리오 attempt가 진행 중일 때 이 API들은 404를 반환한다 (혼용 방지)
