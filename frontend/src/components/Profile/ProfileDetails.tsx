@@ -2,12 +2,16 @@ import React from 'react'
 import { UserProfileResponse } from '../../services/api'
 import { average } from '../../utils/dashboard'
 import DashboardOverview from './DashboardOverview'
+import EnvironmentRoadmap from '../Environment/EnvironmentRoadmap'
+import { EnvironmentItem } from '../../types/training'
 import './Profile.css'
 
 interface ProfileDetailsProps {
   token: string
   profile: UserProfileResponse
   loading: boolean
+  /** 훈련 환경 로드맵(준비 중·이 서버에서 닫힘·후속 연구). 작업 화면이 아니라 여기서 보여 준다 (FE-28). */
+  environments?: EnvironmentItem[] | null
   onClose: () => void
   onRefresh: () => void
 }
@@ -19,7 +23,7 @@ const formatDate = (date: string) =>
     day: 'numeric',
   }).format(new Date(date))
 
-const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading, onClose, onRefresh }) => {
+const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading, environments, onClose, onRefresh }) => {
   // 완료 0건의 평균은 0점이 아니라 '없음'이다 (설계 문서 5.5).
   const averageScore = average(profile.total_score, profile.missions_completed)
 
@@ -96,6 +100,13 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading
 
         <h3 className="profile-section-title">학습 현황</h3>
         <DashboardOverview token={token} />
+
+        {environments && environments.length > 0 && (
+          <>
+            <h3 className="profile-section-title">훈련 환경</h3>
+            <EnvironmentRoadmap items={environments} />
+          </>
+        )}
       </section>
     </div>
   )

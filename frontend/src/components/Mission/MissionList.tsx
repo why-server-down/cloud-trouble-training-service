@@ -115,6 +115,11 @@ const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 
 const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
 const DEMO_AI_UNLOCK_STORAGE_KEY = 'demoAiScenarioUnlocked'
+/**
+ * 시연 모드 (FE-28). 심사·시연 때만 주소에 `?demo=1` 을 붙여 AI 문제 잠금 해제 버튼을 연다.
+ * 학생 화면에 "시연용" 버튼이 보이면 훈련 규칙을 우회하라는 신호가 된다.
+ */
+const isDemoMode = () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo')
 const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope || 'anonymous'}`
 
 const MissionList: React.FC<MissionListProps> = ({
@@ -948,7 +953,7 @@ const MissionList: React.FC<MissionListProps> = ({
         <section className="ai-scenario-section" aria-labelledby="ai-scenario-title">
           <div className="ai-section-header">
             <h3 id="ai-scenario-title">AI 문제 더 풀기</h3>
-            {!isAiUnlocked && (
+            {!isAiUnlocked && isDemoMode() && (
               <button
                 type="button"
                 className="ui-button plain small demo-unlock-btn"

@@ -144,9 +144,10 @@ describe('환경 가용성 화면 (FE-03)', () => {
      */
     await waitFor(() => expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true'))
     expect(screen.getByRole('tabpanel')).toBeTruthy()
-    // Application 은 탭이 아니라 후속 연구 영역으로 내려갔다.
+    // Application 은 탭이 아니라 후속 연구 영역으로 내려갔다. 로드맵은 프로필에서 본다 (FE-28).
     expect(screen.queryByRole('tab', { name: /Application/ })).toBeNull()
-    expect(screen.getByText(/후속 연구/)).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: /tester/ }))
+    expect(await screen.findByText(/후속 연구/)).toBeTruthy()
   })
 
   it('degraded 환경을 선택하면 경고를 띄우되 진입은 허용한다', async () => {
