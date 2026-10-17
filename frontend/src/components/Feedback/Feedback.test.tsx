@@ -2,11 +2,12 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import ConfirmModal from './ConfirmModal'
-import Toast from './Toast'
+import Toast, { TOAST_AUTO_DISMISS_MS } from './Toast'
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.useRealTimers()
 })
 
 describe('ConfirmModal 접근성 (FE-17)', () => {
@@ -39,6 +40,14 @@ describe('ConfirmModal 접근성 (FE-17)', () => {
   it('열리면 확인 버튼에 focus 가 간다', () => {
     renderModal()
     expect(document.activeElement).toBe(screen.getByRole('button', { name: '포기' }))
+  })
+
+  it('위험한 확정이면 기본 focus 는 취소에 간다 (설계 문서 8)', () => {
+    const { onConfirm } = renderModal({ danger: true })
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '취소' }))
+    // Enter 한 번으로 되돌릴 수 없는 동작이 실행되지 않는다.
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 
   it('Escape 로 닫힌다', () => {
@@ -114,6 +123,44 @@ describe('Toast live region (FE-17)', () => {
     rerender(<Toast kind="info" text="안내" onClose={vi.fn()} />)
     expect(screen.getByRole('status').getAttribute('aria-live')).toBe('polite')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('성공·안내는 4초 뒤 자동으로 닫힌다', () => {
+    vi.useFakeTimers()
+    const onClose = vi.fn()
+    render(<Toast kind="success" text="완료" onClose={onClose} />)
+
+    vi.advanceTimersByTime(TOAST_AUTO_DISMISS_MS - 1)
+    expect(onClose).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('부모가 다시 렌더해도 자동 닫힘 타이머가 처음부터 다시 시작되지 않는다', () => {
+    vi.useFakeTimers()
+    const onClose = vi.fn()
+    const { rerender } = render(<Toast kind="info" text="안내" onClose={() => onClose()} />)
+
+    vi.advanceTimersByTime(TOAST_AUTO_DISMISS_MS - 1000)
+    // 폴링 등으로 부모가 새 onClose 함수를 넘기며 다시 렌더한다.
+    rerender(<Toast kind="info" text="안내" onClose={() => onClose()} />)
+    vi.advanceTimersByTime(1000)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('오류는 자동으로 닫히지 않는다 (설계 문서 5.5)', () => {
+    vi.useFakeTimers()
+    const onClose = vi.fn()
+    render(<Toast kind="error" text="실패" onClose={onClose} />)
+
+    vi.advanceTimersByTime(60_000)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toBeTruthy()
+  })
+
+  it('종류를 색이 아니라 글자로도 알린다', () => {
+    render(<Toast kind="success" text="미션을 시작했습니다." onClose={vi.fn()} />)
+    expect(screen.getByRole('status').textContent).toContain('완료')
   })
 
   it('닫기 버튼에 접근 가능한 이름이 있다', () => {

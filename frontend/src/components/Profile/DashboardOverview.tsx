@@ -139,12 +139,22 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     }
   }, [filter, refreshKey, token])
 
+  const loadRef = useRef(load)
+  loadRef.current = load
+
+  /*
+   * usePolling 은 진행 중 요청을 인스턴스끼리 공유한다. 그 요청이 이미 취소된 controller
+   * (StrictMode 이중 마운트, 요청 도중 필터 전환)의 것이면 결과가 버려지고 다음 주기(15초)까지
+   * 로딩 화면에 머문다. 끝났을 때 signal 이 취소돼 있으면 현재 controller 로 다시 읽는다.
+   */
   const poll = useCallback(async () => {
-    const signal = controllerRef.current?.signal
-    if (!signal || signal.aborted) return 'continue' as const
-    await load(signal)
-    return 'continue' as const
-  }, [load])
+    for (;;) {
+      const signal = controllerRef.current?.signal
+      if (!signal || signal.aborted) return 'continue' as const
+      await loadRef.current(signal)
+      if (!signal.aborted) return 'continue' as const
+    }
+  }, [])
 
   usePolling(poll, {
     intervalMs: DASHBOARD_POLL_INTERVAL_MS,
@@ -193,8 +203,10 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
    */
   const averageMttr = stats ? average(stats.total_time_spent, completed) : null
 
+  /* 0 과 구분되도록 값 자리에 — 를 두고 이유를 글자로 쓴다 (설계 문서 5.5). */
   const noData = (label: string) => (
     <span className="metric-empty" aria-label={`${label} 데이터 없음`}>
+      <span aria-hidden="true">—</span>
       데이터 없음
     </span>
   )
@@ -208,7 +220,19 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       ).join(', ')}`
 
   if (isLoading && !stats && !statsFailed) {
-    return <div className="dashboard-empty">학습 대시보드를 불러오는 중...</div>
+    return (
+      <div className="dashboard-skeleton" role="status" aria-live="polite">
+        <span className="sr-only">학습 대시보드를 불러오는 중...</span>
+        <div className="skeleton-block skeleton-filter" aria-hidden="true" />
+        <div className="skeleton-block skeleton-tier" aria-hidden="true" />
+        <div className="skeleton-metrics" aria-hidden="true">
+          {[0, 1, 2, 3].map((index) => (
+            <div className="skeleton-block" key={index} />
+          ))}
+        </div>
+        <div className="skeleton-block skeleton-card" aria-hidden="true" />
+      </div>
+    )
   }
 
   return (
@@ -245,12 +269,11 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         ) : (
           <>
             <div>
-              <span className="dashboard-label">
-                CURRENT TIER / {filterLabel(filter).toUpperCase()}
-              </span>
+              <span className="dashboard-label">현재 티어 · {filterLabel(filter)}</span>
+              {/* 티어 색은 서버가 정한 값이다. */}
               <h3 style={{ color: stats?.current_tier.color }}>{stats?.current_tier.name}</h3>
               <p>
-                {stats?.total_score ?? 0}점 / 완료 {completed}건
+                {stats?.total_score ?? 0}점 · 완료 {completed}건
               </p>
             </div>
             <div className="tier-progress-wrap">
@@ -259,7 +282,14 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   ? `다음 티어: ${stats.current_tier.next_tier}`
                   : '최고 티어에 도달했습니다'}
               </span>
-              <div className="tier-progress">
+              <div
+                className="tier-progress"
+                role="progressbar"
+                aria-label="다음 티어까지 진행률"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={stats?.current_tier.progress ?? 0}
+              >
                 <i style={{ width: `${stats?.current_tier.progress ?? 0}%` }} />
               </div>
             </div>
@@ -282,9 +312,9 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           )}
         </article>
         <article>
-          <span>평균 MTTR</span>
+          <span>평균 복구 시간(MTTR)</span>
           {statsFailed || averageMttr === null ? (
-            noData('평균 MTTR')
+            noData('평균 복구 시간(MTTR)')
           ) : (
             <strong>{formatDuration(averageMttr)}</strong>
           )}
@@ -306,9 +336,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       <div className="dashboard-grid">
         <section className="dashboard-card skill-card">
           <span className="dashboard-label">
-            {isAllView
-              ? 'ENVIRONMENT COMPETENCY'
-              : `SKILL RADAR / ${filterLabel(filter).toUpperCase()}`}
+            {isAllView ? '환경 역량' : `스킬 역량 · ${filterLabel(filter)}`}
           </span>
           {isAllView && !hasEnvironmentBreakdown ? (
             <p className="dashboard-empty">
@@ -343,9 +371,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </section>
 
         <section className="dashboard-card">
-          <span className="dashboard-label">
-            LEARNING CURVE / {filterLabel(filter).toUpperCase()}
-          </span>
+          <span className="dashboard-label">학습 곡선 · {filterLabel(filter)}</span>
           {curveFailed ? (
             <p className="dashboard-empty" role="alert">
               학습 곡선을 불러오지 못했습니다.
@@ -387,13 +413,17 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </section>
 
         <section className="dashboard-card">
-          <span className="dashboard-label">LEADERBOARD / TOP 10</span>
+          <span className="dashboard-label">리더보드 · 상위 10명</span>
           {leaderboard.length ? (
             <ol className="leaderboard-list">
               {leaderboard.map((entry) => (
                 <li className={entry.is_current_user ? 'current-user' : ''} key={entry.user_id}>
-                  <b>#{entry.rank}</b>
-                  <span>{entry.username}</span>
+                  <b>{entry.rank}</b>
+                  <span>
+                    {entry.username}
+                    {/* 색만으로 '나'를 말하지 않는다. */}
+                    {entry.is_current_user && <em className="ui-chip">나</em>}
+                  </span>
                   <strong>{entry.total_score}</strong>
                 </li>
               ))}
@@ -404,15 +434,27 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
         </section>
 
         <section className="dashboard-card">
-          <span className="dashboard-label">
-            ACHIEVEMENTS / {achievements?.unlocked ?? 0} OF {achievements?.total ?? 0}
-          </span>
+          <div className="dashboard-card-header">
+            <span className="dashboard-label">업적</span>
+            <span className="ui-chip">
+              {achievements?.unlocked ?? 0} / {achievements?.total ?? 0} 달성
+            </span>
+          </div>
           {achievements?.items.length ? (
             <div className="achievement-list">
               {achievements.items.map((achievement) => (
                 <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
-                  <strong>{achievement.name}</strong>
-                  <span>{achievement.description}</span>
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="8" cy="8" r="6.25" />
+                    {achievement.unlocked && <path d="m5.4 8.2 1.8 1.8 3.4-3.6" />}
+                  </svg>
+                  <div>
+                    <strong>
+                      {achievement.name}
+                      <span className="sr-only">{achievement.unlocked ? ' (달성)' : ' (미달성)'}</span>
+                    </strong>
+                    <span>{achievement.description}</span>
+                  </div>
                 </article>
               ))}
             </div>

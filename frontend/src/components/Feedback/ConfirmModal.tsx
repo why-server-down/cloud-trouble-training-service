@@ -23,18 +23,26 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
 }) => {
   const dialogRef = useRef<HTMLElement | null>(null)
   const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
   /** 모달을 연 요소. 닫힌 뒤 focus 를 돌려주기 위해 기억한다 (FE-17). */
   const openerRef = useRef<Element | null>(null)
 
   useEffect(() => {
     openerRef.current = document.activeElement
-    // 확인 버튼에 focus 를 준다. 키보드만 쓰는 사용자가 바로 결정할 수 있게 한다.
-    confirmRef.current?.focus()
+    /*
+     * 기본 focus. 일반 확인은 확인 버튼에 두어 키보드로 바로 결정하게 하고,
+     * 위험한 확정(포기·명령 실행)은 취소에 둔다 — Enter 한 번으로 되돌릴 수 없는
+     * 동작이 실행되면 안 된다 (설계 문서 8).
+     */
+    const initialFocus = danger ? cancelRef.current : confirmRef.current
+    initialFocus?.focus()
 
     return () => {
       const opener = openerRef.current
       if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
     }
+    // 처음 열릴 때 한 번만 정한다. 열린 뒤 danger 가 바뀌어도 focus 를 옮기지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /*
@@ -83,7 +91,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
     <div className="modal-backdrop" role="presentation" onMouseDown={onCancel}>
       <section
         ref={dialogRef}
-        className="confirm-modal"
+        className="confirm-modal material-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-modal-title"
@@ -93,12 +101,12 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
         <h3 id="confirm-modal-title">{title}</h3>
         <p id="confirm-modal-message">{message}</p>
         <div className="confirm-modal-actions">
-          <button className="modal-button secondary" type="button" onClick={onCancel}>
+          <button ref={cancelRef} className="modal-button secondary ui-button plain" type="button" onClick={onCancel}>
             취소
           </button>
           <button
             ref={confirmRef}
-            className={`modal-button ${danger ? 'danger' : 'primary'}`}
+            className={`modal-button ui-button ${danger ? 'danger filled' : 'primary'}`}
             type="button"
             onClick={onConfirm}
           >
