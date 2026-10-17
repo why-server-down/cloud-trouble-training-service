@@ -35,12 +35,12 @@ export const ENVIRONMENT_META: Record<EnvironmentId, EnvironmentDisplayMeta> = {
   docker: {
     label: 'Docker',
     subtitle: '컨테이너 운영',
-    investigationHint: '컨테이너 상태와 로그, 네트워크·볼륨 설정을 차례로 확인합니다.',
+    investigationHint: '컨테이너 상태와 로그, 네트워크·자원 설정을 차례로 확인합니다.',
   },
   linux: {
     label: 'Linux',
     subtitle: '시스템 관리',
-    investigationHint: '프로세스, 디스크 사용량, 부하 지표를 차례로 확인합니다.',
+    investigationHint: '프로세스, 디스크 사용량, CPU 사용률을 차례로 확인합니다.',
   },
 }
 
@@ -92,7 +92,7 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'kubectl get events --sort-by=.metadata.creationTimestamp',
     ],
     investigationClues: {
-      'kubectl get pods': 'STATUS가 Running이 아니거나 RESTARTS가 늘고 있는 Pod를 찾습니다.',
+      'kubectl get pods': 'READY가 1/1처럼 다 차지 않았거나, STATUS가 Running이 아니거나, RESTARTS가 늘고 있는 Pod를 찾습니다.',
       'kubectl get deployments': 'READY가 원하는 개수(예: 1/1)를 채우는지 봅니다.',
       'kubectl get services': '연결할 Service가 있는지 보고, 이어서 endpoints로 실제 연결 대상을 확인합니다.',
       'kubectl get events --sort-by=.metadata.creationTimestamp': '맨 아래 Warning 이벤트의 REASON과 MESSAGE를 읽습니다.',
@@ -101,11 +101,14 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'kubectl get pods',
       'kubectl get services',
       'kubectl get deployments',
+      'kubectl get endpoints',
       'kubectl describe pod ',
       'kubectl describe service ',
       'kubectl logs ',
-      'kubectl delete pod ',
-      'kubectl apply -f ',
+      // 복구 계열. 고정 미션의 정답 경로다 — Pod 삭제는 같은 설정으로 다시 만들어질 뿐이라 넣지 않는다.
+      'kubectl set image deployment/nginx nginx=',
+      'kubectl set resources deployment/nginx --limits=memory=',
+      'kubectl rollout undo deployment/nginx',
       'kubectl version',
       'kubectl help',
       'kubectl get all',
@@ -124,7 +127,7 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
     ],
     investigationClues: {
       'docker ps -a': 'STATUS가 Exited로 멈춘 컨테이너가 있는지 봅니다.',
-      'docker logs ': '뒤에 컨테이너 이름을 붙여 실행하고 마지막 오류 줄을 읽습니다.',
+      'docker logs ': '뒤에 컨테이너 이름을 붙여 실행하고, 오류가 없으면 앱이 아니라 컨테이너 설정에서 원인을 찾습니다.',
       'docker inspect ': '뒤에 컨테이너 이름을 붙여 실행하고 State, NetworkSettings, HostConfig의 자원 제한을 봅니다.',
       'docker network inspect ': '뒤에 네트워크 이름을 붙여 실행하고 Containers 목록에 훈련 컨테이너가 있는지 봅니다.',
     },
@@ -149,7 +152,7 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'docker restart ',
       'docker stop ',
       'docker unpause ',
-      'docker update --memory ',
+      'docker update --cpus ',
       'docker version',
       'docker info',
       'clear',
@@ -166,13 +169,17 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find',
       'kill', 'pkill', 'rm', 'truncate',
     ],
-    // 실제 장애 유형(disk_pressure / cpu_saturation / process_flood)을 조사하는 순서대로.
-    investigationStarters: ['ps aux', 'df -h', 'top -b -n 1', 'cat /proc/loadavg'],
+    /*
+     * 실제 장애 유형(process_flood / disk_pressure / cpu_saturation)을 조사하는 순서대로.
+     * busybox `ps aux` 에는 %CPU 열이 없어 CPU 는 `top` 으로 본다. `/proc/loadavg` 는
+     * 노드 전체 값이라 이 샌드박스의 장애를 가리키지 못해 넣지 않는다.
+     */
+    investigationStarters: ['ps aux', 'df -h', 'ls -al /tmp/afterfail', 'top -b -n 1'],
     investigationClues: {
-      'ps aux': '같은 이름으로 많이 반복되거나 %CPU가 높은 프로세스를 찾습니다.',
+      'ps aux': '같은 이름으로 반복되는 프로세스가 있는지 찾습니다.',
       'df -h': 'Use%가 100%에 가까운 마운트가 있는지 봅니다.',
-      'top -b -n 1': 'CPU를 오래 쓰고 있는 프로세스를 찾습니다.',
-      'cat /proc/loadavg': '앞의 세 숫자(1·5·15분 부하 평균)가 계속 높은지 봅니다.',
+      'ls -al /tmp/afterfail': '크기가 유난히 큰 파일이 있는지 찾습니다.',
+      'top -b -n 1': '컨테이너 CPU 상한 때문에 %CPU 숫자는 작게 보이므로, 크기보다 맨 위에 있는 프로세스가 무엇인지 봅니다.',
     },
     /*
      * 계획서 FE-09 의 최소 목록에는 systemctl / journalctl / dmesg 가 있지만
