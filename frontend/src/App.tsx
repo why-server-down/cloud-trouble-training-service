@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
@@ -8,6 +8,9 @@ import Sheet from './components/Feedback/Sheet'
 import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
 import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
+import InvestigationGuide from './components/Mission/InvestigationGuide'
+import { ChartIcon, ChatIcon, GuideIcon, ListIcon, TerminalIcon } from './components/Mission/Icons'
+import { insertTerminalCommand } from './utils/terminal'
 import {
   capabilityList,
   getEnvironmentMeta,
@@ -43,7 +46,17 @@ import {
 import { useEnvironmentSessions } from './hooks/useEnvironmentSessions'
 import './App.css'
 
-type WorkspaceTab = 'missions' | 'terminal'
+/** 작업 화면의 네 영역. 모바일 하단 탭 바가 한 번에 하나를 보여준다 (FE-26). */
+type WorkspaceTab = 'missions' | 'terminal' | 'tutor' | 'observe'
+/** 데스크톱 미션 중 보조 패널의 세그먼트. */
+type AuxTab = 'briefing' | 'tutor' | 'observe'
+
+const AREA_IDS: Record<WorkspaceTab, string> = {
+  missions: 'area-mission',
+  terminal: 'area-terminal',
+  tutor: 'area-tutor',
+  observe: 'area-observe',
+}
 
 /** 사용자별 마지막 선택 환경. 계획서에 정해진 키를 그대로 쓴다. */
 const ENVIRONMENT_STORAGE_KEY = 'afterfail:environment:v1'
@@ -131,6 +144,13 @@ function App() {
   const [token, setToken] = useState<string | null>(null)
   const [profile, setProfile] = useState<UserProfileResponse | null>(null)
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('missions')
+  const [auxTab, setAuxTab] = useState<AuxTab>('briefing')
+  /*
+   * MissionList 가 진행 상황과 튜터를 portal 할 자리 (FE-26). 상태 소유자(MissionList)는
+   * 그대로 두고 그리는 위치만 터미널 위·보조 패널로 옮긴다.
+   */
+  const [incidentSlot, setIncidentSlot] = useState<HTMLDivElement | null>(null)
+  const [tutorSlot, setTutorSlot] = useState<HTMLDivElement | null>(null)
   const [environments, setEnvironments] = useState<EnvironmentItem[] | null>(null)
   const [environmentsError, setEnvironmentsError] = useState<string | null>(null)
   const [activeEnvironment, setActiveEnvironment] = useState<EnvironmentId | null>(null)
@@ -196,6 +216,33 @@ function App() {
    */
   const advertisesObservability = hasCapability(sessionEnvironmentCapabilities, 'observability')
   const canUseTerminal = hasCapability(sessionEnvironmentCapabilities, 'terminal')
+  const canUseTutor = hasActiveAttempt && hasCapability(sessionEnvironmentCapabilities, 'tutor')
+
+  /*
+   * 보이는 탭. 미션이 끝나 튜터가 없어졌는데 튜터 탭에 머물러 있으면 빈 화면이 된다.
+   * 그때는 미션 목록으로 돌린다.
+   */
+  const visibleTab: WorkspaceTab = activeTab === 'tutor' && !canUseTutor ? 'missions' : activeTab
+
+  const auxTabs: Array<{ id: AuxTab; label: string; area: WorkspaceTab }> = [
+    { id: 'briefing', label: '브리핑', area: 'missions' },
+    ...(canUseTutor ? [{ id: 'tutor' as const, label: '튜터', area: 'tutor' as const }] : []),
+    { id: 'observe', label: '관측', area: 'observe' },
+  ]
+
+  /* 미션 전에는 목록·가이드·기록 셋, 미션 중에는 미션·터미널·튜터·관측. */
+  const mobileTabs: Array<{ id: WorkspaceTab; label: string; icon: ReactNode }> = hasActiveAttempt
+    ? [
+        { id: 'missions', label: '미션', icon: <ListIcon /> },
+        { id: 'terminal', label: '터미널', icon: <TerminalIcon /> },
+        ...(canUseTutor ? [{ id: 'tutor' as const, label: '튜터', icon: <ChatIcon /> }] : []),
+        { id: 'observe', label: '관측', icon: <ChartIcon /> },
+      ]
+    : [
+        { id: 'missions', label: '미션', icon: <ListIcon /> },
+        { id: 'terminal', label: '가이드', icon: <GuideIcon /> },
+        { id: 'observe', label: '기록', icon: <ChartIcon /> },
+      ]
 
   /**
    * 관측 URL 은 활성 attempt 의 환경으로 만든다 (FE-08).
@@ -222,10 +269,6 @@ function App() {
   const fieldGuideTerminal = activeEnvironment ? getEnvironmentTerminal(activeEnvironment) : null
   /** 실행 파일이 고정된 환경만 이름을 문장에 넣는다. Linux 는 단일 바이너리가 없다. */
   const fieldGuideLabel = fieldGuideTerminal?.binary ?? null
-  const fieldGuideStarters = fieldGuideTerminal?.investigationStarters ?? []
-  const fieldGuideInvestigationHint = activeEnvironment
-    ? getEnvironmentMeta(activeEnvironment).investigationHint
-    : '현재 상태와 최근 변화를 차례로 확인합니다.'
   const isGrafanaLoading =
     hasActiveAttempt && hasObservability && (!isGrafanaFrameReady || !isGrafanaDataReady)
   const isActiveEnvironmentDegraded = activeEnvironmentItem?.status === 'degraded'
@@ -506,11 +549,43 @@ function App() {
     setActiveTour('intro')
   }
 
+  /* 투어가 가리키는 요소가 숨은 영역에 있으면 그 영역을 먼저 연다 (모바일 탭, 데스크톱 보조 패널). */
   const handleTourStepChange = (step: TourStep) => {
-    if (activeTour !== 'mission') return
-    if (step.target === '[data-tour="mission-progress"]') setActiveTab('missions')
-    if (step.target === '[data-tour="terminal"]' || step.target === '[data-tour="grafana"]') setActiveTab('terminal')
+    const target = step.target
+    if (target === '[data-tour="mission-list"]') setActiveTab('missions')
+    if (target === '[data-tour="terminal"]' || target === '[data-tour="field-guide"]') setActiveTab('terminal')
+    if (target === '[data-tour="grafana"]' || target === '[data-tour="learning-dashboard"]') {
+      setActiveTab('observe')
+      setAuxTab('observe')
+    }
   }
+
+  /**
+   * 브리핑의 조사 명령을 터미널 입력줄에 넣는다 (FE-26). 모바일에서는 터미널 탭으로
+   * 옮긴 뒤 넣어야 focus 가 들어간다 — 숨은 요소는 focus 를 받지 못한다.
+   */
+  const insertCommand = useCallback((command: string) => {
+    setActiveTab('terminal')
+    window.requestAnimationFrame(() => insertTerminalCommand(command))
+  }, [])
+
+  /*
+   * 새 시도가 시작되면 터미널과 브리핑을 앞에 둔다. 시도가 끝나면 다음 미션을 고를 수
+   * 있게 목록으로 돌아간다. 같은 시도의 상태 갱신에는 반응하지 않는다.
+   */
+  const activeAttemptId = activeAttempt?.attemptId ?? null
+  const previousAttemptIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = previousAttemptIdRef.current
+    previousAttemptIdRef.current = activeAttemptId
+    if (activeAttemptId === previous) return
+    if (activeAttemptId) {
+      setActiveTab('terminal')
+      setAuxTab('briefing')
+    } else if (previous) {
+      setActiveTab('missions')
+    }
+  }, [activeAttemptId])
 
   const handleActiveAttemptChange = useCallback((summary: ActiveAttemptSummary | null) => {
     setActiveAttempt(summary)
@@ -587,7 +662,7 @@ function App() {
                 />
 
                 {activeAttempt && (
-                  <p className="env-notice env-notice-lock" role="status">
+                  <p className="env-notice env-notice-lock sr-only" role="status">
                     진행 중인 {getEnvironmentMeta(activeAttempt.environment).label} 훈련이 있어 다른 환경으로 전환할 수 없습니다.
                     미션을 완료하거나 포기하면 해제됩니다.
                   </p>
@@ -622,181 +697,242 @@ function App() {
                   </section>
                 ) : (
                   <>
-                <nav className="workspace-tabs" aria-label="작업 화면">
-                  <button className={activeTab === 'missions' ? 'active' : ''} type="button" onClick={() => setActiveTab('missions')}>미션</button>
-                  <button className={activeTab === 'terminal' ? 'active' : ''} type="button" onClick={() => setActiveTab('terminal')}>터미널</button>
-                </nav>
                 <div
-                  className="app-layout"
+                  className="workspace-grid"
+                  data-mode={hasActiveAttempt ? 'active' : 'idle'}
+                  data-tab={visibleTab}
+                  data-aux={auxTab}
                   id="env-panel"
                   role="tabpanel"
                   aria-labelledby={`env-tab-${activeEnvironment}`}
                 >
-                  <div className={`mission-section ${activeTab !== 'missions' ? 'mobile-hidden' : ''}`} data-tour="mission-list"><MissionList token={token} storageScope={accountStorageScope} environment={activeEnvironment} capabilities={activeEnvironmentCapabilities} onActiveAttemptChange={handleActiveAttemptChange} onAttemptCompleted={handleAttemptCompleted} /></div>
-                  <div className={`terminal-section ${activeTab !== 'terminal' ? 'mobile-hidden' : ''}`}>
-                    <div className="terminal-workspace">
-                      {activeAttempt && !canUseTerminal ? (
-                        /*
-                         * 서버가 이 환경에 terminal 을 광고하지 않는다 (FE-22).
-                         * 세션 생성을 시도하면 백엔드 assert_implemented 가 거절하므로,
-                         * 사용자에게 실패할 로딩을 보여주지 않고 이유를 먼저 알린다.
-                         */
-                        <section className="env-notice" role="status">
-                          <span className="env-notice-title">
-                            {getEnvironmentMeta(activeAttempt.environment).label} 환경은 터미널을
-                            제공하지 않습니다
-                          </span>
-                          <p>
-                            미션 진행과 검증은 그대로 동작합니다. 터미널이 필요한 미션이라면
-                            다른 환경을 선택하세요.
-                          </p>
-                        </section>
-                      ) : activeAttempt ? (
-                        <div className="terminal-tour-target" data-tour="terminal">
-                          {activeSession ? (
-                            /*
-                             * key 로 세션마다 새 Terminal 을 만든다. 환경을 바꾸면
-                             * 이전 WebSocket·입력 queue 를 물려받은 인스턴스가 남지 않는다.
-                             */
-                            <Terminal
-                              key={activeSession.id}
-                              environment={activeAttempt.environment}
-                              sessionId={activeSession.id}
-                              token={token}
-                              namespace={activeSession.namespace}
-                            />
-                          ) : activeSessionState.status === 'error' ? (
-                            <section className="env-notice env-notice-error" role="alert">
-                              <span className="env-notice-title">터미널 세션을 준비하지 못했습니다</span>
-                              <p>{activeSessionState.message}</p>
-                              <button
-                                className="ui-button small env-notice-action"
-                                type="button"
-                                onClick={() => retry(activeAttempt.environment)}
-                              >
-                                다시 시도
-                              </button>
-                            </section>
-                          ) : (
-                            <section className="env-notice" role="status" aria-live="polite">
-                              <span className="env-notice-title">
-                                {getEnvironmentMeta(activeAttempt.environment).label} 터미널 세션을 준비하는 중...
-                              </span>
-                            </section>
+                  {/* 인시던트 바 자리. MissionList 가 진행 상황을 여기에 portal 한다 (FE-26). */}
+                  <div className="incident-slot" ref={setIncidentSlot} />
+
+                  {hasActiveAttempt && (
+                    <div className="aux-header">
+                      <div className="aux-tabs" role="tablist" aria-label="보조 패널">
+                        {auxTabs.map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            id={`aux-tab-${tab.id}`}
+                            aria-selected={auxTab === tab.id}
+                            aria-controls={AREA_IDS[tab.area]}
+                            className={auxTab === tab.id ? 'active' : ''}
+                            onClick={() => setAuxTab(tab.id)}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <section
+                    className="area area-mission"
+                    id={AREA_IDS.missions}
+                    aria-label={hasActiveAttempt ? '브리핑' : '미션'}
+                    data-tour="mission-list"
+                  >
+                    <MissionList
+                      token={token}
+                      storageScope={accountStorageScope}
+                      environment={activeEnvironment}
+                      capabilities={activeEnvironmentCapabilities}
+                      incidentSlot={incidentSlot}
+                      tutorSlot={tutorSlot}
+                      onActiveAttemptChange={handleActiveAttemptChange}
+                      onAttemptCompleted={handleAttemptCompleted}
+                    />
+                    {activeAttempt && (
+                      <section className="briefing-guide" aria-label="조사 순서">
+                        <InvestigationGuide
+                          environment={activeAttempt.environment}
+                          active
+                          onInsertCommand={canUseTerminal ? insertCommand : undefined}
+                        />
+                      </section>
+                    )}
+                  </section>
+
+                  <section className="area area-terminal" id={AREA_IDS.terminal} aria-label={hasActiveAttempt ? '터미널' : '시작 가이드'}>
+                    {activeAttempt && !canUseTerminal ? (
+                      /*
+                       * 서버가 이 환경에 terminal 을 광고하지 않는다 (FE-22).
+                       * 세션 생성을 시도하면 백엔드 assert_implemented 가 거절하므로,
+                       * 사용자에게 실패할 로딩을 보여주지 않고 이유를 먼저 알린다.
+                       */
+                      <section className="env-notice" role="status">
+                        <span className="env-notice-title">
+                          {getEnvironmentMeta(activeAttempt.environment).label} 환경은 터미널을
+                          제공하지 않습니다
+                        </span>
+                        <p>
+                          미션 진행과 검증은 그대로 동작합니다. 터미널이 필요한 미션이라면
+                          다른 환경을 선택하세요.
+                        </p>
+                      </section>
+                    ) : activeAttempt ? (
+                      <div className="terminal-tour-target" data-tour="terminal">
+                        {activeSession ? (
+                          /*
+                           * key 로 세션마다 새 Terminal 을 만든다. 환경을 바꾸면
+                           * 이전 WebSocket·입력 queue 를 물려받은 인스턴스가 남지 않는다.
+                           */
+                          <Terminal
+                            key={activeSession.id}
+                            environment={activeAttempt.environment}
+                            sessionId={activeSession.id}
+                            token={token}
+                            namespace={activeSession.namespace}
+                          />
+                        ) : activeSessionState.status === 'error' ? (
+                          <section className="env-notice env-notice-error" role="alert">
+                            <span className="env-notice-title">터미널 세션을 준비하지 못했습니다</span>
+                            <p>{activeSessionState.message}</p>
+                            <button
+                              className="ui-button small env-notice-action"
+                              type="button"
+                              onClick={() => retry(activeAttempt.environment)}
+                            >
+                              다시 시도
+                            </button>
+                          </section>
+                        ) : (
+                          <section className="env-notice" role="status" aria-live="polite">
+                            <span className="env-notice-title">
+                              {getEnvironmentMeta(activeAttempt.environment).label} 터미널 세션을 준비하는 중...
+                            </span>
+                          </section>
+                        )}
+                      </div>
+                    ) : (
+                      <section className="tutorial-panel" data-tour="field-guide">
+                        <div className="tutorial-panel-header">
+                          <span className="panel-label">시작 가이드</span>
+                        </div>
+                        <div className="tutorial-content">
+                          <div className="tutorial-intro">
+                            <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
+                            <p>
+                              미션을 시작하면 이 자리에 터미널이 열립니다.
+                              {fieldGuideLabel
+                                ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
+                                : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
+                            </p>
+                          </div>
+                          <InvestigationGuide environment={activeEnvironment} />
+                          <EnvironmentRoadmap items={environments} />
+                        </div>
+                      </section>
+                    )}
+                  </section>
+
+                  <section className="area area-tutor" id={AREA_IDS.tutor} aria-label="AI 튜터">
+                    {/* MissionList 가 튜터를 여기에 portal 한다 (FE-26). */}
+                    <div className="tutor-slot" ref={setTutorSlot} />
+                  </section>
+
+                  <section
+                    className="area area-observe"
+                    id={AREA_IDS.observe}
+                    aria-label={hasActiveAttempt ? '관측' : '학습 현황'}
+                  >
+                    <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
+                      <div className="grafana-panel-header">
+                        <span className="panel-label">
+                          {hasActiveAttempt ? `관측 · ${observabilityLabel}` : '학습 현황'}
+                        </span>
+                        {hasActiveAttempt && grafanaUrl && (
+                          <a className="panel-link" href={grafanaUrl} target="_blank" rel="noreferrer">
+                            새 창
+                            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                              <path
+                                d="M6.5 3.5H4a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V9.5M9.5 3H13v3.5M13 3 7.5 8.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                          </a>
+                        )}
+                      </div>
+                      {!hasActiveAttempt ? (
+                        <div className="workspace-dashboard">
+                          <DashboardOverview token={token} refreshKey={dashboardRefreshKey} />
+                        </div>
+                      ) : hasObservability && grafanaUrl ? (
+                        <div className="grafana-frame-wrap">
+                          <iframe
+                            className="grafana-frame"
+                            src={grafanaUrl}
+                            title={`${observabilityLabel} Grafana dashboard`}
+                            onLoad={() => setIsGrafanaFrameReady(true)}
+                          />
+                          {isGrafanaLoading && (
+                            <div className="grafana-loading-overlay" role="status" aria-live="polite">
+                              <span>Grafana 대시보드를 불러오는 중입니다</span>
+                            </div>
+                          )}
+                          {!isGrafanaLoading && isObservabilityDegraded && (
+                            <p className="grafana-degraded-note" role="status" aria-live="polite">
+                              Prometheus 지표 확인에 실패했습니다. 대시보드는 열려 있지만 값이 비어
+                              있을 수 있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
+                            </p>
                           )}
                         </div>
                       ) : (
-                        <section className="tutorial-panel" data-tour="field-guide">
-                          <div className="tutorial-panel-header">
-                            <span className="panel-label">시작 가이드</span>
-                          </div>
-                          <div className="tutorial-content">
-                            <div className="tutorial-intro">
-                              <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
-                              <p>
-                                왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다.
-                                {fieldGuideLabel
-                                  ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
-                                  : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
-                              </p>
-                            </div>
-                            <ol className="tutorial-steps">
-                              <li>
-                                <span className="tutorial-step-index" aria-hidden="true">01</span>
-                                <strong>미션 선택</strong>
-                                <span>왼쪽에서 잠금 해제된 미션을 고르고 시작합니다.</span>
-                              </li>
-                              <li>
-                                <span className="tutorial-step-index" aria-hidden="true">02</span>
-                                <strong>상태 조사</strong>
-                                <span>{fieldGuideInvestigationHint}</span>
-                              </li>
-                              <li>
-                                <span className="tutorial-step-index" aria-hidden="true">03</span>
-                                <strong>복구 및 검증</strong>
-                                <span>원인을 수정한 뒤 미션 패널에서 완료 확인을 실행합니다.</span>
-                              </li>
-                            </ol>
-                            <div className="tutorial-commands">
-                              <span className="panel-label">조사 시작 명령</span>
-                              {fieldGuideStarters.map((command) => (
-                                <code key={command}>{command}</code>
-                              ))}
-                            </div>
-                            <EnvironmentRoadmap items={environments} />
-                          </div>
-                        </section>
-                      )}
-                      <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
-                        <div className="grafana-panel-header">
-                          <span className="panel-label">
-                            {hasActiveAttempt ? `관측 · ${observabilityLabel}` : '학습 현황'}
-                          </span>
-                          {hasActiveAttempt && grafanaUrl && (
-                            <a className="panel-link" href={grafanaUrl} target="_blank" rel="noreferrer">
-                              새 창
-                              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                                <path
-                                  d="M6.5 3.5H4a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V9.5M9.5 3H13v3.5M13 3 7.5 8.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </a>
-                          )}
+                        /*
+                         * 관측 화면을 열 수 없다. 다른 환경 대시보드로 대체하지 않는다 (FE-08).
+                         * 이유가 두 가지라 문구를 나눈다 (FE-22) — "대시보드가 없다"와
+                         * "서버가 관측을 제공하지 않는다"는 사용자가 할 일이 다르다.
+                         */
+                        <div className="grafana-frame-wrap grafana-frame-empty">
+                          <section className="env-notice" role="status">
+                            <span className="env-notice-title">
+                              {advertisesObservability
+                                ? `${observabilityLabel} 환경은 관측 대시보드가 아직 없습니다`
+                                : `${observabilityLabel} 환경은 관측 데이터를 제공하지 않습니다`}
+                            </span>
+                            <p>
+                              터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는
+                              영향이 없습니다.
+                            </p>
+                          </section>
                         </div>
-                        {!hasActiveAttempt ? (
-                          <div className="workspace-dashboard">
-                            <DashboardOverview token={token} refreshKey={dashboardRefreshKey} />
-                          </div>
-                        ) : hasObservability && grafanaUrl ? (
-                          <div className="grafana-frame-wrap">
-                            <iframe
-                              className="grafana-frame"
-                              src={grafanaUrl}
-                              title={`${observabilityLabel} Grafana dashboard`}
-                              onLoad={() => setIsGrafanaFrameReady(true)}
-                            />
-                            {isGrafanaLoading && (
-                              <div className="grafana-loading-overlay" role="status" aria-live="polite">
-                                <span>Grafana 대시보드를 불러오는 중입니다</span>
-                              </div>
-                            )}
-                            {!isGrafanaLoading && isObservabilityDegraded && (
-                              <p className="grafana-degraded-note" role="status" aria-live="polite">
-                                Prometheus 지표 확인에 실패했습니다. 대시보드는 열려 있지만 값이 비어
-                                있을 수 있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
-                              </p>
-                            )}
-                          </div>
-                        ) : (
-                          /*
-                           * 관측 화면을 열 수 없다. 다른 환경 대시보드로 대체하지 않는다 (FE-08).
-                           * 이유가 두 가지라 문구를 나눈다 (FE-22) — "대시보드가 없다"와
-                           * "서버가 관측을 제공하지 않는다"는 사용자가 할 일이 다르다.
-                           */
-                          <div className="grafana-frame-wrap grafana-frame-empty">
-                            <section className="env-notice" role="status">
-                              <span className="env-notice-title">
-                                {advertisesObservability
-                                  ? `${observabilityLabel} 환경은 관측 대시보드가 아직 없습니다`
-                                  : `${observabilityLabel} 환경은 관측 데이터를 제공하지 않습니다`}
-                              </span>
-                              <p>
-                                터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는
-                                영향이 없습니다.
-                              </p>
-                            </section>
-                          </div>
-                        )}
-                      </section>
-                    </div>
-                  </div>
+                      )}
+                    </section>
+                  </section>
                 </div>
+
+                {/*
+                  * 모바일 하단 탭 바 (FE-26). 한 번에 한 영역만 보이고 나머지는 숨길 뿐
+                  * 언마운트하지 않는다 — 터미널 연결과 튜터 대화가 탭 전환으로 사라지면 안 된다.
+                  */}
+                <nav className="mobile-tabbar material-bar" aria-label="작업 화면">
+                  <div className="mobile-tabbar-list" role="tablist" aria-label="작업 화면">
+                    {mobileTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={visibleTab === tab.id}
+                        aria-controls={AREA_IDS[tab.id]}
+                        className={visibleTab === tab.id ? 'active' : ''}
+                        onClick={() => setActiveTab(tab.id)}
+                      >
+                        {tab.icon}
+                        <span>{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </nav>
                   </>
+
                 )}
               </>
             )}
