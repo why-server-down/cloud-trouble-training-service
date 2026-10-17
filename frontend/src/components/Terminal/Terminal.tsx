@@ -268,8 +268,14 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
       commandQueueRef.current.push({ cmd, wasEchoed })
       processNextCommand()
     }
-    // 붙여넣기 확인 시트가 확정되면 이 경로로 차례로 실행한다.
-    queueCommandsRef.current = (commands) => commands.forEach((command) => queueCommand(command, false))
+    /*
+     * 붙여넣기 확인 시트가 확정되면 이 경로로 차례로 실행한다. 입력하던 내용은 먼저 지운다 —
+     * 남겨 두면 실행 뒤 새 프롬프트에는 안 보이는데 Enter 를 누르면 실행된다.
+     */
+    queueCommandsRef.current = (commands) => {
+      commit(replaceLine(lineState(), ''))
+      commands.forEach((command) => queueCommand(command, false))
+    }
 
     /*
      * 브리핑에서 누른 조사 명령 (FE-26). 실행하지 않고 입력줄에만 붙인다 —

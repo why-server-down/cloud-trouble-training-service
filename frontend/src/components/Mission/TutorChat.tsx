@@ -388,12 +388,22 @@ const TutorChat: React.FC<TutorChatProps> = ({
    * 화면 배치가 바뀌어 다시 마운트돼도 같은 힌트를 또 묻지 않는다.
    */
   const handledAutoHintRef = useRef(autoHintKey)
+  /**
+   * 보내야 할 힌트 질문. 다른 질문에 답하는 중이거나 호출 제한 중이면 바로 보낼 수 없다 —
+   * 그때 버리면 점수만 깎이고 힌트를 못 받는다. 보낼 수 있게 되면 그때 보낸다.
+   */
+  const [pendingAutoHint, setPendingAutoHint] = useState(false)
   useEffect(() => {
     if (!autoHintKey || autoHintKey === handledAutoHintRef.current) return
     handledAutoHintRef.current = autoHintKey
+    setPendingAutoHint(true)
     messagesRef.current?.focus()
+  }, [autoHintKey])
+  useEffect(() => {
+    if (!pendingAutoHint || loading || cooldown > 0 || disabled || requestRef.current) return
+    setPendingAutoHint(false)
     void ask(`힌트 ${hintLevel}단계를 주세요.`)
-  }, [ask, autoHintKey, hintLevel])
+  }, [ask, cooldown, disabled, hintLevel, loading, pendingAutoHint])
 
   const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()

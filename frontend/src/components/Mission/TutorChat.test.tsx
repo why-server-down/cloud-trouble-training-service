@@ -461,3 +461,21 @@ describe('힌트를 사면 튜터가 바로 답한다 (FE-28)', () => {
     expect(mocked.askTutor).not.toHaveBeenCalled()
   })
 })
+
+describe('힌트 질문은 버리지 않는다 (FE-28)', () => {
+  it('다른 질문에 답하는 중에 힌트를 사면 답이 끝난 뒤 힌트를 묻는다', async () => {
+    let finishFirst: (value: api.ChatResponse) => void = () => {}
+    mocked.askTutor.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+    const view = renderChat({ hintsUsed: 0, autoHintKey: 0 })
+    await askOnce('먼저 묻는 질문')
+    expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+
+    view.rerender(<TutorChat token="t" missionId="mission-1" environment="docker" hintsUsed={1} autoHintKey={1} />)
+    await act(async () => {})
+    expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+
+    await act(async () => finishFirst(answer()))
+    await waitFor(() => expect(mocked.askTutor).toHaveBeenCalledTimes(2))
+    expect(mocked.askTutor.mock.calls[1][1]).toBe('힌트 1단계를 주세요.')
+  })
+})
