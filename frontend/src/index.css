@@ -236,6 +236,19 @@ a {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  overflow: clip;
+}
+
+/*
+ * 앱의 구조 틀은 스크롤되지 않는다. overflow: hidden 은 사용자가 못 굴릴 뿐 코드(scrollIntoView,
+ * focus)는 여전히 밀 수 있어, 한 번 밀리면 되돌릴 방법이 없다. clip 은 그 자체를 막는다.
+ * 스크롤은 각 영역 안의 목록·패널(overflow: auto)만 한다.
+ */
+#root .app,
+#root .app-main,
+#root .workspace,
+#root .workspace-grid {
+  overflow: clip;
 }
 
 .sr-only {
