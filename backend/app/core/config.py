@@ -130,7 +130,7 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"  # 2.5-flash-lite 는 신규 키에서 404
+    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "models/gemini-embedding-001"
 
     QDRANT_URL: str = "http://localhost:6333"
