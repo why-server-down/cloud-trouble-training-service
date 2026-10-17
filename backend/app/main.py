@@ -8,6 +8,7 @@ from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from app.api.attempts import router as attempts_router
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.dashboard import router as dashboard_router
@@ -121,6 +122,7 @@ app.include_router(scenarios_router)
 app.include_router(chat_router)
 app.include_router(dashboard_router)
 app.include_router(environments_router)
+app.include_router(attempts_router)
 # `/metrics` 를 mount 로 붙이면 정확히 `/metrics` 로 온 요청이 `/metrics/` 로
 # 307 리다이렉트된다(실측 2026-09-02). Prometheus 는 리다이렉트를 따라가지만,
 # Location 이 절대 URL 이라 TLS 를 종료하는 프록시 뒤에서는 http 로 내려가고
