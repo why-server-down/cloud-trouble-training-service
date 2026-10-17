@@ -210,7 +210,7 @@ app/
 | `wrong_image_registry` | private registry 이미지로 패치 → unauthorized ImagePullBackOff | `kubectl set image deployment/nginx nginx=nginx:latest` |
 | `secret_ref_missing` | 존재하지 않는 Secret envFrom 참조 → CreateContainerConfigError | Secret 생성 또는 envFrom 제거 |
 | `pvc_unbound` | 존재하지 않는 storageClass PVC 생성 + 마운트 → Pod Pending | PVC 삭제 및 deployment에서 volume/volumeMount 제거 |
-| `cpu_throttle` | CPU limit 1m + 빡빡한 readinessProbe → Running이지만 0/1 Not Ready | `kubectl patch deployment nginx`로 CPU limit 상향 + readinessProbe 제거 |
+| `cpu_throttle` | CPU limit 1m + CPU를 조금 쓰는 exec readinessProbe(1초 timeout) → Running이지만 0/1 Not Ready | `kubectl set resources deployment/nginx --limits=cpu=100m` |
 
 ### AI 시나리오 시스템 (scenario_service.py)
 

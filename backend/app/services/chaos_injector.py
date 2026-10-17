@@ -107,6 +107,10 @@ MEMORY_DEMAND_COMMAND = [
     'head -c 48m /dev/zero | tail > /dev/null && exec nginx -g "daemon off;"',
 ]
 
+# cpu_throttle 의 readiness 검사. CPU 를 조금 쓰는 셸 루프라 CPU limit 100m 에서는 0.1초 안팎에
+# 끝나지만 1m 에서는 5초 넘게 걸려 timeoutSeconds 1 을 넘긴다(colima k3s 실측).
+CPU_DEMAND_PROBE_COMMAND = ["sh", "-c", "i=0; while [ $i -lt 10000 ]; do i=$((i+1)); done"]
+
 
 class ChaosMeshInjector(BaseChaosInjector):
     """Chaos Mesh 기반 실제 장애 주입 구현.
@@ -470,9 +474,12 @@ class ChaosMeshInjector(BaseChaosInjector):
         )
 
     def _apply_cpu_throttle(self, _chaos_id: str, namespace: str):
-        # CPU limit을 1m으로 극도로 제한 + 빡빡한 readinessProbe → 0/1 Not Ready
+        # CPU limit을 1m으로 극도로 제한 → CPU를 조금 쓰는 readiness 검사가 1초 안에 끝나지 못해 0/1 Not Ready
         # OOMKilled와 달리 메모리 문제가 아닌 CPU 리소스 설정 문제
-        # 사용자 Fix: kubectl patch deployment nginx 로 resources.limits.cpu 상향 + readinessProbe 제거
+        # 사용자 Fix: kubectl set resources deployment/nginx --limits=cpu=100m --requests=cpu=50m
+        #
+        # 예전 검사는 httpGet / 였다. nginx 는 1m 으로도 요청 하나쯤은 바로 답해서 주입 직후 Ready 가 되고
+        # 검증도 고치기 전부터 통과했다(실클러스터 확인). 검사 자체가 CPU 를 써야 limit 차이가 드러난다.
         self._patch_nginx_container(
             namespace,
             resources={
@@ -480,7 +487,7 @@ class ChaosMeshInjector(BaseChaosInjector):
                 "limits": {"cpu": "1m"},
             },
             readinessProbe={
-                "httpGet": {"path": "/", "port": 80},
+                "exec": {"command": CPU_DEMAND_PROBE_COMMAND},
                 "initialDelaySeconds": 2,
                 "periodSeconds": 5,
                 "timeoutSeconds": 1,
