@@ -214,6 +214,25 @@ describe('액션별 진행 표시 (FE-16)', () => {
     expect(props.onCheck).not.toHaveBeenCalled()
   })
 
+  it('힌트 감점을 알면 버튼에 비용을 적는다', async () => {
+    const { props } = renderStatus({ hintPenalty: 5 })
+    await screen.findByText('10:00')
+
+    fireEvent.click(screen.getByRole('button', { name: '힌트 사용 −5점' }))
+    expect(props.onHint).toHaveBeenCalledTimes(1)
+  })
+
+  it('남은 시간이 5분·1분 아래로 내려가면 색과 함께 글자로 알린다', async () => {
+    mocked.getMissionStatus.mockResolvedValue(statusFor({ remaining_seconds: 240 }))
+    const { view } = renderStatus()
+    expect(await screen.findByText('5분 미만')).toBeTruthy()
+
+    view.unmount()
+    mocked.getMissionStatus.mockResolvedValue(statusFor({ remaining_seconds: 30 }))
+    renderStatus()
+    expect(await screen.findByText('1분 미만')).toBeTruthy()
+  })
+
   it('액션마다 다른 문구를 쓴다', async () => {
     const { view } = renderStatus({ pendingAction: 'check' })
     await screen.findByText('10:00')

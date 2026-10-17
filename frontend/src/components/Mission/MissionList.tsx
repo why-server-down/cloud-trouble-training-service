@@ -35,7 +35,8 @@ import {
   EnvironmentId,
 } from '../../types/training'
 import MissionCard from './MissionCard'
-import MissionStatus, { MissionAction } from './MissionStatus'
+import MissionStatus, { MissionAction, MissionStatusView } from './MissionStatus'
+import { CheckIcon, LockIcon } from './Icons'
 import TutorChat from './TutorChat'
 import './Mission.css'
 
@@ -72,10 +73,10 @@ interface Confirmation {
 type Difficulty = 'beginner' | 'intermediate' | 'advanced' | 'expert'
 
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  beginner: 'Beginner',
-  intermediate: 'Intermediate',
-  advanced: 'Advanced',
-  expert: 'Expert',
+  beginner: '입문',
+  intermediate: '중급',
+  advanced: '고급',
+  expert: '전문가',
 }
 
 const ACTIVE_ATTEMPT_TYPE_KEY = 'activeAttemptType'
@@ -486,6 +487,7 @@ const MissionList: React.FC<MissionListProps> = ({
   const handleCheckScenario = async () => {
     if (loading) return
     setLoading(true)
+    setPendingAction('check')
     setError(null)
     try {
       const result = await checkScenario(token)
@@ -511,6 +513,7 @@ const MissionList: React.FC<MissionListProps> = ({
       showToast('error', msg)
     } finally {
       setLoading(false)
+      setPendingAction(null)
     }
   }
 
@@ -520,6 +523,7 @@ const MissionList: React.FC<MissionListProps> = ({
       message: '진행 중인 AI 시나리오를 포기하시겠습니까?',
       confirmLabel: '포기',
       danger: true,
+      kind: 'abandon',
       action: async () => {
         try {
           await abandonScenario(token)
@@ -543,6 +547,7 @@ const MissionList: React.FC<MissionListProps> = ({
       title: '힌트 사용',
       message: '힌트를 사용하시겠습니까? 점수가 차감됩니다.',
       confirmLabel: '힌트 사용',
+      kind: 'hint',
       action: async () => {
         try {
           const attempt = await requestScenarioHint(token)
@@ -557,16 +562,8 @@ const MissionList: React.FC<MissionListProps> = ({
     })
   }
 
-  // 시나리오 시간 표시
-  const scenarioTimeClass =
-    activeScenario && activeScenario.remaining_seconds < 60
-      ? 'danger'
-      : activeScenario && activeScenario.remaining_seconds < 300
-        ? 'warning'
-        : ''
   const isActiveScenario = activeScenario?.status === 'in_progress'
-  const scenarioMinutes = activeScenario ? Math.floor(activeScenario.remaining_seconds / 60) : 0
-  const scenarioSeconds = activeScenario ? activeScenario.remaining_seconds % 60 : 0
+  const activeMission = missions.find((mission) => mission.id === activeMissionId) ?? null
   const displayedMissions = activeMissionId
     ? missions.filter((mission) => mission.id === activeMissionId)
     : isActiveScenario
@@ -609,26 +606,33 @@ const MissionList: React.FC<MissionListProps> = ({
   return (
     <div className={`mission-panel${activeMissionId || isActiveScenario ? ' mission-active' : ''}`}>
       <div className="mission-header">
-        <span className="panel-index">RUNBOOK / INCIDENT QUEUE</span>
         <h2>미션 목록</h2>
       </div>
 
       {/* 정적 미션 목록 */}
       <div className={`mission-list${activeMissionId || isActiveScenario ? ' active-only' : ''}`}>
-        {error && <div className="mission-error">{error}</div>}
+        {error && (
+          <div className="mission-error" role="alert">
+            <span>{error}</span>
+            {/* 목록 조회 실패일 때만 다시 시도를 준다. 액션 실패는 같은 버튼을 다시 누르면 된다. */}
+            {missionsStatus === 'error' && (
+              <button type="button" className="ui-button small" onClick={() => void fetchMissions()}>
+                다시 시도
+              </button>
+            )}
+          </div>
+        )}
         {isActiveScenario && activeScenario && (
           <div className="mission-card active ai-mission-card">
+            <span className="mission-active-label">
+              <span className="ui-live-dot" aria-hidden="true" />
+              진행 중 · AI 문제
+            </span>
             <span className="mission-card-header">
               <span className="mission-title">{activeScenario.title}</span>
-              <span className="mission-level">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</span>
+              <span className="ui-chip mission-level">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</span>
             </span>
             <span className="mission-description">{activeScenario.student_brief}</span>
-            <span className="mission-info">
-              <span>남은 시간 {scenarioMinutes}:{scenarioSeconds.toString().padStart(2, '0')}</span>
-              <span>현재 {activeScenario.current_score}점</span>
-              <span>힌트 {activeScenario.hints_used}개</span>
-            </span>
-            <span className="mission-active-label">LIVE AI INCIDENT</span>
           </div>
         )}
         {/*
@@ -671,6 +675,7 @@ const MissionList: React.FC<MissionListProps> = ({
             token={token}
             refreshKey={statusRefreshKey}
             pendingAction={pendingAction}
+            hintPenalty={activeMission?.hint_penalty}
             onStatusChange={handleStatusChange}
             onMissionEnd={handleMissionEnd}
             onCheck={handleCheckMission}
@@ -683,126 +688,79 @@ const MissionList: React.FC<MissionListProps> = ({
 
       {isActiveScenario && activeScenario && (
         <>
-          <div className="mission-status-panel" data-tour="mission-progress">
-            <div className="status-header">AI 시나리오 진행 상황</div>
-            <div className="status-item">
-              <span>남은 시간</span>
-              <span className={`status-value ${scenarioTimeClass}`}>
-                {scenarioMinutes}:{scenarioSeconds.toString().padStart(2, '0')}
-              </span>
-            </div>
-            <div className="status-item">
-              <span>현재 점수</span>
-              <span className="status-value">{activeScenario.current_score}점</span>
-            </div>
-            <div className="status-item">
-              <span>사용한 힌트</span>
-              <span className="status-value">{activeScenario.hints_used}개</span>
-            </div>
-            <div className="status-actions">
-              <button className="btn btn-success" type="button" onClick={handleCheckScenario} disabled={loading}>
-                완료 확인
-              </button>
-              <button className="btn btn-warning" type="button" onClick={handleUseScenarioHint} disabled={loading}>
-                힌트 사용
-              </button>
-              <button className="btn btn-danger" type="button" onClick={handleAbandonScenario} disabled={loading}>
-                포기
-              </button>
-            </div>
-          </div>
+          {/* ScenarioStatusResponse 에는 힌트 감점이 없어 비용을 적지 않는다. */}
+          <MissionStatusView
+            title="AI 시나리오 진행 상황"
+            remainingSeconds={activeScenario.remaining_seconds}
+            score={activeScenario.current_score}
+            hintsUsed={activeScenario.hints_used}
+            pendingAction={pendingAction}
+            busy={loading}
+            abandonLabel="포기"
+            onCheck={handleCheckScenario}
+            onHint={handleUseScenarioHint}
+            onAbandon={handleAbandonScenario}
+          />
           {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
         </>
       )}
 
       {/* AI 문제 더 풀기 섹션. 서버가 ai_scenario 를 광고하지 않으면 그리지 않는다 (FE-22) */}
       {canUseAiScenario && !activeMissionId && !isActiveScenario && (
-        <div className="ai-scenario-section">
+        <section className="ai-scenario-section" aria-labelledby="ai-scenario-title">
           <div className="ai-section-header">
-            <span className="panel-index">AI CHALLENGE MODE</span>
+            <h3 id="ai-scenario-title">AI 문제 더 풀기</h3>
             {!isAiUnlocked && (
               <button
                 type="button"
-                className="demo-unlock-btn"
+                className="ui-button plain small demo-unlock-btn"
                 onClick={unlockAiScenariosForDemo}
               >
                 시연용 잠금 해제
               </button>
             )}
-            <h3>AI 문제 더 풀기</h3>
           </div>
 
           {/* 잠금 상태 표시 */}
           {unlockStatus && !isAiUnlocked && (
             <div className="ai-lock-notice">
-              <span className="ai-lock-icon">🔒</span>
-              <span>
+              <LockIcon />
+              <p>
                 AI 문제 모드는 계정 단위로 열립니다. Kubernetes · Docker · Linux 를 합친
                 기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
                 활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
-              </span>
+              </p>
             </div>
-          )}
-
-          {/* AI 시나리오 진행 중 */}
-          {activeScenario && activeScenario.status === 'in_progress' && (
-            <>
-              <div className="ai-scenario-active">
-                <div className="ai-scenario-title">{activeScenario.title}</div>
-                <div className="ai-scenario-brief">{activeScenario.student_brief}</div>
-                <div className="ai-difficulty-badge">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</div>
-              </div>
-              <div className="mission-status-panel" data-tour="mission-progress">
-                <div className="status-header">AI 시나리오 진행 상황</div>
-                <div className="status-item">
-                  <span>남은 시간</span>
-                  <span className={`status-value ${scenarioTimeClass}`}>
-                    {scenarioMinutes}:{scenarioSeconds.toString().padStart(2, '0')}
-                  </span>
-                </div>
-                <div className="status-item">
-                  <span>현재 점수</span>
-                  <span className="status-value">{activeScenario.current_score}점</span>
-                </div>
-                <div className="status-item">
-                  <span>사용한 힌트</span>
-                  <span className="status-value">{activeScenario.hints_used}개</span>
-                </div>
-                <div className="status-actions">
-                  <button className="btn btn-success" type="button" onClick={handleCheckScenario} disabled={loading}>
-                    완료 확인
-                  </button>
-                  <button className="btn btn-warning" type="button" onClick={handleUseScenarioHint} disabled={loading}>
-                    힌트 사용
-                  </button>
-                  <button className="btn btn-danger" type="button" onClick={handleAbandonScenario} disabled={loading}>
-                    포기
-                  </button>
-                </div>
-              </div>
-              {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
-            </>
           )}
 
           {/* 잠금 해제 + AI 시나리오 없을 때: 난이도 선택 */}
           {isAiUnlocked && !activeScenario && (
             <div className="ai-difficulty-selector">
-              <div className="ai-selector-label">난이도 선택</div>
-              <div className="difficulty-btns">
+              <span className="ai-selector-label" id="ai-difficulty-label">난이도</span>
+              {/*
+                * 네이티브 radio 를 세그먼트 모양으로 쓴다. 화살표 키 이동과 선택 상태 낭독을
+                * 브라우저가 맡으므로 roving tabindex 를 직접 만들지 않는다.
+                */}
+              <div className="segmented" role="radiogroup" aria-labelledby="ai-difficulty-label">
                 {(Object.keys(DIFFICULTY_LABELS) as Difficulty[]).map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    className={`difficulty-btn${selectedDifficulty === d ? ' selected' : ''}`}
-                    onClick={() => setSelectedDifficulty(d)}
-                  >
-                    {DIFFICULTY_LABELS[d]}
-                  </button>
+                  <label key={d} className="segmented-option">
+                    <input
+                      type="radio"
+                      name="ai-difficulty"
+                      value={d}
+                      checked={selectedDifficulty === d}
+                      onChange={() => setSelectedDifficulty(d)}
+                    />
+                    <span>
+                      <CheckIcon />
+                      {DIFFICULTY_LABELS[d]}
+                    </span>
+                  </label>
                 ))}
               </div>
               <button
                 type="button"
-                className="btn ai-start-btn"
+                className="ui-button primary ai-start-btn"
                 onClick={handleStartScenario}
                 disabled={loading}
               >
@@ -810,7 +768,7 @@ const MissionList: React.FC<MissionListProps> = ({
               </button>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {confirmation && (

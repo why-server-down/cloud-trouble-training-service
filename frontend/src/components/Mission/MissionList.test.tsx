@@ -294,6 +294,56 @@ describe('환경별 미션 (FE-06)', () => {
   })
 })
 
+describe('미션 카드 접근성 (FE-24)', () => {
+  const lockedMission: MissionResponse = {
+    ...mission,
+    id: 'mission-2',
+    chaos_type: 'memory_stress',
+    level: 2,
+    is_unlocked: false,
+  }
+
+  it('잠긴 카드는 Tab 순서에 남아 이유를 읽히지만 눌러도 시작 확인이 뜨지 않는다', async () => {
+    mocked.listMissions.mockResolvedValue([mission, lockedMission])
+    renderList()
+
+    const locked = await screen.findByRole('button', { name: /메모리 부족/ })
+    // disabled 면 키보드 사용자가 닿지 못한다. aria-disabled 로 상태만 알린다.
+    expect(locked.hasAttribute('disabled')).toBe(false)
+    expect(locked.getAttribute('aria-disabled')).toBe('true')
+    expect(locked.textContent).toContain('이전 레벨을 완료하면 열립니다')
+
+    fireEvent.click(locked)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByText('선택한 미션을 시작하시겠습니까?')).toBeNull()
+  })
+
+  it('열린 카드는 눌러서 시작 확인을 연다', async () => {
+    renderList()
+
+    const card = await screen.findByRole('button', { name: /사라진 애플리케이션/ })
+    expect(card.getAttribute('aria-disabled')).toBeNull()
+    fireEvent.click(card)
+    expect(await screen.findByText('선택한 미션을 시작하시겠습니까?')).toBeTruthy()
+  })
+
+  it('AI 난이도는 한국어 라벨의 단일 선택이고 확인 문구에도 같은 라벨을 쓴다', async () => {
+    mocked.getUnlockStatus.mockResolvedValue({ unlocked: true, completed_static: 4, total_static: 4 })
+    renderList()
+
+    const group = await screen.findByRole('radiogroup', { name: '난이도' })
+    expect(group).toBeTruthy()
+    expect((screen.getByRole('radio', { name: '입문' }) as HTMLInputElement).checked).toBe(true)
+
+    fireEvent.click(screen.getByRole('radio', { name: '고급' }))
+    expect((screen.getByRole('radio', { name: '고급' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('radio', { name: '입문' }) as HTMLInputElement).checked).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'AI 장애 생성 시작' }))
+    expect(await screen.findByText('고급 난이도로 AI 장애를 생성하시겠습니까?')).toBeTruthy()
+  })
+})
+
 describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
   const ALL: EnvironmentCapability[] = [
     'static_mission',
@@ -335,7 +385,8 @@ describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
 
     await screen.findByText('미션 목록')
     expect(screen.queryByText('AI 문제 더 풀기')).toBeNull()
-    expect(screen.queryByText('AI CHALLENGE MODE')).toBeNull()
+    // 제목만이 아니라 섹션 전체(잠금 안내 포함)가 빠져야 한다.
+    expect(screen.queryByText(/계정 단위로 열립니다/)).toBeNull()
   })
 
   it('ai_scenario 를 광고하면 AI 문제 섹션이 나온다', async () => {

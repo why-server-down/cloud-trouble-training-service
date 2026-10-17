@@ -5,6 +5,7 @@ import { getEnvironmentMeta } from '../../config/environments'
 import { getSafeSourceHref } from '../../utils/tutorSources'
 import { markStart, measureSince, PERF } from '../../utils/perf'
 import { EnvironmentId, isEnvironmentId } from '../../types/training'
+import { AlertIcon } from './Icons'
 
 interface TutorChatProps {
   token: string
@@ -368,22 +369,25 @@ const TutorChat: React.FC<TutorChatProps> = ({
   const tutorChat = (
     <>
       {floating && !floatingOpen && (
-        <button className="tutor-floating-launcher" type="button" onClick={onToggleFloating}>
+        <button className="tutor-floating-launcher material-popover" type="button" onClick={onToggleFloating}>
           AI 튜터
         </button>
       )}
       <section className={panelClassName}>
         <div className="tutor-header">
           <div className="tutor-title-group">
-            <span>AI 튜터</span>
+            <h3 className="tutor-title">AI 튜터</h3>
             {/* 색만으로 구분하지 않는다 — 환경 이름을 그대로 쓴다 (FE-11). */}
-            <span className="tutor-environment-badge" data-environment={environment}>
+            <span className="ui-chip tutor-environment-badge" data-environment={environment}>
               {environmentLabel}
             </span>
-            <span className="tutor-hint-level">힌트 단계 {hintLevel}</span>
+            <span className="ui-chip tutor-hint-level" title="힌트를 쓸수록 더 구체적으로 안내합니다">
+              힌트 {hintLevel}단계
+              <span className="sr-only"> · 힌트를 쓸수록 더 구체적으로 안내합니다</span>
+            </span>
           </div>
           {floating && (
-            <button className="tutor-floating-close" type="button" onClick={onToggleFloating}>
+            <button className="ui-button plain small tutor-floating-close" type="button" onClick={onToggleFloating}>
               닫기
             </button>
           )}
@@ -398,7 +402,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
                  * 그대로 쓴다. 아이콘은 장식이므로 스크린리더에서 숨긴다.
                  */
                 <p className="chat-environment-mismatch">
-                  <span aria-hidden="true">⚠ </span>
+                  <AlertIcon />
                   이 답변은 {getEnvironmentMeta(message.mismatchedEnvironment).label} 기준입니다
                   (현재 세션: {environmentLabel}). 지금 환경에서 쓸 수 없는 명령이 섞여 있을 수
                   있으니 그대로 따르지 마세요.
@@ -424,7 +428,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
                   : '답변을 준비하고 있습니다...'}
               </span>
               {isCancellable && (
-                <button className="chat-cancel-btn" type="button" onClick={cancelQuestion}>
+                <button className="ui-button plain small chat-cancel-btn" type="button" onClick={cancelQuestion}>
                   취소
                 </button>
               )}
@@ -459,7 +463,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
         {retryQuestion && (
           <div className="chat-retry-bar">
             <button
-              className="chat-retry-btn"
+              className="ui-button small chat-retry-btn"
               type="button"
               disabled={isChatDisabled}
               onClick={() => void ask(retryQuestion)}
@@ -490,8 +494,10 @@ const TutorChat: React.FC<TutorChatProps> = ({
             }
             disabled={isChatDisabled}
           />
-          <button type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
+          <button className="ui-button primary small" type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
         </form>
+        {/* 튜터 질문과 힌트 감점을 혼동하지 않게 관계를 밝힌다. 감점은 힌트 버튼에서만 생긴다. */}
+        <p className="tutor-note">질문은 감점 없음 · 점수는 힌트를 사용할 때만 깎입니다</p>
       </section>
     </>
   )

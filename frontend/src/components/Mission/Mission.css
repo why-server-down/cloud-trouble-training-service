@@ -1,32 +1,42 @@
+/*
+ * 미션 패널: 미션 목록, 진행 상황, AI 튜터, AI 문제 (FE-24).
+ * 값은 모두 index.css 토큰을 쓴다. 규칙은 docs/frontend-design-system.md 가 기준이다.
+ * 고정 패널과 카드는 평평하다 — 그림자는 실제로 떠 있는 플로팅 튜터에만 준다.
+ */
+
+/* ── 패널 ───────────────────────────────────────────────── */
 .mission-panel {
   display: flex;
   height: 100%;
   flex-direction: column;
   overflow-y: auto;
-  border-right: 1px solid var(--line-strong);
-  background: rgba(15, 20, 19, 0.94);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
 }
 
 .mission-header {
-  padding: 1rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-2);
 }
 
-.panel-index {
-  display: block;
-  margin-bottom: 0.45rem;
-}
-
-.mission-header h2 {
+.mission-header h2,
+.ai-section-header h3 {
   color: var(--text);
-  font-size: 1.2rem;
-  letter-spacing: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  line-height: var(--leading-lg);
 }
 
 .mission-list {
+  display: grid;
   flex: 1;
-  padding: 0.85rem;
+  align-content: start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-4);
   overflow-y: auto;
 }
 
@@ -37,12 +47,8 @@
 
 .mission-panel.mission-active .mission-list {
   flex: 0 0 auto;
-  padding-bottom: 0.65rem;
+  padding-bottom: var(--space-3);
   overflow: visible;
-}
-
-.mission-panel.mission-active .mission-card {
-  margin-bottom: 0;
 }
 
 .mission-panel.mission-active .mission-header,
@@ -50,220 +56,283 @@
   flex-shrink: 0;
 }
 
+.mission-icon {
+  flex-shrink: 0;
+}
+
+/* ── 미션 카드 ───────────────────────────────────────────── */
 .mission-card {
-  display: block;
+  display: flex;
   width: 100%;
-  margin-bottom: 0.7rem;
-  padding: 0.85rem;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line-strong);
-  border-radius: 0;
-  background: var(--surface);
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
   color: var(--text);
-  cursor: pointer;
   text-align: left;
-  transition: 150ms ease;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
-.mission-card:hover:not(.locked):not(.active) {
-  border-color: var(--accent);
-  border-left-color: var(--accent);
-  background: #1b221f;
-  transform: translateX(3px);
+/* 누를 수 있는 카드만 떠오른다. 배경이 --surface-3 이 되면 3단계 글자는 대비가 모자라 한 단계 올린다. */
+.mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover {
+  border-color: var(--separator-strong);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
 }
 
+.mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover .mission-info {
+  color: var(--text-secondary);
+}
+
+.mission-card:not([aria-disabled='true']):not(.ai-mission-card):active {
+  transform: translateY(0) scale(0.995);
+}
+
+/* 잠긴 카드는 투명도로 흐리지 않는다 — 글자는 읽혀야 한다. 대신 면을 낮춰 눌리지 않는다는 것을 보인다. */
 .mission-card.locked {
+  background: transparent;
   cursor: not-allowed;
-  opacity: 0.45;
+}
+
+.mission-card.locked .mission-title {
+  color: var(--text-secondary);
 }
 
 .mission-card.active {
-  border-color: var(--warning);
-  border-left-color: var(--warning);
-  background: #282318;
-}
-
-.ai-mission-card {
+  border-color: var(--accent-line);
   cursor: default;
 }
 
-.ai-mission-card:hover {
-  transform: none;
-}
-
-.mission-card-header,
-.mission-info {
-  display: flex;
-}
-
 .mission-card-header {
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.6rem;
-  margin-bottom: 0.55rem;
+  gap: var(--space-3);
 }
 
 .mission-title {
+  min-width: 0;
   color: var(--text);
-  font-size: 0.92rem;
-  font-weight: 700;
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-md);
 }
 
 .mission-level {
-  padding: 0.18rem 0.35rem;
-  border: 1px solid var(--line-strong);
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .mission-description {
-  display: block;
-  margin-bottom: 0.65rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.55;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
 }
 
 .mission-info {
-  flex-wrap: wrap;
-  gap: 0.35rem 0.7rem;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.65rem;
-}
-
-/* 미션이 어느 환경 것인지 글자로 밝힌다. 색은 보조일 뿐이다 (FE-06). */
-.mission-environment-badge {
-  padding: 0.05rem 0.35rem;
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.mission-active-label {
-  display: block;
-  margin-top: 0.65rem;
-  color: var(--warning);
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-}
-
-.mission-status-panel,
-.tutor-panel {
-  border-top: 1px solid var(--line-strong);
-  background: var(--surface);
-}
-
-.mission-status-panel {
-  padding: 0.9rem;
-}
-
-.status-header,
-.tutor-header {
-  margin-bottom: 0.8rem;
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.status-item {
   display: flex;
-  justify-content: space-between;
-  padding: 0.28rem 0;
-  border-bottom: 1px dashed #29322f;
-  color: var(--muted);
-  font-size: 0.78rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.mission-card-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--separator);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.mission-start-cue {
+  justify-content: flex-end;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-sm);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.mission-card:hover .mission-start-cue,
+.mission-card:focus-visible .mission-start-cue {
+  color: var(--accent-hover);
+}
+
+/* 진행 중 표시: 강조색 점 + 글자. 상태를 담는 줄이라 설계 문서 5.4 의 예외다. */
+.mission-active-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--leading-xs);
+}
+
+/* ── 진행 상황 ──────────────────────────────────────────── */
+.mission-status-panel {
+  padding: var(--space-4);
+  border-top: 1px solid var(--separator);
+}
+
+.status-header {
+  margin-bottom: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-sm);
+}
+
+/*
+ * 라벨 줄과 값 줄을 각각 맞춘다. 칸은 위→아래로 채워(column flow) 라벨이 1행, 값이 2행에 온다.
+ * 타이머만 크게 두되 미션 목표보다 커 보이지 않게 --text-xl 에서 멈춘다.
+ */
+.status-metrics {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto;
+  align-items: baseline;
+  column-gap: var(--space-6);
+  row-gap: var(--space-1);
+}
+
+.status-timer,
+.status-item {
+  display: contents;
+}
+
+.status-label {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.status-time-flag {
+  margin-left: var(--space-2);
+  font-weight: 500;
 }
 
 .status-value {
   color: var(--text);
-  font-family: var(--mono);
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: var(--leading-md);
+  font-variant-numeric: tabular-nums;
 }
 
-.status-value.warning {
+.status-timer-value {
+  font-size: var(--text-xl);
+  line-height: var(--leading-xl);
+}
+
+.status-value.warning,
+.status-time-flag.warning {
   color: var(--warning);
 }
 
-.status-value.danger {
+.status-value.danger,
+.status-time-flag.danger {
   color: var(--danger);
 }
 
 .status-actions {
   display: flex;
-  gap: 0.4rem;
-  margin-top: 0.8rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
-.btn {
-  flex: 1;
-  padding: 0.55rem 0.35rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  font-weight: 700;
-  transition: 140ms ease;
+/* 포기는 다른 동작과 떨어뜨리고 구분선을 둔다 (설계 문서 5.1, 6.2). */
+.status-actions-divider {
+  width: 1px;
+  height: var(--space-5);
+  margin-left: auto;
+  background: var(--separator-strong);
 }
 
-.btn:hover:not(:disabled) {
-  color: var(--text);
-}
-
-.btn-success:hover:not(:disabled) {
-  border-color: var(--ok);
-}
-
-.btn-warning:hover:not(:disabled) {
-  border-color: var(--warning);
-}
-
-.btn-danger:hover:not(:disabled) {
-  border-color: var(--danger);
-}
-
-.btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-
-.empty-state,
-.mission-error {
-  padding: 1.5rem 0.75rem;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.72rem;
+/* ── 빈 상태와 안내 ─────────────────────────────────────── */
+.empty-state {
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
   text-align: center;
 }
 
-.mission-error {
+/* 안내 상자. 색 이름은 하나씩만 뜻을 갖는다: 경고(불안정), 위험(실패), 정보(기다리면 됨). */
+.mission-error,
+.status-stale-note,
+.chat-error,
+.chat-rate-limit-note,
+.chat-environment-mismatch,
+.chat-fallback-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.mission-error,
+.chat-error {
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
+.status-stale-note,
+.chat-environment-mismatch,
+.chat-fallback-note {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.chat-rate-limit-note {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.mission-error {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-stale-note {
+  margin-bottom: var(--space-3);
+}
+
+.chat-environment-mismatch .mission-icon {
+  margin-top: 3px;
+}
+
+/* ── AI 튜터 ────────────────────────────────────────────── */
 .tutor-panel {
   display: flex;
   min-height: 245px;
   max-height: 330px;
   flex-direction: column;
-  padding: 0.9rem;
-  background: #121817;
-}
-
-.tutor-floating-launcher,
-.tutor-floating-close {
-  display: none;
+  padding: var(--space-4);
+  border-top: 1px solid var(--separator);
+  background: var(--surface-1);
 }
 
 .mission-panel.mission-active .tutor-panel {
@@ -272,25 +341,46 @@
   flex: 1 1 auto;
 }
 
+.tutor-floating-launcher,
+.tutor-panel .tutor-floating-close {
+  display: none;
+}
+
 .tutor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .tutor-title-group {
   display: flex;
   min-width: 0;
   flex: 1;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.65rem;
+  gap: var(--space-2);
+}
+
+.tutor-title {
+  margin-right: var(--space-1);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-md);
 }
 
 .tutor-hint-level {
-  color: var(--faint);
-  font-size: 0.62rem;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+
+.tutor-note {
+  margin-top: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
 }
 
 .chat-messages {
@@ -298,82 +388,71 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 0.6rem;
-  padding-right: 0.25rem;
+  gap: var(--space-3);
+  padding-right: var(--space-1);
   overflow-y: auto;
 }
 
 .chat-message {
   width: fit-content;
   max-width: min(92%, 42rem);
-  padding: 0.62rem 0.72rem;
-  border-left: 2px solid var(--line-strong);
-  background: var(--surface-raised);
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.58;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
   overflow-wrap: anywhere;
 }
 
 .chat-message.user {
   align-self: flex-end;
-  border-left-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--text);
 }
 
 .chat-message-role {
   display: block;
-  margin-bottom: 0.28rem;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.58rem;
-  line-height: 1;
-  text-transform: uppercase;
+  margin-bottom: var(--space-1);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--leading-xs);
 }
 
+/* 주황 배경 위에서는 3단계 글자의 대비가 모자라다. */
 .chat-message.user .chat-message-role {
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 
 .chat-message-content {
   display: grid;
-  gap: 0.48rem;
-}
-
-.chat-message-content p {
-  margin: 0;
+  gap: var(--space-2);
 }
 
 .chat-message-content code {
-  display: inline-block;
-  max-width: 100%;
-  padding: 0.06rem 0.28rem;
-  border: 1px solid var(--line);
-  background: #0a0f0e;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--fill-2);
   color: var(--text);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  line-height: 1.45;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
-  vertical-align: baseline;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .chat-list {
   display: grid;
-  gap: 0.34rem;
-  margin: 0;
-  padding-left: 1.05rem;
-}
-
-.chat-list li {
-  padding-left: 0.15rem;
+  gap: var(--space-1);
+  padding-left: var(--space-5);
 }
 
 .chat-message-loading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-2);
+  color: var(--text-secondary);
 }
 
 .chat-message-loading .chat-message-role {
@@ -383,394 +462,323 @@
 .typing-indicator {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 0.18rem;
   align-items: center;
+  gap: var(--space-1);
 }
 
 .typing-indicator span {
-  width: 0.3rem;
-  height: 0.3rem;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--accent);
-  opacity: 0.35;
-  animation: tutorTypingPulse 1.05s infinite ease-in-out;
+  background: var(--text-secondary);
+  opacity: 0.3;
+  animation: tutor-typing 1.2s var(--ease-out) infinite;
 }
 
 .typing-indicator span:nth-child(2) {
-  animation-delay: 0.14s;
+  animation-delay: 0.15s;
 }
 
 .typing-indicator span:nth-child(3) {
-  animation-delay: 0.28s;
+  animation-delay: 0.3s;
 }
 
-@keyframes tutorTypingPulse {
+@keyframes tutor-typing {
   0%,
-  80%,
+  70%,
   100% {
-    transform: translateY(0);
     opacity: 0.3;
   }
 
-  40% {
-    transform: translateY(-0.12rem);
+  35% {
     opacity: 1;
   }
 }
 
 .chat-error {
-  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 0.45rem;
-  color: var(--danger);
-  font-size: 0.72rem;
+  margin-top: var(--space-2);
 }
 
-/* 실패한 질문을 다시 보낸다 (FE-11). */
-.chat-retry-btn,
-.chat-cancel-btn {
-  padding: 0.22rem 0.5rem;
-  border: 1px solid currentColor;
-  border-radius: 3px;
-  color: inherit;
-  font-size: 0.68rem;
-  background: transparent;
-  cursor: pointer;
-}
-
-.chat-retry-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.chat-cancel-btn {
-  margin-left: 0.4rem;
-  color: var(--faint);
-}
-
-/* 호출 제한 안내. 실패가 아니라 "기다리면 된다"는 상태임을 구분해 보여준다. */
 .chat-rate-limit-note {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin: 0.35rem 0 0;
-  color: var(--warning, #d9b45b);
-  font-size: 0.68rem;
-  line-height: 1.4;
+  margin-top: var(--space-2);
 }
 
-/* 실패한 질문의 재전송 자리. 제한 중에도 남아 있어야 질문을 다시 타이핑하지 않는다. */
+.chat-cancel-btn {
+  margin-left: auto;
+}
+
+/* 실패한 질문의 재전송 자리. 제한 중에도 남아 있어야 질문을 다시 타이핑하지 않는다 (FE-11). */
 .chat-retry-bar {
   display: flex;
   justify-content: flex-end;
-  margin-top: 0.35rem;
+  margin-top: var(--space-2);
 }
 
-/* 환경 배지 (FE-11). 색만으로 구분하지 않으므로 텍스트를 그대로 노출한다. */
-.tutor-environment-badge {
-  padding: 0.1rem 0.4rem;
-  border: 1px solid var(--faint);
-  border-radius: 3px;
-  color: var(--faint);
-  font-size: 0.6rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+/* 답변이 다른 환경을 근거로 왔을 때의 경고 (FE-11). 계약 불일치라 답변 **위**에 둔다. */
+.chat-environment-mismatch {
+  margin-bottom: var(--space-2);
+}
+
+.chat-fallback-note {
+  margin-top: var(--space-2);
 }
 
 /* 답변 근거 접기 영역 (FE-11). 없으면 렌더되지 않으므로 레이아웃이 흔들리지 않는다. */
 .chat-evidence {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  margin-top: 0.4rem;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--separator);
 }
 
 .chat-evidence-group summary {
-  color: var(--faint);
-  font-size: 0.66rem;
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
   cursor: pointer;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  list-style: none;
+}
+
+.chat-evidence-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-evidence-group summary::before {
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: '';
+  transform: rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.chat-evidence-group[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.chat-evidence-group summary:hover {
+  color: var(--text);
 }
 
 .chat-evidence-group ul {
-  margin: 0.3rem 0 0;
-  padding-left: 1rem;
-  font-size: 0.68rem;
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding-left: var(--space-5);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
 }
 
-.chat-evidence-group li {
-  margin-bottom: 0.15rem;
+.chat-evidence-group a {
+  color: var(--accent);
 }
 
 .chat-source-path {
-  margin-left: 0.35rem;
-  color: var(--faint);
-  font-size: 0.62rem;
+  margin-left: var(--space-1);
+  color: var(--text-tertiary);
 }
 
 /* 응답 시간 (FE-20). 숨기지 않되 답변을 가리지 않게 작게 둔다. */
 .chat-latency {
-  color: var(--faint);
-  font-size: 0.62rem;
-  letter-spacing: 0.02em;
-}
-
-.chat-fallback-note {
-  margin: 0.35rem 0 0;
-  color: var(--warning, #d9b45b);
-  font-size: 0.66rem;
-  line-height: 1.4;
-}
-
-/*
- * 답변이 다른 환경을 근거로 왔을 때의 경고 (FE-11). 계약 불일치는 fallback 안내보다
- * 무거우므로 답변 **위**에 두고 테두리로 본문과 분리한다. 색만으로 구분하지 않는다
- * (FE-17) — 문구에 두 환경 이름이 그대로 들어간다.
- */
-.chat-environment-mismatch {
-  margin: 0 0 0.4rem;
-  padding: 0.35rem 0.45rem;
-  border-left: 2px solid var(--warning, #d9b45b);
-  background: rgba(217, 180, 91, 0.08);
-  color: var(--warning, #d9b45b);
-  font-size: 0.66rem;
-  line-height: 1.45;
-}
-
-/* 시각적으로는 숨기고 스크린리더에는 남긴다. */
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-form {
   display: flex;
-  gap: 0.4rem;
-  margin-top: 0.7rem;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .chat-form input {
   min-width: 0;
+  height: var(--control-height);
   flex: 1;
-  padding: 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: 0;
-  background: #0d1211;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
   color: var(--text);
-  font-size: 0.76rem;
+  font-size: var(--text-md);
 }
 
-.chat-form button {
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--accent);
-  border-radius: 0;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.68rem;
-}
-
-.chat-form button:disabled {
+.chat-form input:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  opacity: 0.6;
 }
 
-/* AI 시나리오 섹션 */
+.chat-form .ui-button {
+  min-height: var(--control-height);
+}
+
+/* ── AI 문제 더 풀기 ─────────────────────────────────────── */
 .ai-scenario-section {
-  border-top: 1px solid var(--line-strong);
-  background: #0d1211;
+  flex-shrink: 0;
+  padding: var(--space-4);
+  border-top: 1px solid var(--separator);
 }
 
 .ai-section-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.2rem 0.75rem;
-  padding: 0.9rem 0.9rem 0.5rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.ai-section-header .panel-index {
-  grid-column: 1;
-}
-
-.ai-section-header h3 {
-  grid-column: 1;
-  color: var(--text);
-  font-size: 1rem;
-  letter-spacing: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
 }
 
 .demo-unlock-btn {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
-  flex: 0 0 auto;
-  padding: 0.4rem 0.55rem;
-  border: 1px dashed var(--accent);
-  border-radius: 0;
-  background: rgba(56, 189, 248, 0.08);
-  color: var(--accent);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.62rem;
-}
-
-.demo-unlock-btn:hover {
-  background: rgba(56, 189, 248, 0.14);
-}
-
-@media (max-width: 560px) {
-  .ai-section-header {
-    grid-template-columns: 1fr;
-  }
-
-  .demo-unlock-btn {
-    grid-column: 1;
-    grid-row: auto;
-    justify-self: start;
-    margin-top: 0.35rem;
-  }
+  margin-right: calc(var(--space-2) * -1);
 }
 
 .ai-lock-notice {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.75rem 0.9rem;
-  color: var(--muted);
-  font-size: 0.75rem;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
 }
 
-.ai-lock-icon {
-  font-size: 0.9rem;
-}
-
-.ai-scenario-active {
-  padding: 0.75rem 0.9rem 0;
-}
-
-.ai-scenario-title {
-  margin-bottom: 0.35rem;
-  color: var(--text);
-  font-size: 0.88rem;
-  font-weight: 700;
-}
-
-.ai-scenario-brief {
-  margin-bottom: 0.5rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.55;
-}
-
-.ai-difficulty-badge {
-  display: inline-block;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
+.ai-lock-notice .mission-icon {
+  margin-top: 3px;
+  color: var(--text-tertiary);
 }
 
 .ai-difficulty-selector {
-  padding: 0.75rem 0.9rem 0.9rem;
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .ai-selector-label {
-  margin-bottom: 0.5rem;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: var(--leading-sm);
 }
 
-.difficulty-btns {
+/* 세그먼트 컨트롤. 경계는 비텍스트 대비 3:1 을 넘는 --border-control 이다. */
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+  background: var(--fill-1);
+}
+
+.segmented-option {
+  position: relative;
   display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
 }
 
-.difficulty-btn {
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
+.segmented-option input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
   cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  transition: 140ms ease;
+  opacity: 0;
 }
 
-.difficulty-btn:hover {
-  border-color: var(--accent);
+.segmented-option span {
+  display: inline-flex;
+  min-height: calc(var(--control-height) - 6px);
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  border-radius: calc(var(--radius-md) - 2px);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.segmented-option span .mission-icon {
+  display: none;
+}
+
+.segmented-option:hover span {
+  background: var(--fill-2);
   color: var(--text);
 }
 
-.difficulty-btn.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--text);
+/* 선택은 배경 밝기만으로 말하지 않는다 — 강조색 글자와 체크를 함께 쓴다. */
+.segmented-option input:checked + span {
+  background: var(--surface-3);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.segmented-option input:checked + span .mission-icon {
+  display: block;
+}
+
+.segmented-option input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .ai-start-btn {
   width: 100%;
-  padding: 0.6rem;
-  border-color: var(--accent);
-  color: var(--accent);
-  font-size: 0.72rem;
+  margin-top: var(--space-1);
 }
 
-.ai-start-btn:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--text);
-}
-
+/* ── 플로팅 튜터 (작은 화면) ────────────────────────────── */
 @media (max-width: 980px), (max-height: 760px) {
   .tutor-floating-launcher {
     position: fixed;
-    left: 1rem;
-    bottom: 1rem;
+    bottom: var(--space-4);
+    left: var(--space-4);
     z-index: 80;
     display: inline-flex;
+    min-height: 44px;
     align-items: center;
     justify-content: center;
-    min-width: 6rem;
-    min-height: 2.65rem;
-    padding: 0.65rem 0.85rem;
-    border: 1px solid var(--accent);
-    background: #17211e;
-    color: var(--accent);
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+    padding: 0 var(--space-5);
+    border-radius: 999px;
+    box-shadow: var(--shadow-2);
+    color: var(--text);
+    font-size: var(--text-md);
+    font-weight: 600;
   }
 
+  /*
+   * 콘텐츠 위에 떠 있으므로 그림자를 준다. 답변 본문은 읽는 글이라 재질(글래스)이 아니라
+   * 불투명 면을 쓴다 (설계 문서 4).
+   */
   .tutor-panel.tutor-floating {
     position: fixed;
-    left: 1rem;
-    bottom: 1rem;
+    bottom: var(--space-4);
+    left: var(--space-4);
     z-index: 90;
     width: min(26rem, calc(100vw - 2rem));
     height: min(34rem, calc(100dvh - 6rem));
     min-height: min(22rem, calc(100dvh - 6rem));
     max-height: none;
     flex: none;
-    border: 1px solid var(--line-strong);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46);
-    transition: opacity 160ms ease, transform 160ms ease;
+    border: 1px solid var(--separator-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-2);
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out),
+      visibility 0s linear 0s;
   }
 
   .mission-panel.mission-active .tutor-panel.tutor-floating {
@@ -778,60 +786,42 @@
     flex: none;
   }
 
+  /* 닫힌 패널은 보이지 않을 뿐 아니라 Tab 순서에서도 빠져야 한다. */
   .tutor-panel.tutor-floating.tutor-collapsed {
     pointer-events: none;
     opacity: 0;
-    transform: translateY(0.75rem);
+    transform: translateY(var(--space-3)) scale(0.98);
+    visibility: hidden;
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      transform var(--dur-base) var(--ease-out),
+      visibility 0s linear var(--dur-base);
   }
 
   .tutor-panel.tutor-floating .tutor-floating-close {
     display: inline-flex;
     flex: 0 0 auto;
-    align-items: center;
-    justify-content: center;
-    min-height: 1.9rem;
-    padding: 0.35rem 0.55rem;
-    border: 1px solid var(--line-strong);
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 0.64rem;
-  }
-
-  .tutor-panel.tutor-floating .tutor-floating-close:hover {
-    border-color: var(--accent);
-    color: var(--text);
+    margin-right: calc(var(--space-2) * -1);
   }
 }
 
 @media (max-width: 480px) {
   .tutor-floating-launcher {
-    left: 0.75rem;
-    bottom: 0.75rem;
+    bottom: var(--space-3);
+    left: var(--space-3);
   }
 
   .tutor-panel.tutor-floating {
-    right: 0.75rem;
-    bottom: 0.75rem;
-    left: 0.75rem;
+    right: var(--space-3);
+    bottom: var(--space-3);
+    left: var(--space-3);
     width: auto;
     height: min(72dvh, calc(100dvh - 5rem));
     min-height: min(19rem, calc(100dvh - 5rem));
-    padding: 0.75rem;
+    padding: var(--space-3);
   }
 
   .mission-panel.mission-active .tutor-panel.tutor-floating {
     min-height: min(19rem, calc(100dvh - 5rem));
-  }
-}
-
-@media (max-width: 768px) {
-  .mission-panel {
-    border-right: none;
-  }
-
-  .mission-list {
-    padding: 0.65rem;
   }
 }
