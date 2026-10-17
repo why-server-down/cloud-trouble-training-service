@@ -56,7 +56,7 @@ const ProgressSummary: React.FC<ProgressSummaryProps> = ({ token, refreshKey = 0
       ) : (
         <div className="progress-summary-body">
           <p className="progress-summary-line">
-            {/* 티어 색은 쓰지 않는다. 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
+            {/* 티어 색은 쓰지 않는다. 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
             <span className="ui-chip">
               <span className="sr-only">현재 티어 </span>
               {tier.name}

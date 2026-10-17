@@ -51,19 +51,19 @@
   --text: #eceae4;
   --text-secondary: #a7afa9;
   --text-tertiary: #808c86;
-  --accent: #ec8a4b;
-  --accent-hover: #f39b62;
-  --accent-soft: rgba(236, 138, 75, 0.14);
-  --accent-line: rgba(236, 138, 75, 0.45);
-  --text-on-accent: #1b0f06;
+  --accent: #73a9f9;
+  --accent-hover: #85b9ff;
+  --accent-soft: rgba(115, 169, 249, 0.14);
+  --accent-line: rgba(115, 169, 249, 0.45);
+  --text-on-accent: #0c1626;
   --ok: #8cc084;
   --ok-soft: rgba(140, 192, 132, 0.14);
   --warning: #e2b54f;
   --warning-soft: rgba(226, 181, 79, 0.14);
   --danger: #ef6f5f;
   --danger-soft: rgba(239, 111, 95, 0.14);
-  --info: #86b4d9;
-  --info-soft: rgba(134, 180, 217, 0.14);
+  --info: #7ac1d2;
+  --info-soft: rgba(122, 193, 210, 0.14);
   --scrim: rgba(0, 0, 0, 0.5);
 
   /* 글꼴 — 모노에는 한글이 없어 끝에 Plex Sans KR 을 둔다. 굴림체 폴백을 막는다. */
@@ -391,7 +391,7 @@ a {
   }
 
   50% {
-    box-shadow: 0 0 0 6px rgba(236, 138, 75, 0.05);
+    box-shadow: 0 0 0 6px rgba(115, 169, 249, 0.05);
   }
 }
 

@@ -37,9 +37,9 @@ import './Terminal.css'
 const TERMINAL_THEME = {
   background: '#0a0c0b',
   foreground: '#eceae4',
-  cursor: '#ec8a4b',
+  cursor: '#73a9f9',
   cursorAccent: '#0a0c0b',
-  selectionBackground: 'rgba(236, 138, 75, 0.28)',
+  selectionBackground: 'rgba(115, 169, 249, 0.28)',
   black: '#1a1f1d',
   red: '#ef6f5f',
   green: '#8cc084',

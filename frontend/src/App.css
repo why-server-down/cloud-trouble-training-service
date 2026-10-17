@@ -76,7 +76,7 @@
   flex-shrink: 0;
   place-items: center;
   border-radius: 50%;
-  /* 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
+  /* 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
   background: var(--fill-3);
   color: var(--text);
   font-size: var(--text-xs);
