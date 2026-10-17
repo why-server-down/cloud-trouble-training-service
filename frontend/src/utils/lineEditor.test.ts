@@ -5,6 +5,8 @@ import {
   deleteForward,
   deleteToStart,
   deleteWordBackward,
+  findHistoryMatch,
+  historySearchLabel,
   insertText,
   moveEnd,
   moveHome,
@@ -88,5 +90,26 @@ describe('터미널 입력줄 편집 (FE-28)', () => {
     const { state, shown } = apply('kubectl get services', moveHome, (s) => replaceLine(s, 'docker ps'))
     expect(state).toEqual({ line: 'docker ps', cursor: 9 })
     expect(shown).toBe('docker ps')
+  })
+})
+
+describe('이력 검색 (FE-28)', () => {
+  const history = ['kubectl get pods', 'kubectl describe pod nginx', 'kubectl get services', 'docker ps']
+
+  it('가장 최근 명령부터 query 를 포함하는 것을 찾는다', () => {
+    expect(findHistoryMatch(history, 'get', history.length)).toBe(2)
+    // Ctrl+R 을 한 번 더 누르면 그보다 오래된 것
+    expect(findHistoryMatch(history, 'get', 2)).toBe(0)
+    expect(findHistoryMatch(history, 'get', 0)).toBe(-1)
+  })
+
+  it('없으면 -1, 빈 query 는 바로 앞 명령', () => {
+    expect(findHistoryMatch(history, 'helm', history.length)).toBe(-1)
+    expect(findHistoryMatch(history, '', history.length)).toBe(3)
+  })
+
+  it('검색 문구는 찾은 명령과 실패를 구분한다', () => {
+    expect(historySearchLabel('desc', 'kubectl describe pod nginx')).toBe("(이력 검색) 'desc': kubectl describe pod nginx")
+    expect(historySearchLabel('helm', null)).toBe("(이력 검색 · 없음) 'helm': ")
   })
 })

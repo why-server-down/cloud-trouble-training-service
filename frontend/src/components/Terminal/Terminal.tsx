@@ -10,6 +10,8 @@ import {
   deleteToStart,
   deleteWordBackward,
   EditResult,
+  findHistoryMatch,
+  historySearchLabel,
   insertText,
   moveEnd,
   moveHome,
@@ -56,10 +58,17 @@ const TERMINAL_THEME = {
   brightWhite: '#f4f2ec',
 }
 
-const TERMINAL_FONT = '"IBM Plex Mono", "SF Mono", Menlo, Consolas, "IBM Plex Sans KR", monospace'
-/** Plex Mono 가 아직 없을 때 쓰는 스택. 값이 달라야 로딩 후 바꿀 때 xterm 이 글자 폭을 다시 잰다. */
+/*
+ * 터미널 글꼴 (FE-28). xterm 은 한글을 두 칸에 그리는데, 한글 글리프가 영문 두 칸보다 좁은 글꼴이면
+ * "명 령 을"처럼 벌어져 보인다. 한글 = 영문 × 2 로 설계된 D2Coding 의 부분 글꼴을 이름을 바꿔 쓴다
+ * (Terminal.css @font-face, assets/fonts/OFL-AfterFail-Terminal-Mono.txt).
+ */
+const TERMINAL_FONT_FAMILY = 'AfterFail Terminal Mono'
+const TERMINAL_FONT = `"${TERMINAL_FONT_FAMILY}", "SF Mono", Menlo, Consolas, monospace`
+/** 웹폰트가 아직 없을 때 쓰는 스택. 값이 달라야 로딩 후 바꿀 때 xterm 이 글자 폭을 다시 잰다. */
 const TERMINAL_FALLBACK_FONT = '"SF Mono", Menlo, Consolas, "IBM Plex Sans KR", monospace'
-const TERMINAL_FONT_SIZE = 13
+// D2Coding 은 영문 폭이 0.5em 이라 같은 크기에서 Plex Mono 보다 좁다. 한 단계 키워 읽기 폭을 맞춘다.
+const TERMINAL_FONT_SIZE = 14
 
 const CONNECTION_LABEL = {
   connected: '연결됨',
@@ -132,13 +141,12 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
   useEffect(() => {
     if (!terminalElementRef.current) return
 
-    const fontSpec = `${TERMINAL_FONT_SIZE}px "IBM Plex Mono"`
+    const fontSpec = `${TERMINAL_FONT_SIZE}px "${TERMINAL_FONT_FAMILY}"`
     const fonts = typeof document !== 'undefined' ? document.fonts : undefined
     const terminal = new XTerm({
       cursorBlink: true,
       fontSize: TERMINAL_FONT_SIZE,
-      // Plex Mono 는 글꼴 자체 줄 높이가 1.3em 이라 배수는 작게 둔다.
-      lineHeight: 1.1,
+      lineHeight: 1.15,
       fontFamily: fonts?.check(fontSpec) === false ? TERMINAL_FALLBACK_FONT : TERMINAL_FONT,
       theme: TERMINAL_THEME,
       /*
@@ -217,6 +225,64 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
     const resetLine = () => {
       currentLineRef.current = ''
       cursorRef.current = 0
+    }
+
+    /*
+     * 이력 검색 (Ctrl+R). 검색 중에는 입력줄 자리에 "(이력 검색) '찾는 말': 명령" 을 그린다.
+     * Enter 는 찾은 명령을 실행, Esc·화살표는 찾은 명령을 입력줄로 가져와 고치게 하고,
+     * Ctrl+C·Ctrl+G 는 검색 전 입력으로 되돌린다 (bash 와 같은 손버릇).
+     */
+    const search = { active: false, query: '', index: -1, shown: '', original: '' }
+    const history = commandHistoryRef.current
+    const drawSearch = () => {
+      const match = search.index >= 0 ? history[search.index] : null
+      const next = historySearchLabel(search.query, match)
+      terminal.write(replaceLine({ line: search.shown, cursor: search.shown.length }, next).output)
+      search.shown = next
+    }
+    const startSearch = () => {
+      search.active = true
+      search.query = ''
+      search.original = currentLineRef.current
+      search.index = findHistoryMatch(history, '', history.length)
+      search.shown = currentLineRef.current
+      terminal.write(currentLineRef.current.slice(cursorRef.current))
+      cursorRef.current = currentLineRef.current.length
+      drawSearch()
+    }
+    const endSearch = (line: string) => {
+      terminal.write(replaceLine({ line: search.shown, cursor: search.shown.length }, line).output)
+      search.active = false
+      currentLineRef.current = line
+      cursorRef.current = line.length
+    }
+    /** 검색 중인 키를 처리했으면 true. */
+    const handleSearchKey = (data: string): boolean => {
+      const code = data.charCodeAt(0)
+      const match = search.index >= 0 ? history[search.index] : null
+      if (code === 18) {
+        const older = findHistoryMatch(history, search.query, search.index >= 0 ? search.index : history.length)
+        if (older >= 0) search.index = older
+        drawSearch()
+      } else if (code === 13) {
+        endSearch(match ?? search.original)
+        const command = currentLineRef.current
+        resetLine()
+        queueCommand(command, true)
+      } else if (code === 3 || code === 7) {
+        endSearch(search.original)
+      } else if (data === '\x1b' || data.startsWith('\x1b[') || code === 1 || code === 5) {
+        endSearch(match ?? search.original)
+      } else if (code === 127) {
+        search.query = search.query.slice(0, -1)
+        search.index = findHistoryMatch(history, search.query, history.length)
+        drawSearch()
+      } else if (code >= 32) {
+        search.query += data
+        search.index = findHistoryMatch(history, search.query, history.length)
+        drawSearch()
+      }
+      return true
     }
 
     const processNextCommand = () => {
@@ -310,6 +376,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
         return
       }
 
+      if (search.active && handleSearchKey(data)) return
+
       // Esc: 터미널에서 빠져나간다. 그다음 Tab 이 다음 요소로 간다 (키보드 트랩 방지).
       if (data === '\x1b') {
         terminal.blur()
@@ -353,9 +421,19 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
           historyIndexRef.current = commandHistoryRef.current.length
           commit(replaceLine(lineState(), ''))
         }
+      } else if (code === 18) {
+        startSearch()
       } else if (code === 3) {
-        // Ctrl+C 는 입력 중인 줄을 버린다. 서버에서 이미 실행 중인 명령은 멈추지 않는다(명령마다 시간 제한이 있다).
-        terminal.write(`^C\r\n${getPrompt()}`)
+        /*
+         * Ctrl+C 는 입력 중인 줄을 버린다. 서버에서 이미 실행 중인 명령은 멈출 수 없다 —
+         * 그때는 기다리면 된다는 사실을 알린다(명령마다 시간 제한이 있다). 프롬프트는
+         * 결과가 도착하면 그때 나온다.
+         */
+        if (isExecutingRef.current) {
+          terminal.write('^C\r\n\x1b[2m실행 중인 명령은 멈추지 않습니다. 명령마다 시간 제한이 있어 곧 끝납니다.\x1b[0m\r\n')
+        } else {
+          terminal.write(`^C\r\n${getPrompt()}`)
+        }
         resetLine()
       } else if (code === 12) {
         terminal.clear()
@@ -418,7 +496,7 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
     <div className="terminal-container">
       <div className="terminal-status">
         <span className="terminal-label">{terminalMeta.headerLabel}</span>
-        <span id="terminal-exit-hint" className="terminal-exit-hint">Esc: 터미널에서 나가기</span>
+        <span id="terminal-exit-hint" className="terminal-exit-hint">Esc 나가기 · Ctrl+R 이력 검색</span>
         <span className={`terminal-connection status-${connectionStatus}`} role="status">
           <span className="terminal-connection-dot" aria-hidden="true" />
           {CONNECTION_LABEL[connectionStatus]}

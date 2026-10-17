@@ -147,3 +147,18 @@ export const replaceLine = ({ line, cursor }: LineState, next: string): EditResu
     output: toEnd + back(width) + ' '.repeat(width) + back(width) + next,
   }
 }
+
+/**
+ * 이력 검색 (Ctrl+R, FE-28). `before` 보다 앞(오래된 쪽)에서 query 를 포함하는 가장 최근 명령의
+ * 위치를 돌려준다. 없으면 -1. query 가 비어 있으면 바로 앞 명령을 고른다.
+ */
+export const findHistoryMatch = (history: readonly string[], query: string, before: number): number => {
+  for (let index = Math.min(before, history.length) - 1; index >= 0; index -= 1) {
+    if (history[index].includes(query)) return index
+  }
+  return -1
+}
+
+/** 이력 검색 중 입력줄 자리에 보여 줄 문구. */
+export const historySearchLabel = (query: string, match: string | null) =>
+  match === null ? `(이력 검색 · 없음) '${query}': ` : `(이력 검색) '${query}': ${match}`
