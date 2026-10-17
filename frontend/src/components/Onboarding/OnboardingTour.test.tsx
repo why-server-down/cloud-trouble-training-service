@@ -125,3 +125,39 @@ describe('투어 카드 배치 (FE-28)', () => {
     expect(card.style.left).toBe(`${40 + 380 + 8 + 16}px`)
   })
 })
+
+describe('스포트라이트와 스크롤 (FE-28)', () => {
+  const placeTarget = (rect: { top: number; left: number; width: number; height: number }) => {
+    const target = document.createElement('button')
+    target.setAttribute('data-tour', 'edge')
+    target.getBoundingClientRect = () =>
+      ({ ...rect, right: rect.left + rect.width, bottom: rect.top + rect.height, x: rect.left, y: rect.top, toJSON: () => ({}) }) as DOMRect
+    const frame = document.createElement('div')
+    frame.style.overflow = 'hidden'
+    frame.appendChild(target)
+    document.body.appendChild(frame)
+    return { target, frame }
+  }
+
+  it('화면 맨 위 대상도 상자가 대상을 감싼다 — 위치만 옮기고 크기는 그대로 두지 않는다', () => {
+    const { frame } = placeTarget({ top: 11.5, left: 1000, width: 168, height: 32 })
+    render(<OnboardingTour steps={[{ target: '[data-tour="edge"]', eyebrow: '상단', title: '프로필', body: '설명' }]} run onClose={vi.fn()} />)
+
+    const spotlight = document.querySelector('.tour-spotlight') as HTMLElement
+    const top = parseFloat(spotlight.style.top)
+    const height = parseFloat(spotlight.style.height)
+    expect(top).toBe(4)
+    // 아래 가장자리 = 대상 아래(43.5) + 여백 8
+    expect(top + height).toBeCloseTo(51.5)
+    frame.remove()
+  })
+
+  it('스크롤이 막힌 틀(overflow: hidden)은 밀지 않는다', () => {
+    const { frame } = placeTarget({ top: 2000, left: 10, width: 100, height: 30 })
+    frame.scrollTop = 0
+    render(<OnboardingTour steps={[{ target: '[data-tour="edge"]', eyebrow: '아래', title: '멀리', body: '설명' }]} run onClose={vi.fn()} />)
+
+    expect(frame.scrollTop).toBe(0)
+    frame.remove()
+  })
+})

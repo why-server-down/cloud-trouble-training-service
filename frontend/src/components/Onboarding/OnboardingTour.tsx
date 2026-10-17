@@ -24,11 +24,33 @@ type TargetRect = {
 }
 
 const SPOTLIGHT_PADDING = 8
+/** 스포트라이트가 화면 끝에 붙지 않게 남기는 최소 여백. 헤더 버튼처럼 끝에 가까운 대상에도 맞도록 작게 둔다. */
+const SPOTLIGHT_EDGE = 4
 const TOOLTIP_WIDTH = 340
 const TOOLTIP_GAP = 16
 const EDGE_GUTTER = 16
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+/**
+ * 대상이 보이도록 **사용자가 스크롤할 수 있는** 가장 가까운 영역만 움직인다.
+ * scrollIntoView 는 overflow: hidden 인 앱 틀까지 밀어서, 투어가 끝난 뒤 화면이 내려간 채로
+ * 남았다(환경 탭이 가려지고 사용자는 되돌릴 방법이 없었다).
+ */
+const scrollTargetIntoView = (element: Element) => {
+  let parent = element.parentElement
+  while (parent && parent !== document.body) {
+    const { overflowY } = getComputedStyle(parent)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) {
+      const target = element.getBoundingClientRect()
+      const box = parent.getBoundingClientRect()
+      if (target.top < box.top) parent.scrollTop -= box.top - target.top + SPOTLIGHT_PADDING
+      else if (target.bottom > box.bottom) parent.scrollTop += target.bottom - box.bottom + SPOTLIGHT_PADDING
+      return
+    }
+    parent = parent.parentElement
+  }
+}
 
 const getVisibleRect = (selector: string): TargetRect | null => {
   const element = document.querySelector(selector)
@@ -100,14 +122,17 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
   const currentStep = steps[stepIndex]
   const isLastStep = stepIndex === steps.length - 1
 
+  /*
+   * 대상 둘레에 여백을 둔 스포트라이트. 네 변을 따로 화면 안으로 자른다 — 예전에는 위치만
+   * 끌어오고 크기는 그대로라, 화면 맨 위의 프로필 버튼에서 상자가 아래로 밀려 어긋났다.
+   */
   const paddedRect = useMemo(() => {
     if (!targetRect) return null
-    return {
-      top: Math.max(EDGE_GUTTER, targetRect.top - SPOTLIGHT_PADDING),
-      left: Math.max(EDGE_GUTTER, targetRect.left - SPOTLIGHT_PADDING),
-      width: Math.min(window.innerWidth - EDGE_GUTTER * 2, targetRect.width + SPOTLIGHT_PADDING * 2),
-      height: Math.min(window.innerHeight - EDGE_GUTTER * 2, targetRect.height + SPOTLIGHT_PADDING * 2),
-    }
+    const top = Math.max(SPOTLIGHT_EDGE, targetRect.top - SPOTLIGHT_PADDING)
+    const left = Math.max(SPOTLIGHT_EDGE, targetRect.left - SPOTLIGHT_PADDING)
+    const bottom = Math.min(window.innerHeight - SPOTLIGHT_EDGE, targetRect.top + targetRect.height + SPOTLIGHT_PADDING)
+    const right = Math.min(window.innerWidth - SPOTLIGHT_EDGE, targetRect.left + targetRect.width + SPOTLIGHT_PADDING)
+    return { top, left, width: right - left, height: bottom - top }
   }, [targetRect])
 
   const tooltipPosition = useMemo(
@@ -189,7 +214,7 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
 
     const updateTarget = () => setTargetRect(getVisibleRect(currentStep.target))
     const target = document.querySelector(currentStep.target)
-    target?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
+    if (target) scrollTargetIntoView(target)
 
     const timer = window.setTimeout(updateTarget, 120)
     updateTarget()
