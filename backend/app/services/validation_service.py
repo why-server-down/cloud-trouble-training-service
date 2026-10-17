@@ -84,10 +84,12 @@ class MissionValidationQueries:
                 namespace="{namespace}",endpoint="webapp-svc",ready="true"
             }) > 0
         """,
+        # 장애는 readinessProbe 실패다. 예전 쿼리는 Liveness 성공을 셌는데 nginx 에는 livenessProbe 가
+        # 없어 고쳐도 통과할 수 없었다. nginx-svc 의 ready 엔드포인트로 본다.
         "network_latency": """
-            sum(increase(prober_probe_total{
-                namespace="{namespace}",probe_type="Liveness",result="successful"
-            }[1m])) > 0
+            sum(kube_endpoint_address{
+                namespace="{namespace}",endpoint="nginx-svc",ready="true"
+            }) > 0
         """,
     }
 
@@ -209,6 +211,23 @@ class K8sValidationService(BaseValidationService):
             logger.warning(f"[Validation] Failed to inspect pods in {namespace}: {e}")
             return self._retry()
 
+    @staticmethod
+    def _rollout_complete(dep) -> bool:
+        """Deployment 롤아웃이 끝나 모든 replica 가 새 템플릿으로 Ready 인가.
+
+        Pod phase 만 보면 CrashLoopBackOff 도 Running 이라 고치지 않아도 통과했고, 주입 직후
+        이전 Pod 가 아직 Ready 인 1~2초 동안 확인해도 통과했다.
+        """
+        replicas = dep.spec.replicas if dep.spec.replicas is not None else 1
+        status = dep.status
+        return (
+            (status.observed_generation or 0) >= (dep.metadata.generation or 0)
+            and (status.updated_replicas or 0) == replicas
+            and (status.ready_replicas or 0) == replicas
+            and (status.available_replicas or 0) == replicas
+            and not status.unavailable_replicas
+        )
+
     def _check_memory_stress(self, namespace: str) -> ValidationResult:
         try:
             dep = self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
@@ -232,27 +251,18 @@ class K8sValidationService(BaseValidationService):
                     return self._retry()
             else:
                 return self._retry()
-        except Exception as e:
-            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
-            return self._retry()
-
-        try:
-            pods = self._core_api.list_namespaced_pod(namespace=namespace, label_selector="app=nginx")
-            if not pods.items:
+            if not self._rollout_complete(dep):
                 return self._retry()
-            for pod in pods.items:
-                if pod.status.phase != "Running":
-                    return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            logger.warning(f"[Validation] Failed to inspect pods in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
             return self._retry()
 
     def _check_service_misconfig(self, namespace: str) -> ValidationResult:
         try:
             svc = self._core_api.read_namespaced_service(name="webapp-svc", namespace=namespace)
-            selector = svc.spec.selector or {}
-            if selector.get("app") != "webapp":
+            # 정확히 일치해야 한다. 키를 더 붙이면 Pod 를 고르지 못해 Endpoints 가 비어도 통과했다.
+            if (svc.spec.selector or {}) != {"app": "webapp"}:
                 return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
@@ -260,8 +270,12 @@ class K8sValidationService(BaseValidationService):
             return self._retry()
 
     def _check_network_latency(self, namespace: str) -> ValidationResult:
-        # nginx-svc에 ready 엔드포인트가 존재하면 readiness probe가 정상화된 것
+        # nginx 롤아웃이 끝나 Pod 가 Ready 이고 nginx-svc 에 ready 엔드포인트가 있으면 정상화된 것.
+        # 엔드포인트만 보면 주입 직후 이전 Pod 가 빠지기 전이나, 다른 Pod 에 app=nginx 라벨을 붙여도 통과했다.
         try:
+            dep = self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
+            if not self._rollout_complete(dep):
+                return self._retry()
             ep = self._core_api.read_namespaced_endpoints(name="nginx-svc", namespace=namespace)
             for subset in (ep.subsets or []):
                 if subset.addresses:

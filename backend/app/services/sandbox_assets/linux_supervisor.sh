@@ -35,7 +35,9 @@ prepare_worker() {
 
 start_process_flood() {
     _count="${1:-120}"
-    prepare_worker afterfail-worker 'sleep 86400'
+    # sleep 을 자식으로 두고 기다린다. pkill -f afterfail-worker 로 워커가 끝날 때 자식도 함께
+    # 정리한다. 예전에는 sleep 120개가 고아로 남아 다음 미션(cpu_saturation)까지 보였다.
+    prepare_worker afterfail-worker "trap 'kill \$! 2>/dev/null; exit 0' TERM; sleep 86400 & wait \$!"
     _i=0
     while [ "$_i" -lt "$_count" ]; do
         "$WORKDIR/afterfail-worker" >/dev/null 2>&1 &

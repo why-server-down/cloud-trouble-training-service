@@ -30,6 +30,11 @@ class _FakeSandboxService:
         self.fail_when = fail_when
         self.raise_on_reference = raise_on_reference
 
+    async def ensure(self, *, user_id, namespace, environment):
+        # 주입은 샌드박스를 먼저 준비한다(처음 미션을 하는 계정은 아직 없다).
+        self.ensured = getattr(self, "ensured", []) + [(user_id, namespace, environment)]
+        return self.reference_for(user_id=user_id, namespace=namespace, environment=environment)
+
     def reference_for(self, *, user_id, namespace, environment):
         if self.raise_on_reference:
             raise RuntimeError("sandbox is gone")

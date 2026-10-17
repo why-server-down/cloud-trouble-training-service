@@ -73,7 +73,7 @@ class LinuxChaosInjector(BaseChaosInjector):
         chaos_id = f"{chaos_type.replace('_', '-')}-{uuid.uuid4().hex[:8]}"
         loop = asyncio.get_running_loop()
         try:
-            sandbox = self._sandbox_for(namespace)
+            sandbox = await self._ensure_sandbox(namespace)
             snapshot = await loop.run_in_executor(None, lambda: self._snapshot(sandbox))
             await loop.run_in_executor(
                 None, lambda: self._raise_signal(sandbox, signal, chaos_type)
@@ -130,6 +130,18 @@ class LinuxChaosInjector(BaseChaosInjector):
         return True
 
     # --- 헬퍼 ------------------------------------------------------------
+
+    async def _ensure_sandbox(self, namespace: str) -> SandboxRef:
+        """주입 대상 샌드박스를 준비한다(멱등).
+
+        화면은 미션을 시작한 뒤에 터미널 세션을 열어 샌드박스를 만든다. 처음 미션을 하는 계정은
+        주입 시점에 샌드박스가 없어 exec 가 실패했다. 되돌리기는 이미 있는 샌드박스만 다룬다.
+        """
+        return await self._sandboxes.ensure(
+            user_id=namespace.removeprefix("user-"),
+            namespace=namespace,
+            environment=environments.LINUX,
+        )
 
     def _sandbox_for(self, namespace: str) -> SandboxRef:
         user_id = namespace.removeprefix("user-")
