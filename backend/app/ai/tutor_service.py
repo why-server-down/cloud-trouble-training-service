@@ -66,8 +66,8 @@ _MOCK_HINTS: dict[str, dict[str, dict[int, str]]] = {
         "memory_stress": {
             0: "nginx Pod의 STATUS와 RESTARTS 값이 어떻게 보이나요? 새로 만들어진 Pod가 같은 상태를 반복하고 있지는 않나요?",
             1: "새 Pod가 시작했다가 반복해서 종료되고 있다면, 컨테이너가 마지막에 왜 끝났는지와 Pod에 걸린 리소스 설정을 살펴볼 차례예요.",
-            2: "`kubectl describe pod <이름>`에서 Last State의 Reason과 Exit Code, 그리고 Limits 항목을 확인해 보세요. 컨테이너가 memory limit보다 많은 메모리를 쓰면 커널이 강제로 종료합니다(OOMKilled, Exit Code 137). 지금 limit 값이 nginx가 뜨기에 충분한지 생각해 보세요.",
-            3: "원인: nginx 컨테이너의 memory limit이 6Mi로 너무 낮아 새 Pod가 뜨자마자 OOMKilled로 종료되고 CrashLoopBackOff를 반복합니다.\n1. `kubectl describe pod <이름>`에서 Last State: OOMKilled와 Limits의 memory 6Mi 확인\n2. `kubectl set resources deployment/nginx --limits=memory=128Mi`로 limit 상향\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\nPod를 재시작해도 같은 limit으로 다시 뜨기 때문에 해결되지 않아요. Deployment의 limit 자체를 올려야 합니다.",
+            2: "`kubectl describe pod <이름>`에서 Last State의 Reason과 Exit Code, 그리고 Limits 항목을 확인해 보세요. 컨테이너가 memory limit보다 많은 메모리를 쓰면 커널이 강제로 종료합니다(Exit Code 137, 클러스터에 따라 Reason은 OOMKilled 또는 Error). 지금 limit 값이 nginx가 뜨기에 충분한지 생각해 보세요.",
+            3: "원인: nginx 컨테이너의 memory limit이 6Mi로 너무 낮아 새 Pod가 시작하자마자 한도를 넘어 강제 종료(Exit Code 137)되고 CrashLoopBackOff를 반복합니다.\n1. `kubectl describe pod <이름>`에서 Last State의 Exit Code 137과 Limits의 memory 6Mi 확인\n2. `kubectl set resources deployment/nginx --limits=memory=128Mi`로 limit 상향\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\nPod를 재시작해도 같은 limit으로 다시 뜨기 때문에 해결되지 않아요. Deployment의 limit 자체를 올려야 합니다.",
         },
         "service_misconfig": {
             0: "웹페이지 요청은 Service를 거쳐 Pod로 전달돼요. Pod 자체는 정상으로 떠 있나요? 그렇다면 요청은 어디서 끊겼을까요?",
