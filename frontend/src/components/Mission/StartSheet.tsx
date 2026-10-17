@@ -116,16 +116,16 @@ const StartSheet: React.FC<StartSheetProps> = ({
           <h3 id="start-guide-title">처음이라면 — 작업 화면은 이렇게 생겼습니다</h3>
           <ol>
             <li>
-              <strong>인시던트 바</strong>
-              <span>위쪽에 남은 시간·점수와 완료 확인이 있습니다.</span>
+              <strong>위쪽 진행 바</strong>
+              <span>남은 시간·점수와 완료 확인 버튼이 있습니다.</span>
             </li>
             <li>
               <strong>터미널</strong>
               <span>명령으로 상태를 조사하고 원인을 고칩니다.</span>
             </li>
             <li>
-              <strong>보조 패널</strong>
-              <span>브리핑·튜터·관측을 전환합니다. 모바일에서는 아래 탭입니다.</span>
+              <strong>오른쪽 패널</strong>
+              <span>브리핑·튜터·관측을 전환합니다. 모바일에서는 아래 탭으로 바꿉니다.</span>
             </li>
           </ol>
         </section>

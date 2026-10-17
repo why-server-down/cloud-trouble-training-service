@@ -692,3 +692,25 @@ describe('작업 상태 보존 (FE-25)', () => {
     expect(screen.queryByRole('dialog', { name: '프로필' })).toBeNull()
   })
 })
+
+describe('미션 중 로그아웃 확인 (FE-28)', () => {
+  it('진행 중인 미션이 있으면 바로 로그아웃하지 않고 결과를 설명한 뒤 확인을 받는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+    await screen.findByTestId('terminal-stub')
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    const dialog = await screen.findByRole('dialog', { name: '진행 중인 미션이 있습니다' })
+    expect(dialog.textContent).toContain('남은 시간은 계속 줄어듭니다')
+    expect(mocked.logoutUser).not.toHaveBeenCalled()
+
+    // 취소하면 작업 화면이 그대로다.
+    fireEvent.click(screen.getByRole('button', { name: '취소' }))
+    expect(screen.getByTestId('terminal-stub')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '로그아웃' }))
+    await waitFor(() => expect(mocked.logoutUser).toHaveBeenCalled())
+  })
+})

@@ -72,6 +72,11 @@ export interface EnvironmentTerminalMeta {
    * 예전에는 App.tsx 에 kubectl 명령이 하드코딩돼 Docker/Linux 탭에서도 그대로 보였다.
    */
   investigationStarters: readonly string[]
+  /**
+   * 조사 명령을 실행한 뒤 출력에서 볼 곳 (FE-28). 정답이 아니라 시선을 둘 자리다 —
+   * 명령을 쳤는데 무엇이 단서인지 몰라 막히는 첫 사용자를 위한 것이다.
+   */
+  investigationClues: Readonly<Record<string, string>>
 }
 
 export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta> = {
@@ -85,6 +90,12 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'kubectl get services',
       'kubectl get events --sort-by=.metadata.creationTimestamp',
     ],
+    investigationClues: {
+      'kubectl get pods': 'STATUS·RESTARTS 열 — Running이 아니거나 재시작이 늘고 있는 Pod',
+      'kubectl get deployments': 'READY가 원하는 수(예: 1/1)를 채우는지',
+      'kubectl get services': '연결할 Service가 있는지 — 이어서 endpoints로 연결 대상을 확인',
+      'kubectl get events --sort-by=.metadata.creationTimestamp': '맨 아래 Warning 이벤트의 REASON과 MESSAGE',
+    },
     completions: [
       'kubectl get pods',
       'kubectl get services',
@@ -110,6 +121,12 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
       'docker inspect ',
       'docker network inspect ',
     ],
+    investigationClues: {
+      'docker ps -a': 'STATUS 열 — Exited 로 멈춘 컨테이너가 있는지',
+      'docker logs ': '컨테이너 이름을 붙여 실행하고 마지막 오류 줄을 확인',
+      'docker inspect ': 'State, NetworkSettings, HostConfig 의 자원 제한',
+      'docker network inspect ': 'Containers 목록에 훈련 컨테이너가 들어 있는지',
+    },
     // BE-12 DockerPolicy 의 READ_COMMANDS / READ_SUBCOMMANDS / RECOVERY_COMMANDS 범위 안에서만 고른다.
     completions: [
       'docker ps',
@@ -150,6 +167,12 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
     ],
     // 실제 장애 유형(disk_pressure / cpu_saturation / process_flood)을 조사하는 순서대로.
     investigationStarters: ['ps aux', 'df -h', 'top -b -n 1', 'cat /proc/loadavg'],
+    investigationClues: {
+      'ps aux': '같은 이름이 많이 반복되는 프로세스, %CPU가 높은 프로세스',
+      'df -h': 'Use%가 100%에 가까운 마운트',
+      'top -b -n 1': 'CPU를 오래 쓰고 있는 프로세스',
+      'cat /proc/loadavg': '앞의 세 숫자(부하 평균)가 계속 높은지',
+    },
     /*
      * 계획서 FE-09 의 최소 목록에는 systemctl / journalctl / dmesg 가 있지만
      * LinuxPolicy 가 셋 다 배제한다 — 이 이미지에 systemd 가 없고 커널 링 버퍼도

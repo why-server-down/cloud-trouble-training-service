@@ -21,7 +21,7 @@ interface InvestigationGuideProps {
  * 단계 번호 01 → 02 → 03 은 실제 순서라 장식이 아니다.
  */
 const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, active = false, onInsertCommand }) => {
-  const { investigationStarters } = getEnvironmentTerminal(environment)
+  const { investigationStarters, investigationClues } = getEnvironmentTerminal(environment)
   const { investigationHint } = getEnvironmentMeta(environment)
   const steps = [
     {
@@ -60,21 +60,28 @@ const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, ac
         {onInsertCommand ? (
           <>
             {investigationStarters.map((command) => (
-              <button
-                key={command}
-                className="guide-command"
-                type="button"
-                onClick={() => onInsertCommand(command)}
-                aria-label={`${command.trim()} — 터미널 입력줄에 넣기`}
-              >
-                <code>{command}</code>
-                <span className="guide-command-action" aria-hidden="true">입력</span>
-              </button>
+              <div key={command} className="guide-command-row">
+                <button
+                  className="guide-command"
+                  type="button"
+                  onClick={() => onInsertCommand(command)}
+                  aria-label={`${command.trim()} — 터미널 입력줄에 넣기`}
+                >
+                  <code>{command}</code>
+                  <span className="guide-command-action" aria-hidden="true">입력</span>
+                </button>
+                {investigationClues[command] && <p className="guide-command-clue">볼 곳: {investigationClues[command]}</p>}
+              </div>
             ))}
             <p className="guide-command-note">누르면 실행하지 않고 입력줄에만 넣습니다. 확인한 뒤 Enter를 누르세요.</p>
           </>
         ) : (
-          investigationStarters.map((command) => <code key={command}>{command}</code>)
+          investigationStarters.map((command) => (
+            <div key={command} className="guide-command-row">
+              <code>{command}</code>
+              {investigationClues[command] && <p className="guide-command-clue">볼 곳: {investigationClues[command]}</p>}
+            </div>
+          ))
         )}
       </div>
     </div>
