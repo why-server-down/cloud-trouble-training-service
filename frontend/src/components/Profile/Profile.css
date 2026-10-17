@@ -343,7 +343,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  /* 진행률은 1차 동작도 진행 중 표시도 아니라 주황을 쓰지 않는다 (FE-29). */
+  /* 진행률은 1차 동작도 진행 중 표시도 아니라 강조색을 쓰지 않는다 (FE-29). */
   background: var(--text-secondary);
   transition: width var(--dur-slow) var(--ease-out);
 }
@@ -429,7 +429,7 @@
   stroke-width: 1;
 }
 
-/* 지표 그림은 중립색이다. 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
+/* 지표 그림은 중립색이다. 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
 .skill-radar .skill-radar-value {
   fill: var(--fill-2);
   stroke: var(--text-secondary);

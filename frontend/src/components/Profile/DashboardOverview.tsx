@@ -283,7 +283,7 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           <>
             <div>
               <span className="dashboard-label">현재 티어 · {filterLabel(filter)}</span>
-              {/* 티어 이름은 중립 글자다. 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
+              {/* 티어 이름은 중립 글자다. 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
               <h3>{stats?.current_tier.name}</h3>
               <p>
                 {stats?.total_score ?? 0}점 · 완료 {completed}건

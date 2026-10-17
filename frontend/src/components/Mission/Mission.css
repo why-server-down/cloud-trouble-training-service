@@ -637,7 +637,7 @@
   line-height: var(--leading-xs);
 }
 
-/* 주황 배경 위에서는 3단계 글자의 대비가 모자라다. */
+/* 강조색 배경 위에서는 3단계 글자의 대비가 모자라다. */
 .chat-message.user .chat-message-role {
   color: var(--text-secondary);
 }
