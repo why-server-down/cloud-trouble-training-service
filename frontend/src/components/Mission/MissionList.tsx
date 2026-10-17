@@ -8,6 +8,7 @@ import {
   ApiError,
   checkMission,
   checkScenario,
+  getAttempt,
   getMissionStatus,
   getScenarioStatus,
   getUnlockStatus,
@@ -458,6 +459,33 @@ const MissionList: React.FC<MissionListProps> = ({
   }
 
   /**
+   * 서버 기록으로 결과를 확정해 연다 (BE-30). 시간 초과·AI 시나리오처럼 끝난 응답에 점수나 시각이
+   * 없을 때 쓴다. 조회가 실패하면 `fallback` 이 있을 때만 그것을 보여 준다 — 끝난 이유를 모르면
+   * 지어내지 않는다.
+   */
+  const openDebriefFromServer = async (
+    attemptId: string | null,
+    base: Debrief,
+    again: StartRequest,
+    fallback: Debrief | null,
+  ) => {
+    if (!attemptId || debriefedAttemptRef.current === attemptId) return
+    try {
+      const attempt = await getAttempt(token, attemptId)
+      if (attempt.status === 'in_progress') return
+      openDebrief(attemptId, {
+        ...base,
+        outcome: outcomeOf(attempt.status),
+        finalScore: attempt.final_score,
+        durationSeconds: attemptDuration(attempt),
+        hintsUsed: attempt.hints_used,
+      }, again)
+    } catch {
+      if (fallback) openDebrief(attemptId, fallback, again)
+    }
+  }
+
+  /**
    * 시작 시트의 확정 (FE-27). 성공할 때까지 시트를 닫지 않고, 실패하면 이유를 시트 안에
    * 남긴다 — 장애 주입은 몇 초 걸릴 수 있고 그동안 무슨 일이 일어나는지 보여야 한다.
    */
@@ -653,22 +681,20 @@ const MissionList: React.FC<MissionListProps> = ({
    * 서버가 끝난 상태를 알려 준 경우에만 결과 시트를 띄운다 — 404 로 시도가 사라졌으면
    * 무엇으로 끝났는지 모르므로 지어내지 않는다.
    */
-  const handleMissionEnd = useCallback((status: MissionStatusResponse | null, lastRemainingSeconds: number | null) => {
+  // MissionStatus 가 최신 콜백을 ref 로 들고 있어 렌더마다 새로 만들어도 폴링이 다시 시작되지 않는다.
+  const handleMissionEnd = (status: MissionStatusResponse | null, lastRemainingSeconds: number | null) => {
     if (status && activeMissionId) {
       openDebrief(status.attempt.id, debriefForMission(status.attempt, activeMission), {
         kind: 'mission',
         missionId: activeMissionId,
       })
-    } else if (
-      activeMissionId
-      && lastRemainingSeconds !== null
-      && lastRemainingSeconds <= TIMEOUT_INFERENCE_SECONDS
-    ) {
+    } else if (activeMissionId) {
       /*
-       * 서버는 시간이 다 된 시도를 정리한 뒤 404 를 준다. 남은 시간이 거의 0 이었으므로 시간
-       * 초과로 본다. 서버가 확정한 점수는 받지 못했으니 비워 둔다 — 지어내지 않는다.
+       * 서버는 시간이 다 된 시도를 정리한 뒤 404 를 준다. 들고 있던 시도 id 로 끝난 기록을 조회해
+       * 결과·최종 점수·끝난 시각을 서버 값으로 보여 준다 (BE-30). 조회가 실패하면 남은 시간이
+       * 거의 0 이었을 때만 시간 초과로 보고, 받지 못한 점수는 비워 둔다.
        */
-      openDebrief(activeAttemptId, {
+      const base: Debrief = {
         outcome: 'failed',
         missionTitle: activeMission ? getMissionCopy(activeMission).name : '미션',
         environmentLabel: getEnvironmentMeta(activeMissionEnvironment ?? environment).label,
@@ -679,14 +705,16 @@ const MissionList: React.FC<MissionListProps> = ({
         cause: activeMission ? getMissionCause(activeMission.chaos_type) : null,
         commands: [...commandLogRef.current],
         commandsPartial: commandsPartialRef.current,
-      }, { kind: 'mission', missionId: activeMissionId })
+      }
+      const likelyTimedOut = lastRemainingSeconds !== null && lastRemainingSeconds <= TIMEOUT_INFERENCE_SECONDS
+      void openDebriefFromServer(activeAttemptId, base, { kind: 'mission', missionId: activeMissionId }, likelyTimedOut ? base : null)
     }
     forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
     reportActiveAttempt(null)
     void fetchMissions()
-  }, [activeAttemptId, activeMission, activeMissionEnvironment, activeMissionId, environment, fetchMissions, forgetActiveAttempt, hintsUsed, reportActiveAttempt])
+  }
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
@@ -714,12 +742,15 @@ const MissionList: React.FC<MissionListProps> = ({
 
   scenarioEndedRef.current = (status) => {
     if (status) {
-      openDebrief(status.attempt_id, debriefForScenario(outcomeOf(status.status), status, null), { kind: 'scenario' })
+      const base = debriefForScenario(outcomeOf(status.status), status, null)
+      void openDebriefFromServer(status.attempt_id, base, { kind: 'scenario' }, base)
       return
     }
-    // 404 — 남은 시간이 거의 0 이었으면 서버가 시간 초과로 정리한 것이다 (정적 미션과 같은 판단).
-    if (activeScenario && activeScenario.remaining_seconds <= TIMEOUT_INFERENCE_SECONDS) {
-      openDebrief(activeScenario.attempt_id, debriefForScenario('failed', activeScenario, null), { kind: 'scenario' })
+    // 404 — 끝난 기록을 조회한다. 실패하면 남은 시간이 거의 0 이었을 때만 시간 초과로 본다.
+    if (activeScenario) {
+      const base = debriefForScenario('failed', activeScenario, null)
+      const likelyTimedOut = activeScenario.remaining_seconds <= TIMEOUT_INFERENCE_SECONDS
+      void openDebriefFromServer(activeScenario.attempt_id, base, { kind: 'scenario' }, likelyTimedOut ? base : null)
     }
   }
 
@@ -734,7 +765,9 @@ const MissionList: React.FC<MissionListProps> = ({
       if (!result.resolved) {
         setCheckFeedback(result.message || '정상화 조건을 아직 만족하지 못했습니다. 상태를 다시 확인해 주세요.')
       } else if (activeScenario) {
-        openDebrief(activeScenario.attempt_id, debriefForScenario('completed', activeScenario, result.score), { kind: 'scenario' })
+        // 완료 응답에는 시각이 없다. 서버 기록으로 걸린 시간을 채우고, 조회가 실패해도 점수는 응답 값으로 보여 준다.
+        const base = debriefForScenario('completed', activeScenario, result.score)
+        void openDebriefFromServer(activeScenario.attempt_id, base, { kind: 'scenario' }, base)
       }
       if (result.resolved) {
         // 상태를 비우기 전에 attemptId 를 잡아둔다 — 완료 이벤트 중복 판정에 쓰인다.
@@ -767,7 +800,8 @@ const MissionList: React.FC<MissionListProps> = ({
         try {
           await abandonScenario(token)
           if (activeScenario) {
-            openDebrief(activeScenario.attempt_id, debriefForScenario('abandoned', activeScenario, null), { kind: 'scenario' })
+            const base = debriefForScenario('abandoned', activeScenario, null)
+            void openDebriefFromServer(activeScenario.attempt_id, base, { kind: 'scenario' }, base)
           }
           forgetActiveAttempt()
           setActiveScenario(null)

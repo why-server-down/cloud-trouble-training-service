@@ -484,6 +484,21 @@ export const abandonMission = async (token: string): Promise<MissionAttemptRespo
   return withEnvironment(await response.json() as MissionAttemptResponse, '미션 포기')
 }
 
+/**
+ * 시도 하나를 조회한다 (BE-30). 정적 미션과 AI 시나리오 모두 된다.
+ * 서버는 시간이 다 된 시도를 정리한 뒤 status 조회에 404 를 주므로, 끝난 결과(최종 점수·끝난 시각)는
+ * 이 API 로 확인한다. 내 시도가 아니거나 없으면 404 다.
+ */
+export const getAttempt = async (token: string, attemptId: string): Promise<MissionAttemptResponse> =>
+  withEnvironment(
+    await getAuthorizedJson<MissionAttemptResponse>(
+      token,
+      `/api/attempts/${encodeURIComponent(attemptId)}`,
+      '시도 기록을 불러오지 못했습니다',
+    ),
+    '시도 조회',
+  )
+
 export const requestHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/hint`, {
     method: 'POST',

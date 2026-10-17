@@ -22,6 +22,7 @@ vi.mock('../../services/api', async (importOriginal) => {
     abandonMission: vi.fn(),
     startMission: vi.fn(),
     checkMission: vi.fn(),
+    getAttempt: vi.fn(),
   }
 })
 
@@ -107,6 +108,8 @@ beforeEach(() => {
   mocked.getMissionStatus.mockImplementation(notFound)
   mocked.getScenarioStatus.mockImplementation(notFound)
   mocked.getUnlockStatus.mockResolvedValue({ unlocked: false, completed_static: 0, total_static: 4 })
+  // 끝난 시도 조회(BE-30)는 기본으로 실패한다. 필요한 테스트에서만 기록을 돌려준다.
+  mocked.getAttempt.mockImplementation(notFound)
 })
 
 afterEach(() => {
@@ -490,6 +493,38 @@ describe('미션 생명주기 (FE-27)', () => {
     expect(sheet.textContent).toContain('4분 12초')
     expect(sheet.textContent).toContain('무엇이 문제였나')
   })
+
+  it('404 로 끝나면 끝난 시도를 조회해 서버가 확정한 점수와 시간을 보여준다 (BE-30)', async () => {
+    mocked.getMissionStatus
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockImplementation(notFound)
+    mocked.getAttempt.mockResolvedValue({
+      ...attempt,
+      status: 'failed',
+      end_time: '2026-08-28T00:20:00Z',
+      final_score: 20,
+    })
+    renderList()
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    expect(mocked.getAttempt).toHaveBeenCalledWith('test-token', 'attempt-1')
+    expect(sheet.textContent).toContain('시간 초과')
+    expect(sheet.textContent).toContain('최종 점수20')
+    expect(sheet.textContent).toContain('20분 0초')
+  }, 10000)
+
+  it('다른 곳에서 포기한 시도는 서버 기록대로 포기 결과를 보여준다', async () => {
+    mocked.getMissionStatus
+      .mockResolvedValueOnce(activeStatus())
+      .mockResolvedValueOnce(activeStatus())
+      .mockImplementation(notFound)
+    mocked.getAttempt.mockResolvedValue({ ...attempt, status: 'abandoned', end_time: '2026-08-28T00:02:00Z', final_score: 0 })
+    renderList()
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    expect(sheet.textContent).toContain('미션 포기')
+  }, 10000)
 
   it('서버가 시간 초과를 404 로 정리해도 남은 시간이 거의 0 이었으면 시간 초과 결과를 보여준다', async () => {
     // 실제 백엔드는 만료된 시도를 실패로 바꾼 뒤 "진행 중인 미션 없음" 404 를 돌려준다.
