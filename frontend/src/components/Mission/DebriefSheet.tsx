@@ -18,6 +18,8 @@ export interface Debrief {
   cause: string | null
   /** 이번 시도에서 터미널에 보낸 명령 (최근 것이 마지막). */
   commands: string[]
+  /** 시도 중간에 화면을 새로 열어 그 전에 보낸 명령은 기록에 없다. */
+  commandsPartial: boolean
 }
 
 interface DebriefSheetProps {
@@ -117,6 +119,9 @@ const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPr
 
       <section className="debrief-section" aria-labelledby="debrief-commands-title">
         <h3 id="debrief-commands-title">내가 실행한 명령</h3>
+        {debrief.commandsPartial && (
+          <p className="debrief-note">시도 중간에 화면을 새로 열어, 그 전에 보낸 명령은 기록되지 않았습니다.</p>
+        )}
         {commands.length > 0 ? (
           <>
             {skipped > 0 && <p className="debrief-note">앞의 {skipped}개는 생략했습니다.</p>}
@@ -129,7 +134,7 @@ const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPr
             </ol>
           </>
         ) : (
-          <p className="debrief-note">이번 시도에서 터미널에 보낸 명령이 없습니다.</p>
+          !debrief.commandsPartial && <p className="debrief-note">이번 시도에서 터미널에 보낸 명령이 없습니다.</p>
         )}
       </section>
 

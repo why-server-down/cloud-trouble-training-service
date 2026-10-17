@@ -25,7 +25,7 @@ interface MissionStatusProps {
    * 시도가 끝났다. 서버가 끝난 상태(완료·시간 초과·포기)를 알려 주면 그 값을 넘긴다 —
    * 디브리프가 결과와 점수를 그리는 근거다. 시도가 사라져 404 면 null 이다.
    */
-  onMissionEnd: (status: MissionStatusResponse | null) => void
+  onMissionEnd: (status: MissionStatusResponse | null, lastRemainingSeconds: number | null) => void
   /** 완료 확인이 실패한 이유 (FE-27). 인시던트 바 안에 남긴다. */
   feedback?: string | null
   onCheck: () => void
@@ -170,6 +170,12 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
    * 표시는 매끄럽게, 요청은 드물게.
    */
   const [remaining, setRemaining] = useState<number | null>(null)
+  /*
+   * 폴링 콜백이 읽을 마지막 남은 시간. 서버는 시간이 다 된 시도를 실패로 정리한 뒤 404 를
+   * 돌려준다 — 끝난 이유를 응답으로 알 수 없어, 거의 0 이었는지를 근거로 넘긴다 (FE-27).
+   */
+  const remainingRef = useRef<number | null>(null)
+  remainingRef.current = remaining
   const [isStale, setIsStale] = useState(false)
 
   // 최신 콜백만 들고 있는다. 폴링 재시작 없이 반영하기 위한 것이다.
@@ -188,14 +194,14 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
 
       // 완료·실패·포기에서 즉시 멈춘다. 끝난 미션을 계속 물을 이유가 없다.
       if (data.attempt.status !== 'in_progress') {
-        onMissionEndRef.current(data)
+        onMissionEndRef.current(data, data.remaining_seconds)
         return 'stop' as const
       }
       return 'continue' as const
     } catch (error) {
       // 404 는 활성 attempt 가 사라진 것이다. 오류가 아니라 종료 신호다.
       if (error instanceof ApiError && error.status === 404) {
-        onMissionEndRef.current(null)
+        onMissionEndRef.current(null, remainingRef.current)
         return 'stop' as const
       }
 

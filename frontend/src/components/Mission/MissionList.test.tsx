@@ -491,6 +491,32 @@ describe('미션 생명주기 (FE-27)', () => {
     expect(sheet.textContent).toContain('무엇이 문제였나')
   })
 
+  it('서버가 시간 초과를 404 로 정리해도 남은 시간이 거의 0 이었으면 시간 초과 결과를 보여준다', async () => {
+    // 실제 백엔드는 만료된 시도를 실패로 바꾼 뒤 "진행 중인 미션 없음" 404 를 돌려준다.
+    mocked.getMissionStatus
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockImplementation(notFound)
+    renderList()
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    expect(sheet.textContent).toContain('시간 초과')
+    // 서버가 확정한 점수를 받지 못했으므로 점수는 비워 둔다.
+    expect(sheet.textContent).toContain('최종 점수—')
+  }, 10000)
+
+  it('시간이 많이 남았는데 시도가 사라지면 결과를 지어내지 않는다', async () => {
+    mocked.getMissionStatus
+      .mockResolvedValueOnce(activeStatus())
+      .mockResolvedValueOnce(activeStatus())
+      .mockImplementation(notFound)
+    renderList()
+
+    await screen.findByRole('button', { name: '완료 확인' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '완료 확인' })).toBeNull(), { timeout: 8000 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  }, 10000)
+
   it('시간이 다 되면 아무 말 없이 끝내지 않고 시간 초과 결과를 보여준다', async () => {
     mocked.getMissionStatus
       .mockResolvedValueOnce(activeStatus())

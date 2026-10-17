@@ -7,7 +7,8 @@ import { AlertIcon } from './Icons'
  * `backend/app/services/scoring_service.py` (TIME_PENALTY_PER_MINUTE, MIN_SCORE)다.
  * 백엔드 값이 바뀌면 여기 문구도 함께 고친다.
  */
-const TIME_PENALTY_PER_MINUTE = 2
+// 서버는 int(경과 분 × 2) 만큼 깎는다 = 30초마다 1점.
+const SECONDS_PER_PENALTY_POINT = 30
 const MIN_COMPLETION_SCORE = 20
 
 interface StartSheetProps {
@@ -51,7 +52,8 @@ const StartSheet: React.FC<StartSheetProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  const confirmRef = useRef<HTMLButtonElement | null>(null)
+  // 처음 focus 는 제목에 둔다. 확정 버튼에 두면 긴 시트에서 위쪽 규칙·경고가 화면 밖으로 밀린다.
+  const titleRef = useRef<HTMLHeadingElement | null>(null)
   const isScenario = kind === 'scenario'
 
   return (
@@ -59,7 +61,7 @@ const StartSheet: React.FC<StartSheetProps> = ({
       className="start-sheet"
       labelledBy="start-sheet-title"
       describedBy="start-sheet-description"
-      initialFocusRef={confirmRef}
+      initialFocusRef={titleRef}
       onClose={() => {
         // 주입 중에 닫으면 결과를 알릴 곳이 사라진다. 요청이 끝날 때까지 닫지 않는다.
         if (!busy) onCancel()
@@ -69,7 +71,7 @@ const StartSheet: React.FC<StartSheetProps> = ({
         <span className="ui-chip">{environmentLabel}</span>
         {tierLabel && <span className="ui-chip">{tierLabel}</span>}
       </div>
-      <h2 id="start-sheet-title" className="sheet-title">{title}</h2>
+      <h2 id="start-sheet-title" className="sheet-title" ref={titleRef} tabIndex={-1}>{title}</h2>
       <p id="start-sheet-description" className="sheet-lead">{description}</p>
 
       <dl className="start-rules">
@@ -96,7 +98,7 @@ const StartSheet: React.FC<StartSheetProps> = ({
         )}
       </dl>
       <p className="start-rules-note">
-        1분마다 {TIME_PENALTY_PER_MINUTE}점씩 깎이고, 완료하면 최소 {MIN_COMPLETION_SCORE}점을 받습니다.
+        시작부터 {SECONDS_PER_PENALTY_POINT}초마다 1점씩 깎이고, 완료하면 최소 {MIN_COMPLETION_SCORE}점을 받습니다.
         포기하면 0점입니다. 튜터에게 질문하는 것은 감점이 없습니다.
       </p>
 
@@ -139,7 +141,7 @@ const StartSheet: React.FC<StartSheetProps> = ({
         <button className="ui-button plain" type="button" onClick={onCancel} disabled={busy}>
           취소
         </button>
-        <button ref={confirmRef} className="ui-button primary" type="button" onClick={onConfirm} disabled={busy}>
+        <button className="ui-button primary" type="button" onClick={onConfirm} disabled={busy}>
           {busy
             ? isScenario
               ? 'AI가 장애를 만드는 중...'

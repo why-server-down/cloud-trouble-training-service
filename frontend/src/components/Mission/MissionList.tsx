@@ -97,6 +97,12 @@ const attemptDuration = (attempt: Pick<MissionAttemptResponse, 'start_time' | 'e
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
+/**
+ * 404 로 끝난 시도를 시간 초과로 볼 남은 시간의 상한(초). 상태 폴링 간격(5초)에
+ * 한 번 늦는 응답을 더한 값이다.
+ */
+const TIMEOUT_INFERENCE_SECONDS = 10
+
 const outcomeOf = (status: string): DebriefOutcome =>
   status === 'completed' ? 'completed' : status === 'abandoned' ? 'abandoned' : 'failed'
 
@@ -170,27 +176,37 @@ const MissionList: React.FC<MissionListProps> = ({
   const [checkFeedback, setCheckFeedback] = useState<string | null>(null)
   /** 이번 시도에서 터미널에 보낸 명령. 디브리프에만 쓰므로 렌더를 일으키지 않게 ref 로 둔다. */
   const commandLogRef = useRef<string[]>([])
-  const loggedAttemptRef = useRef<string | null>(null)
+  /** 지금 기록 중인 시도. 시도가 끝나면 null — 기록은 디브리프가 읽을 때까지 남긴다. */
+  const loggingAttemptRef = useRef<string | null>(null)
+  /** 이 화면에서 시작한 시도인가. 새로고침으로 복원한 시도는 그 전 명령이 기록에 없다. */
+  const startedHereRef = useRef<string | null>(null)
+  const commandsPartialRef = useRef(false)
+  /** 결과 시트를 이미 띄운 시도. 완료 확인과 폴링이 같은 끝을 두 번 알려도 한 번만 띄운다. */
+  const debriefedAttemptRef = useRef<string | null>(null)
+  /** 시나리오 폴링이 끝을 알렸을 때 할 일. 결과 시트 함수가 폴링 콜백보다 뒤에 있어 ref 로 잇는다. */
+  const scenarioEndedRef = useRef<(status: ScenarioStatusResponse | null) => void>(() => undefined)
 
   /** App 에 활성 시도를 알리면서 id 도 기억한다. 모든 보고가 이 한 곳을 지난다. */
   const reportActiveAttempt = useCallback((summary: ActiveAttemptSummary | null) => {
-    setActiveAttemptId(summary?.attemptId ?? null)
+    const nextId = summary?.attemptId ?? null
+    /*
+     * 명령 기록 대상은 effect 를 기다리지 않고 여기서 바로 바꾼다. 새 시도면 비우고,
+     * 끝나면 기록만 멈춘다(디브리프가 읽어야 하므로 비우지 않는다).
+     */
+    if (nextId && nextId !== loggingAttemptRef.current) {
+      commandLogRef.current = []
+      commandsPartialRef.current = startedHereRef.current !== nextId
+    }
+    loggingAttemptRef.current = nextId
+    if (!nextId) setCheckFeedback(null)
+    setActiveAttemptId(nextId)
     onActiveAttemptChange(summary)
   }, [onActiveAttemptChange])
-
-  // 새 시도가 시작되면 명령 기록을 비운다. 끝날 때는 비우지 않는다 — 디브리프가 읽어야 한다.
-  useEffect(() => {
-    if (activeAttemptId && activeAttemptId !== loggedAttemptRef.current) {
-      loggedAttemptRef.current = activeAttemptId
-      commandLogRef.current = []
-    }
-    if (!activeAttemptId) setCheckFeedback(null)
-  }, [activeAttemptId])
 
   useEffect(() => {
     const handleCommand = (event: Event) => {
       const command = (event as CustomEvent<unknown>).detail
-      if (typeof command === 'string' && loggedAttemptRef.current) commandLogRef.current.push(command)
+      if (typeof command === 'string' && loggingAttemptRef.current) commandLogRef.current.push(command)
     }
     window.addEventListener(TERMINAL_COMMAND_EVENT, handleCommand)
     return () => window.removeEventListener(TERMINAL_COMMAND_EVENT, handleCommand)
@@ -348,10 +364,7 @@ const MissionList: React.FC<MissionListProps> = ({
       setScenarioHintsUsed(status.hints_used)
 
       if (status.status !== 'in_progress') {
-        setDebrief({
-          data: debriefForScenario(outcomeOf(status.status), status, null),
-          again: { kind: 'scenario' },
-        })
+        scenarioEndedRef.current(status)
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
@@ -363,6 +376,7 @@ const MissionList: React.FC<MissionListProps> = ({
     } catch (err) {
       // 404 는 시나리오가 끝난 것이다. 정리하고 멈춘다.
       if (err instanceof ApiError && err.status === 404) {
+        scenarioEndedRef.current(null)
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
@@ -403,8 +417,25 @@ const MissionList: React.FC<MissionListProps> = ({
   // ── 정적 미션 핸들러 ──────────────────────────────────────
 
   const handleStartMission = (missionId: string) => {
+    // 진행 중인 시도가 있으면 열지 않는다. 서버도 거절하지만 누르기 전에 막는다.
+    if (activeAttemptId) return
     setStartError(null)
     setStartRequest({ kind: 'mission', missionId })
+  }
+
+  /*
+   * 목록이 진행 중인 시도를 복원했는데 시작 시트가 열려 있으면 닫는다. 시작해 봐야 서버가
+   * "이미 진행 중"으로 거절한다. (방금 이 시트로 시작한 경우는 isStarting 동안 닫지 않는다)
+   */
+  useEffect(() => {
+    if (activeAttemptId && startRequest && !isStarting) setStartRequest(null)
+  }, [activeAttemptId, isStarting, startRequest])
+
+  /** 결과 시트를 연다. 같은 시도의 끝이 두 경로(완료 확인·폴링)로 와도 한 번만 연다. */
+  const openDebrief = (attemptId: string | null, data: Debrief, again: StartRequest) => {
+    if (!attemptId || debriefedAttemptRef.current === attemptId) return
+    debriefedAttemptRef.current = attemptId
+    setDebrief({ data, again })
   }
 
   /**
@@ -418,6 +449,7 @@ const MissionList: React.FC<MissionListProps> = ({
     try {
       if (startRequest.kind === 'mission') {
         const attempt = await startMission(token, startRequest.missionId)
+        startedHereRef.current = attempt.id
         rememberActiveAttempt('static_mission')
         setActiveMissionId(startRequest.missionId)
         setActiveMissionEnvironment(attempt.environment)
@@ -433,7 +465,19 @@ const MissionList: React.FC<MissionListProps> = ({
         await startRandomScenario(token, selectedDifficulty, environment, demoAiUnlocked)
         rememberActiveAttempt('ai_scenario')
         // ScenarioResponse 에는 attempt id 가 없다. 요약은 서버 status 로 만든다.
-        const started = await getScenarioStatus(token)
+        let started: ScenarioStatusResponse
+        try {
+          started = await getScenarioStatus(token)
+        } catch {
+          /*
+           * 생성과 주입은 끝났고 상태 조회만 실패했다. 다시 시작하게 하면 서버가 "이미 진행 중"으로
+           * 거절하므로, 시트를 닫고 목록 조회가 진행 중인 시도를 복원하게 둔다.
+           */
+          setStartRequest(null)
+          await fetchMissions()
+          return
+        }
+        startedHereRef.current = started.attempt_id
         setActiveScenario(started)
         setScenarioHintsUsed(started.hints_used)
         reportActiveAttempt({
@@ -470,6 +514,7 @@ const MissionList: React.FC<MissionListProps> = ({
     hintsUsed: attempt.hints_used,
     cause: mission ? getMissionCause(mission.chaos_type) : null,
     commands: [...commandLogRef.current],
+    commandsPartial: commandsPartialRef.current,
   })
 
   const handleCheckMission = async () => {
@@ -490,9 +535,9 @@ const MissionList: React.FC<MissionListProps> = ({
       if (result.attempt.status !== 'completed') {
         setCheckFeedback(result.message || '리소스 상태를 다시 확인해 주세요.')
       } else {
-        setDebrief({
-          data: debriefForMission(result.attempt, activeMission),
-          again: { kind: 'mission', missionId: activeMissionId as string },
+        openDebrief(result.attempt.id, debriefForMission(result.attempt, activeMission), {
+          kind: 'mission',
+          missionId: activeMissionId as string,
         })
         forgetActiveAttempt()
         setActiveMissionId(null)
@@ -526,9 +571,9 @@ const MissionList: React.FC<MissionListProps> = ({
       action: async () => {
         try {
           const attempt = await abandonMission(token)
-          setDebrief({
-            data: debriefForMission(attempt, activeMission),
-            again: { kind: 'mission', missionId: activeMissionId as string },
+          openDebrief(attempt.id, debriefForMission(attempt, activeMission), {
+            kind: 'mission',
+            missionId: activeMissionId as string,
           })
           forgetActiveAttempt()
           setActiveMissionId(null)
@@ -574,19 +619,40 @@ const MissionList: React.FC<MissionListProps> = ({
    * 서버가 끝난 상태를 알려 준 경우에만 결과 시트를 띄운다 — 404 로 시도가 사라졌으면
    * 무엇으로 끝났는지 모르므로 지어내지 않는다.
    */
-  const handleMissionEnd = useCallback((status: MissionStatusResponse | null) => {
+  const handleMissionEnd = useCallback((status: MissionStatusResponse | null, lastRemainingSeconds: number | null) => {
     if (status && activeMissionId) {
-      setDebrief({
-        data: debriefForMission(status.attempt, activeMission),
-        again: { kind: 'mission', missionId: activeMissionId },
+      openDebrief(status.attempt.id, debriefForMission(status.attempt, activeMission), {
+        kind: 'mission',
+        missionId: activeMissionId,
       })
+    } else if (
+      activeMissionId
+      && lastRemainingSeconds !== null
+      && lastRemainingSeconds <= TIMEOUT_INFERENCE_SECONDS
+    ) {
+      /*
+       * 서버는 시간이 다 된 시도를 정리한 뒤 404 를 준다. 남은 시간이 거의 0 이었으므로 시간
+       * 초과로 본다. 서버가 확정한 점수는 받지 못했으니 비워 둔다 — 지어내지 않는다.
+       */
+      openDebrief(activeAttemptId, {
+        outcome: 'failed',
+        missionTitle: activeMission ? getMissionCopy(activeMission).name : '미션',
+        environmentLabel: getEnvironmentMeta(activeMissionEnvironment ?? environment).label,
+        finalScore: null,
+        baseScore: activeMission?.base_score ?? null,
+        durationSeconds: activeMission?.time_limit ?? null,
+        hintsUsed,
+        cause: activeMission ? getMissionCause(activeMission.chaos_type) : null,
+        commands: [...commandLogRef.current],
+        commandsPartial: commandsPartialRef.current,
+      }, { kind: 'mission', missionId: activeMissionId })
     }
     forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
     reportActiveAttempt(null)
     void fetchMissions()
-  }, [activeMission, activeMissionId, fetchMissions, forgetActiveAttempt, reportActiveAttempt])
+  }, [activeAttemptId, activeMission, activeMissionEnvironment, activeMissionId, environment, fetchMissions, forgetActiveAttempt, hintsUsed, reportActiveAttempt])
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
@@ -595,18 +661,33 @@ const MissionList: React.FC<MissionListProps> = ({
     setStartRequest({ kind: 'scenario' })
   }
 
-  /** AI 시나리오가 끝났을 때의 결과. status 응답에는 시작·종료 시각이 없어 마지막 경과 시간을 쓴다. */
+  /**
+   * AI 시나리오가 끝났을 때의 결과. 시나리오 응답에는 종료 시각이 없어 걸린 시간을 비운다 —
+   * 마지막 폴링의 경과 시간은 실제 끝난 시각과 다르다.
+   */
   const debriefForScenario = (outcome: DebriefOutcome, scenario: ScenarioStatusResponse, finalScore: number | null): Debrief => ({
     outcome,
     missionTitle: scenario.title,
     environmentLabel: getEnvironmentMeta(scenario.environment).label,
     finalScore,
     baseScore: null,
-    durationSeconds: scenario.elapsed_seconds,
-    hintsUsed: scenario.hints_used,
+    durationSeconds: null,
+    hintsUsed: Math.max(scenario.hints_used, scenarioHintsUsed),
     cause: null,
     commands: [...commandLogRef.current],
+    commandsPartial: commandsPartialRef.current,
   })
+
+  scenarioEndedRef.current = (status) => {
+    if (status) {
+      openDebrief(status.attempt_id, debriefForScenario(outcomeOf(status.status), status, null), { kind: 'scenario' })
+      return
+    }
+    // 404 — 남은 시간이 거의 0 이었으면 서버가 시간 초과로 정리한 것이다 (정적 미션과 같은 판단).
+    if (activeScenario && activeScenario.remaining_seconds <= TIMEOUT_INFERENCE_SECONDS) {
+      openDebrief(activeScenario.attempt_id, debriefForScenario('failed', activeScenario, null), { kind: 'scenario' })
+    }
+  }
 
   const handleCheckScenario = async () => {
     if (loading) return
@@ -619,7 +700,7 @@ const MissionList: React.FC<MissionListProps> = ({
       if (!result.resolved) {
         setCheckFeedback(result.message || '정상화 조건을 아직 만족하지 못했습니다. 상태를 다시 확인해 주세요.')
       } else if (activeScenario) {
-        setDebrief({ data: debriefForScenario('completed', activeScenario, result.score), again: { kind: 'scenario' } })
+        openDebrief(activeScenario.attempt_id, debriefForScenario('completed', activeScenario, result.score), { kind: 'scenario' })
       }
       if (result.resolved) {
         // 상태를 비우기 전에 attemptId 를 잡아둔다 — 완료 이벤트 중복 판정에 쓰인다.
@@ -652,7 +733,7 @@ const MissionList: React.FC<MissionListProps> = ({
         try {
           await abandonScenario(token)
           if (activeScenario) {
-            setDebrief({ data: debriefForScenario('abandoned', activeScenario, null), again: { kind: 'scenario' } })
+            openDebrief(activeScenario.attempt_id, debriefForScenario('abandoned', activeScenario, null), { kind: 'scenario' })
           }
           forgetActiveAttempt()
           setActiveScenario(null)

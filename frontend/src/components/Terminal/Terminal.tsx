@@ -190,6 +190,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
         historyIndexRef.current = commandHistoryRef.current.length
         if (isConnectedRef.current && sessionId && token) {
           sendCommand(command)
+          // 결과 시트의 "내가 실행한 명령"용. 연결이 없어 보내지 못한 명령은 알리지 않는다.
+          window.dispatchEvent(new CustomEvent<string>(TERMINAL_COMMAND_EVENT, { detail: command }))
         } else {
           terminal.writeln(getOfflineCommandNotice(environment, command))
           terminal.write(getPrompt())
@@ -209,11 +211,6 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
     }
 
     const queueCommand = (cmd: string, wasEchoed: boolean) => {
-      const trimmed = cmd.trim()
-      // 디브리프에 남길 명령. 화면 지우기는 조사 기록이 아니다.
-      if (trimmed && trimmed !== 'clear') {
-        window.dispatchEvent(new CustomEvent<string>(TERMINAL_COMMAND_EVENT, { detail: trimmed }))
-      }
       commandQueueRef.current.push({ cmd, wasEchoed })
       processNextCommand()
     }
