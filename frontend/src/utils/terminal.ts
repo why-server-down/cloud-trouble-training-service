@@ -62,3 +62,6 @@ export const TERMINAL_INSERT_EVENT = 'afterfail:terminal-insert'
 export const insertTerminalCommand = (command: string) => {
   window.dispatchEvent(new CustomEvent<string>(TERMINAL_INSERT_EVENT, { detail: command }))
 }
+
+/** 사용자가 터미널에서 명령을 보냈다는 신호. 디브리프의 "내가 실행한 명령"을 모은다 (FE-27). */
+export const TERMINAL_COMMAND_EVENT = 'afterfail:terminal-command'

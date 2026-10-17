@@ -5,7 +5,12 @@ import ConfirmModal from '../Feedback/ConfirmModal'
 import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
 import { getEnvironmentTerminal } from '../../config/environments'
 import { EnvironmentId } from '../../types/training'
-import { getOfflineCommandNotice, getTerminalPrompt, TERMINAL_INSERT_EVENT } from '../../utils/terminal'
+import {
+  getOfflineCommandNotice,
+  getTerminalPrompt,
+  TERMINAL_COMMAND_EVENT,
+  TERMINAL_INSERT_EVENT,
+} from '../../utils/terminal'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
@@ -204,6 +209,11 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
     }
 
     const queueCommand = (cmd: string, wasEchoed: boolean) => {
+      const trimmed = cmd.trim()
+      // 디브리프에 남길 명령. 화면 지우기는 조사 기록이 아니다.
+      if (trimmed && trimmed !== 'clear') {
+        window.dispatchEvent(new CustomEvent<string>(TERMINAL_COMMAND_EVENT, { detail: trimmed }))
+      }
       commandQueueRef.current.push({ cmd, wasEchoed })
       processNextCommand()
     }

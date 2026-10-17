@@ -460,13 +460,15 @@ function App() {
     return () => window.clearTimeout(timer)
   }, [activeTour, hasSeenIntroTour, isProfileOpen, token])
 
-  useEffect(() => {
-    // 프로필 시트가 열려 있으면 투어를 미룬다. 두 오버레이가 겹치면 Esc 가 아래 시트부터 닫는다.
-    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour || isProfileOpen) return
-    setActiveTab(window.innerWidth <= 768 ? 'missions' : 'terminal')
-    const timer = window.setTimeout(() => setActiveTour('mission'), 650)
-    return () => window.clearTimeout(timer)
-  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, isProfileOpen, token])
+  /*
+   * 미션 투어를 미션 시작 직후 자동으로 띄우지 않는다 (FE-27). 그때는 이미 타이머가 돌고
+   * 있어 투어가 시간을 잡아먹었다. 첫 미션의 시작 시트가 작업 화면 구성을 미리 알려 주고,
+   * 미션 중에는 둘러보기로 언제든 다시 볼 수 있다.
+   */
+  const markMissionTourSeen = useCallback(() => {
+    localStorage.setItem(scopedStorageKey(MISSION_TOUR_STORAGE_KEY, accountStorageScope), 'done')
+    setHasSeenMissionTour(true)
+  }, [accountStorageScope])
 
   useEffect(() => {
     setIsGrafanaFrameReady(false)
@@ -781,6 +783,8 @@ function App() {
                       capabilities={activeEnvironmentCapabilities}
                       incidentSlot={incidentSlot}
                       tutorSlot={tutorSlot}
+                      showFirstRunGuide={!hasSeenMissionTour}
+                      onFirstRunGuideSeen={markMissionTourSeen}
                       onActiveAttemptChange={handleActiveAttemptChange}
                       onAttemptCompleted={handleAttemptCompleted}
                     />
