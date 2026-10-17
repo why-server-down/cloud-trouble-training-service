@@ -285,7 +285,7 @@
 
 @media (pointer: coarse) {
   .dashboard-filter button {
-    min-height: 40px;
+    min-height: var(--control-height);
   }
 }
 

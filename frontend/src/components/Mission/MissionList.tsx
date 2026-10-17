@@ -123,7 +123,10 @@ const MissionList: React.FC<MissionListProps> = ({
   const hasTutor = Boolean(activeMissionId || activeScenario?.status === 'in_progress')
   const isAiUnlocked = Boolean(unlockStatus?.unlocked || demoAiUnlocked)
 
-  const showToast = useCallback((kind: ToastMessage['kind'], text: string) => setToast({ kind, text }), [])
+  const showToast = useCallback(
+    (kind: ToastMessage['kind'], text: string) => setToast({ kind, text, id: Date.now() }),
+    [],
+  )
 
   const rememberActiveAttempt = useCallback((type: AttemptType) => {
     localStorage.setItem(scopedStorageKey(ACTIVE_ATTEMPT_TYPE_KEY, storageScope), type)
@@ -781,7 +784,7 @@ const MissionList: React.FC<MissionListProps> = ({
           onCancel={() => setConfirmation(null)}
         />
       )}
-      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+      {toast && <Toast key={toast.id} {...toast} onClose={() => setToast(null)} />}
     </div>
   )
 }

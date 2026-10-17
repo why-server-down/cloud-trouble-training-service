@@ -6,6 +6,11 @@ export type ToastKind = 'success' | 'info' | 'error'
 export interface ToastMessage {
   kind: ToastKind
   text: string
+  /**
+   * 알림마다 새 값. 같은 문구를 다시 알려도 타이머와 낭독이 처음부터 시작되게
+   * 부모가 이 값을 key 로 쓴다.
+   */
+  id?: number
 }
 
 interface ToastProps extends ToastMessage {

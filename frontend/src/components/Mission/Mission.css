@@ -84,15 +84,20 @@
   border-color: var(--separator-strong);
   background: var(--surface-3);
   box-shadow: var(--shadow-1);
-  transform: translateY(-1px);
 }
 
 .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover .mission-info {
   color: var(--text-secondary);
 }
 
-.mission-card:not([aria-disabled='true']):not(.ai-mission-card):active {
-  transform: translateY(0) scale(0.995);
+@media (prefers-reduced-motion: no-preference) {
+  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover {
+    transform: translateY(-1px);
+  }
+
+  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):active {
+    transform: translateY(0) scale(0.995);
+  }
 }
 
 /* 잠긴 카드는 투명도로 흐리지 않는다 — 글자는 읽혀야 한다. 대신 면을 낮춰 눌리지 않는다는 것을 보인다. */
@@ -132,8 +137,8 @@
 
 .mission-description {
   color: var(--text-secondary);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
 }
 
 .mission-info {
@@ -400,8 +405,8 @@
   border-radius: var(--radius-md);
   background: var(--surface-2);
   color: var(--text);
-  font-size: var(--text-md);
-  line-height: var(--leading-md);
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
   overflow-wrap: anywhere;
 }
 
@@ -823,5 +828,12 @@
 
   .mission-panel.mission-active .tutor-panel.tutor-floating {
     min-height: min(19rem, calc(100dvh - 5rem));
+  }
+}
+
+/* 터치 기기에서는 실제로 누르는 면이 44px 이상이어야 한다 (설계 문서 8). */
+@media (pointer: coarse) {
+  .segmented-option span {
+    min-height: var(--control-height);
   }
 }

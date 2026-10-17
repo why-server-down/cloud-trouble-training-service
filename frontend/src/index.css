@@ -437,12 +437,22 @@ a {
   }
 }
 
+/*
+ * 움직임 줄이기: 이동·확대 없이 짧은 크로스페이드만 남긴다 (설계 문서 3.4).
+ * 이동·확대 애니메이션은 각 컴포넌트가 no-preference 안에서만 붙인다.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 1ms !important;
+    animation-duration: var(--dur-fast) !important;
     animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-fast) !important;
+    transition-property: opacity, color, background-color, border-color, visibility !important;
     scroll-behavior: auto !important;
+  }
+
+  .ui-button:active:not(:disabled) {
+    transform: none;
   }
 }

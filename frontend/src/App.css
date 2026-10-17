@@ -832,3 +832,10 @@
     padding: 0 var(--space-2);
   }
 }
+
+/* 터치 기기에서는 작은 링크도 44px 높이로 누를 수 있어야 한다 (설계 문서 8). */
+@media (pointer: coarse) {
+  .panel-link {
+    min-height: var(--control-height);
+  }
+}
