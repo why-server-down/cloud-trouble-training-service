@@ -95,8 +95,8 @@
   flex-shrink: 0;
   place-items: center;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--fill-3);
+  color: var(--text);
   font-size: var(--text-xl);
   font-weight: 600;
 }
@@ -343,7 +343,8 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: var(--accent);
+  /* 진행률은 1차 동작도 진행 중 표시도 아니라 주황을 쓰지 않는다 (FE-29). */
+  background: var(--text-secondary);
   transition: width var(--dur-slow) var(--ease-out);
 }
 
@@ -428,11 +429,62 @@
   stroke-width: 1;
 }
 
+/* 지표 그림은 중립색이다. 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
 .skill-radar .skill-radar-value {
-  fill: var(--accent-soft);
-  stroke: var(--accent);
+  fill: var(--fill-2);
+  stroke: var(--text-secondary);
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+/* 환경 역량 막대 (FE-29). 값이 있는 축이 셋 미만일 때 레이더 대신 쓴다. */
+.competency-bars {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.competency-bars li {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--leading-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.competency-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--fill-3);
+}
+
+.competency-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-secondary);
+}
+
+.competency-bars strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  text-align: right;
+}
+
+.competency-empty {
+  grid-column: 2 / -1;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
 }
 
 .skill-list,
@@ -473,7 +525,7 @@
 
 .learning-curve polyline {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--text-secondary);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
@@ -528,17 +580,17 @@
 }
 
 .leaderboard-list .current-user {
-  background: var(--accent-soft);
+  background: var(--fill-2);
   color: var(--text);
 }
 
 .leaderboard-list .current-user b {
-  color: var(--accent);
+  color: var(--text);
 }
 
 .leaderboard-list .ui-chip {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--fill-3);
+  color: var(--text);
   font-style: normal;
 }
 
@@ -567,7 +619,7 @@
 }
 
 .achievement-list article.unlocked svg {
-  stroke: var(--accent);
+  stroke: var(--ok);
 }
 
 .achievement-list article div {
@@ -723,4 +775,80 @@
   .tier-progress-wrap {
     width: 100%;
   }
+}
+
+/* ── 미션 전 학습 현황 요약 (FE-29) ─────────────────────────
+ * 작업 화면 보조 열 맨 위의 얇은 패널. 고정 패널이라 평평하다.
+ */
+.progress-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.progress-summary-header {
+  display: flex;
+  min-height: var(--control-height);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.progress-summary-header .ui-button {
+  margin-right: calc(var(--space-2) * -1);
+}
+
+.progress-summary-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.progress-summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.progress-summary-line .ui-chip {
+  color: var(--text);
+}
+
+.progress-summary-number {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-summary-next {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+.progress-summary-next .tier-progress {
+  margin-top: 0;
+}
+
+.progress-summary-note {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.progress-summary-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
 }

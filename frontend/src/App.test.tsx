@@ -481,7 +481,7 @@ describe('환경별 관측 패널 (FE-08)', () => {
     expect(probe).not.toHaveBeenCalled()
   })
 
-  it('활성 미션이 없으면 학습 대시보드를 띄우고 probe 를 돌리지 않는다', async () => {
+  it('활성 미션이 없으면 학습 현황 요약을 띄우고 probe 를 돌리지 않는다', async () => {
     const probe = stubPrometheus()
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
@@ -489,6 +489,41 @@ describe('환경별 관측 패널 (FE-08)', () => {
     await screen.findByRole('tablist', { name: '환경 선택' })
     expect(screen.getByText('학습 현황')).toBeTruthy()
     expect(probe).not.toHaveBeenCalled()
+  })
+
+  it('미션 전 화면에는 전체 대시보드 대신 요약만 두고, 자세한 기록은 프로필 시트로 연다 (FE-29)', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    mocked.getDashboardStats.mockResolvedValue({
+      username: 'tester',
+      total_score: 390,
+      missions_completed: 4,
+      total_time_spent: 30,
+      hints_used: 2,
+      current_tier: { name: 'Silver', min_score: 200, max_score: 500, color: '#c0c0c0', progress: 63, next_tier: 'Gold' },
+      skill_scores: { troubleshooting: 0, resource: 0, network: 0, ops: 0 },
+      environment: null,
+      environment_stats: {},
+    })
+    render(<App />)
+
+    const summary = await screen.findByRole('region', { name: '학습 현황' })
+    expect(await within(summary).findByText('Silver')).toBeTruthy()
+    expect(within(summary).getByRole('progressbar', { name: '다음 티어까지 진행률' }).getAttribute('aria-valuenow')).toBe('63')
+    expect(within(summary).getByText('Gold까지')).toBeTruthy()
+    // 환경 필터·지표·레이더가 있는 전체 대시보드는 미션 전 화면에 없다.
+    expect(screen.queryByRole('group', { name: '환경 필터' })).toBeNull()
+
+    fireEvent.click(within(summary).getByRole('button', { name: '프로필에서 자세히' }))
+    const sheet = await screen.findByRole('dialog', { name: '프로필' })
+    expect(within(sheet).getByRole('group', { name: '환경 필터' })).toBeTruthy()
+  })
+
+  it('미션 전 모바일 탭은 미션·가이드 둘이다 (FE-29)', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    render(<App />)
+
+    const tabbar = await screen.findByRole('tablist', { name: '작업 화면' })
+    expect(within(tabbar).getAllByRole('tab').map((node) => node.textContent)).toEqual(['미션', '가이드'])
   })
 })
 

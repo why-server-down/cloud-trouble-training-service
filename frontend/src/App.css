@@ -76,8 +76,9 @@
   flex-shrink: 0;
   place-items: center;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  /* 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
+  background: var(--fill-3);
+  color: var(--text);
   font-size: var(--text-xs);
   font-weight: 600;
   line-height: 1;
@@ -484,11 +485,16 @@
 
 /* 데스크톱 배치. 모바일 규칙과 섞이지 않게 폭으로 나눈다. */
 @media (min-width: 901px) {
-  /* 미션 전: 목록 | 시작 가이드 | 학습 현황 */
+  /*
+   * 미션 전: 미션 목록(주 열) | 학습 현황 요약 + 시작 가이드(보조 열) (FE-29).
+   * 초점은 하나, 미션 목록이다. 보조 열은 미션 중 보조 패널과 같은 쪽·비슷한 폭이다.
+   */
   .workspace-grid[data-mode='idle'] {
-    grid-template-areas: "mission terminal observe";
-    grid-template-columns: minmax(20rem, 24rem) minmax(0, 1.1fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas:
+      "mission observe"
+      "mission terminal";
+    grid-template-columns: minmax(0, 1fr) var(--aux-width);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .workspace-grid[data-mode='idle'] .area-tutor,
@@ -646,10 +652,6 @@
   .workspace-grid {
     --aux-width: 360px;
   }
-
-  .workspace-grid[data-mode='idle'] {
-    grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr) minmax(0, 1fr);
-  }
 }
 
 /* 고정된 작업 패널은 평평하다 — 모서리와 구분선만 쓰고 그림자는 주지 않는다. */
@@ -712,9 +714,9 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-5);
   overflow-y: auto;
-  padding: var(--space-6);
+  padding: var(--space-5) var(--space-4);
   word-break: keep-all;
 }
 
@@ -724,11 +726,12 @@
   gap: var(--space-2);
 }
 
+/* 시작 가이드는 보조 열이다. 제목이 미션 목록 제목보다 커 보이지 않게 한다 (FE-29). */
 .tutorial-intro h2 {
   color: var(--text);
-  font-size: var(--text-xl);
+  font-size: var(--text-md);
   font-weight: 600;
-  line-height: var(--leading-xl);
+  line-height: var(--leading-md);
 }
 
 .tutorial-intro p {
@@ -967,17 +970,6 @@
   text-align: center;
 }
 
-.workspace-dashboard {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--space-4);
-}
-
-.workspace-dashboard .dashboard-grid {
-  grid-template-columns: 1fr;
-}
-
 /* ── Mobile ─────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .app-header {
@@ -1006,10 +998,6 @@
 
   .env-tab:not([aria-disabled='true']) .env-tab-sub {
     display: none;
-  }
-
-  .tutorial-content {
-    padding: var(--space-5) var(--space-4);
   }
 }
 
@@ -1077,6 +1065,18 @@
 
   .workspace-grid[data-mode='active'] .incident-slot {
     display: block;
+  }
+
+  /* 미션 전 가이드 탭은 데스크톱 보조 열과 같다: 학습 현황 요약 위, 시작 가이드 아래 (FE-29). */
+  .workspace-grid[data-mode='idle'][data-tab='terminal'] {
+    grid-template-areas:
+      "observe"
+      "main";
+  }
+
+  .workspace-grid[data-mode='idle'][data-tab='terminal'] .area-observe {
+    display: flex;
+    grid-area: observe;
   }
 
   .aux-header {
