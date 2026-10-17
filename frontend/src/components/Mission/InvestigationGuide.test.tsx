@@ -20,9 +20,18 @@ describe('조사 가이드 (FE-26)', () => {
   it('미션 전에는 명령을 보여주기만 하고 버튼을 두지 않는다', () => {
     render(<InvestigationGuide environment="docker" />)
 
-    expect(screen.getByText('docker ps -a')).toBeTruthy()
+    expect(screen.getByText((_, node) => node?.tagName === 'CODE' && node.textContent === 'docker ps -a')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
     expect(screen.queryByText('(완료)')).toBeNull()
+  })
+
+  it('명령은 띄어쓰기에서만 줄이 바뀌도록 단어를 묶는다', () => {
+    render(<InvestigationGuide environment="kubernetes" />)
+
+    // 하이픈이 든 옵션도 한 덩어리다. '--sort-' 에서 끊기지 않는다.
+    const word = screen.getByText('--sort-by=.metadata.creationTimestamp')
+    expect(word.className).toBe('command-word')
+    expect(word.closest('code')?.textContent).toBe('kubectl get events --sort-by=.metadata.creationTimestamp')
   })
 
   it('터미널 입력 신호는 명령을 그대로 실어 보낸다', () => {
