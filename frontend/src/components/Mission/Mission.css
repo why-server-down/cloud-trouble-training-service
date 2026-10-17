@@ -590,9 +590,16 @@
 }
 
 .tutor-hint-ladder {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+  /*
+   * 막대 | 지금 단계 → 설명 → 다음 단계 버튼을 위아래로 쌓는다. 예전에는 버튼이 설명 옆 자리를
+   * 차지해 '알려 / 줍니다.'처럼 꼬리만 넘어가 비율이 어긋났다. 튜터 칸은 가장 넓어도 약 366px 이라
+   * 제목 옆에 버튼을 둘 자리가 없다.
+   */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: 2px;
   margin-bottom: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
@@ -602,9 +609,7 @@
 /* 단계 막대는 진행률처럼 중립색이다. 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */
 .tutor-hint-meter {
   display: flex;
-  flex-shrink: 0;
   gap: 3px;
-  padding-top: 8px;
 }
 
 .tutor-hint-meter i {
@@ -618,27 +623,28 @@
   background: var(--text);
 }
 
-.tutor-hint-ladder p {
-  display: grid;
+.tutor-hint-current {
   min-width: 0;
-  flex: 1;
-  gap: 2px;
-  word-break: keep-all;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-}
-
-.tutor-hint-next {
-  flex-shrink: 0;
-  align-self: center;
-}
-
-.tutor-hint-ladder strong {
   color: var(--text);
   font-size: var(--text-sm);
   font-weight: 600;
   line-height: var(--leading-sm);
+  word-break: keep-all;
+}
+
+.tutor-hint-detail {
+  grid-column: 2;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  word-break: keep-all;
+  text-wrap: pretty;
+}
+
+.tutor-hint-next {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: var(--space-2);
 }
 
 .tutor-note {

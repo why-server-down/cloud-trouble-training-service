@@ -467,16 +467,14 @@ const TutorChat: React.FC<TutorChatProps> = ({
               <i key={level.name} className={index < hintLevel ? 'is-on' : undefined} />
             ))}
           </span>
-          <p>
-            <strong>
-              힌트 {hintLevel}단계 · {HINT_LEVELS[hintLevel].name}
-            </strong>
-            <span>
-              {hintLevel < MAX_HINT_LEVEL
-                ? `힌트를 쓰면 ${HINT_LEVELS[hintLevel + 1].name}까지 알려 줍니다.`
-                : '가장 구체적인 단계입니다.'}
-            </span>
-          </p>
+          <strong className="tutor-hint-current">
+            힌트 {hintLevel}단계 · {HINT_LEVELS[hintLevel].name}
+          </strong>
+          <span className="tutor-hint-detail">
+            {hintLevel < MAX_HINT_LEVEL
+              ? `힌트를 쓰면 ${HINT_LEVELS[hintLevel + 1].name}까지 알려 줍니다.`
+              : '가장 구체적인 단계입니다.'}
+          </span>
           {onRequestHint && hintLevel < MAX_HINT_LEVEL && (
             <button
               className="ui-button small tutor-hint-next"
