@@ -1,6 +1,7 @@
 # Frontend — AfterFail
 
 React 18 + TypeScript + Vite. 3개 훈련 환경(Kubernetes / Docker / Linux)의 장애 대응 훈련 콘솔.
+화면 규칙(토큰·타이포·재질·레이아웃)은 [docs/frontend-design-system.md](../docs/frontend-design-system.md)가 기준이다.
 
 ```bash
 cd frontend
@@ -8,7 +9,7 @@ npm install
 npm run dev     # http://localhost:3000
 npm run build   # tsc && vite build
 npm run lint
-npx vitest run  # 236 tests
+npx vitest run  # 314 tests (Node 25+ 로컬에서는 NODE_OPTIONS=--no-experimental-webstorage)
 ```
 
 ---
@@ -203,7 +204,8 @@ config 조회로 환경을 처리한다.
 
 ### AI 시나리오
 
-`DEMO_UNLOCK_AI_SCENARIOS=true` 또는 화면의 "시연용 잠금 해제" 버튼.
+`DEMO_UNLOCK_AI_SCENARIOS=true` 또는 주소에 `?demo=1` 을 붙였을 때만 보이는 "시연용 잠금 해제" 버튼.
+학생 화면에는 이 버튼이 보이지 않는다 (FE-28).
 해금 조건은 **전 환경 기본 미션 10개 완료**다(`unlock-status` 는 environment 로
 필터되지 않는다).
 
