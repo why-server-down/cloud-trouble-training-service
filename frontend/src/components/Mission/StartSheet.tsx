@@ -1,6 +1,7 @@
 import React, { useRef } from 'react'
 import Sheet from '../Feedback/Sheet'
 import { AlertIcon } from './Icons'
+import { HINT_LEVELS } from './missionCopy'
 
 /*
  * 채점 규칙 표시용 상수. 계산은 하지 않고 안내만 한다 — 원본은 백엔드
@@ -91,7 +92,7 @@ const StartSheet: React.FC<StartSheetProps> = ({
               <dd>{baseScore ?? '—'}점</dd>
             </div>
             <div className="start-rule">
-              <dt>힌트 1회</dt>
+              <dt>힌트 한 단계</dt>
               <dd>{hintPenalty ? `−${hintPenalty}점` : '—'}</dd>
             </div>
           </>
@@ -99,7 +100,8 @@ const StartSheet: React.FC<StartSheetProps> = ({
       </dl>
       <p className="start-rules-note">
         시작부터 {SECONDS_PER_PENALTY_POINT}초마다 1점씩 깎이고, 완료하면 최소 {MIN_COMPLETION_SCORE}점을 받습니다.
-        포기하면 0점입니다. 튜터에게 질문하는 것은 감점이 없습니다.
+        포기하면 0점입니다. 튜터에게 질문하는 것은 감점이 없고, 힌트를 쓸 때마다 튜터의 답이 한 단계씩
+        구체적으로 바뀝니다({HINT_LEVELS.map((level) => level.name).join(' → ')}).
       </p>
 
       <p className="start-notice">
