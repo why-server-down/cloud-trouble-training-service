@@ -65,7 +65,7 @@ PDF는 `Application/DB`까지 최종 목표에 포함하지만, 현재 `CLAUDE.m
 | API | 브라우저 `fetch` 기반 `src/services/api.ts` | 유지, 공통 오류 처리 재사용 |
 | 상태 | `useState`, `useEffect`, localStorage | 유지, 전역 상태 라이브러리 추가 금지 |
 | 차트 | React에서 직접 생성한 SVG | 유지, 차트 라이브러리 추가 금지 |
-| 스타일 | 컴포넌트별 CSS + `App.css` | 기존 디자인 언어 유지 |
+| 스타일 | 컴포넌트별 CSS + `App.css` | 2026-10 개편: 터미널 워크벤치 + Apple 재질 규칙. 기준은 [frontend-design-system.md](frontend-design-system.md) (FE-24~FE-28) |
 | 테스트 | 자동화 테스트 없음 | Vitest 기반 최소 단위·컴포넌트 테스트 추가 |
 | 빌드 | `npm.cmd run build` 통과 | 모든 PR 필수 |
 | 린트 | 스크립트는 있으나 설정 파일이 없어 실패 | Sprint 0에서 설정 복구 |
@@ -1190,6 +1190,29 @@ capabilities 는 탭 **안**의 기능을 정한다. 두 판정을 섞으면 준
 - 계약에 없는 `reason` 이 와도 탭이 정상 렌더링되고 문구는 status 기준으로 나온다.
 - 응답에 `reason` 이 없으면 이번 변경 이전과 똑같이 동작한다.
 
+### FE-24~FE-28 디자인 전면 개편 (추가, 2026-10-17)
+
+기준선 진단(휴리스틱 22/40)에서 내용은 이 제품의 것인데 시각 언어는 범용 다크 콘솔 키트라는
+판정을 받았다. 다크 콘솔 정체성은 유지하고 장식을 걷어낸 자리를 Apple 재질·모션 규칙으로
+채운다. 토큰과 규칙은 [frontend-design-system.md](frontend-design-system.md)가 기준이다.
+
+| ID | 브랜치 | 범위 | 해결하는 문제 |
+|---|---|---|---|
+| FE-24 | `feature/fe-design-foundation` | 토큰, 6단 타입 스케일, IBM Plex Mono(woff2 직접 포함), 대비, 재질 토큰, eyebrow·모눈·액센트 줄 제거, 한국어 문구 | 한글이 모노 폴백으로 깨짐, 12px 미만 글자, 저대비, 장식 소음 |
+| FE-25 | `feature/fe-state-preservation` | 프로필을 시트로, 튜터 대화를 attempt 단위로 보존, 대시보드 초기 로딩 | 미션 중 프로필을 열면 터미널·튜터 대화가 사라짐 |
+| FE-26 | `feature/fe-mission-workspace` | 미션 중 터미널 55% 이상, 브리핑/튜터/관측 보조 패널, 인시던트 바, 버튼 위계, 모바일 하단 탭 바 | 터미널이 주인공이 아님, 모바일 크롬 215px |
+| FE-27 | `feature/fe-mission-lifecycle` | 시작 시트, 투어 시점 이동, 시간 초과 안내, 디브리프 시트, 토스트 정책 | 미션의 시작과 끝에 연출·피드백이 없음 |
+| FE-28 | `feature/fe-redesign-polish` | 접근성 항목, 시연 잠금 해제 `?demo=1`, 로드맵 이동, 파비콘 | 키보드·스크린리더 결함, 학생 화면의 시연 버튼 |
+
+인수 조건:
+
+- 1366×768, 768×1024, 390×844에서 미션 시작 → 조사 → 완료 확인 → 결과 확인을 끝까지 할 수 있다.
+- 화면에 12px 미만 글자가 없고, 본문 대비가 4.5:1 이상이다.
+- 한국어 문장이 모노 글꼴로 렌더링되지 않는다.
+- 미션 중 프로필·탭 전환으로 터미널 연결과 튜터 대화가 사라지지 않는다.
+- 새 runtime 의존성을 추가하지 않는다.
+- 개편 후 같은 방식(Claude 리뷰 2 + Codex)으로 휴리스틱 점수를 다시 매겨 22점과 비교한다.
+
 ---
 
 ## 7. 작업 의존성 및 우선순위
@@ -1238,6 +1261,11 @@ P0/P1이 남아 있으면 Application/DB, 추가 애니메이션, 신규 차트 
 | 10 | `feature/fe-backend-unblocked` | 백엔드 해제분 반영 (FE-09/FE-11 정정) |
 | 11 | `feature/fe-capabilities-gating` | FE-22 |
 | 12 | `feature/fe-env-reason` | FE-23 |
+| 13 | `feature/fe-design-foundation` | FE-24 |
+| 14 | `feature/fe-state-preservation` | FE-25 |
+| 15 | `feature/fe-mission-workspace` | FE-26 |
+| 16 | `feature/fe-mission-lifecycle` | FE-27 |
+| 17 | `feature/fe-redesign-polish` | FE-28 |
 
 PR 하나에서 백엔드 계약 변경과 대규모 UI 변경을 섞지 않는다. 단, 동일 계약을 맞추는 작은 타입 변경은 통합 PR에 포함할 수 있다.
 
