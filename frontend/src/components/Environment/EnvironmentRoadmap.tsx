@@ -33,7 +33,7 @@ const EnvironmentRoadmap: React.FC<EnvironmentRoadmapProps> = ({ items }) => {
     <div className="env-roadmap">
       {pending.length > 0 && (
         <div className="env-roadmap-group">
-          <span>NEXT / 준비 중 환경</span>
+          <span className="env-roadmap-title">준비 중 환경</span>
           <ul>
             {pending.map((item) => (
               <li key={item.id}>
@@ -48,7 +48,7 @@ const EnvironmentRoadmap: React.FC<EnvironmentRoadmapProps> = ({ items }) => {
       )}
       {notDeployed.length > 0 && (
         <div className="env-roadmap-group">
-          <span>CLOSED / 이 서버에서 열지 않은 환경</span>
+          <span className="env-roadmap-title">이 서버에서 열지 않은 환경</span>
           <ul>
             {notDeployed.map((item) => (
               <li key={item.id}>
@@ -60,7 +60,7 @@ const EnvironmentRoadmap: React.FC<EnvironmentRoadmapProps> = ({ items }) => {
         </div>
       )}
       <div className="env-roadmap-group">
-        <span>RESEARCH / 후속 연구</span>
+        <span className="env-roadmap-title">후속 연구</span>
         <ul>
           {RESEARCH_TOPICS.map((topic) => (
             <li key={topic.label}>

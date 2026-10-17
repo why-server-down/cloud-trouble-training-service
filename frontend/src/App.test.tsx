@@ -442,7 +442,7 @@ describe('환경별 관측 패널 (FE-08)', () => {
 
     const frame = await screen.findByTitle('Kubernetes Grafana dashboard')
     expect(frame.getAttribute('src')).toContain('/d/k8s-survival-overview/')
-    expect(screen.getByText('OBSERVABILITY / KUBERNETES')).toBeTruthy()
+    expect(screen.getByText('관측 · Kubernetes')).toBeTruthy()
     await waitFor(() => expect(probe).toHaveBeenCalled())
     expect(vi.mocked(probe).mock.calls[0][0]).toContain('/api/v1/query?query=')
   })
@@ -456,7 +456,7 @@ describe('환경별 관측 패널 (FE-08)', () => {
     expect(await screen.findByText(/Docker 환경은 관측 대시보드가 아직 없습니다/)).toBeTruthy()
     // K8s 대시보드로 대체하지 않는다 — 남의 환경 지표를 자기 것으로 읽게 된다.
     expect(screen.queryByTitle(/Grafana dashboard/)).toBeNull()
-    expect(screen.getByText('OBSERVABILITY / DOCKER')).toBeTruthy()
+    expect(screen.getByText('관측 · Docker')).toBeTruthy()
     expect(screen.queryByRole('link', { name: '새 창' })).toBeNull()
   })
 
@@ -476,7 +476,7 @@ describe('환경별 관측 패널 (FE-08)', () => {
     render(<App />)
 
     await screen.findByRole('tablist')
-    expect(screen.getByText('PROFILE / LEARNING DASHBOARD')).toBeTruthy()
+    expect(screen.getByText('학습 현황')).toBeTruthy()
     expect(probe).not.toHaveBeenCalled()
   })
 })
@@ -590,7 +590,7 @@ describe('환경별 field guide (FE-09)', () => {
     render(<App />)
 
     await openTerminalTab()
-    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const guide = await screen.findByText('조사 시작 명령')
     const commands = guide.parentElement as HTMLElement
 
     expect(commands.textContent).toContain('ps aux')
@@ -604,7 +604,7 @@ describe('환경별 field guide (FE-09)', () => {
     render(<App />)
 
     await openTerminalTab()
-    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const guide = await screen.findByText('조사 시작 명령')
     const commands = guide.parentElement as HTMLElement
 
     expect(commands.textContent).toContain('docker ps -a')
@@ -616,7 +616,7 @@ describe('환경별 field guide (FE-09)', () => {
     render(<App />)
 
     await openTerminalTab()
-    const guide = await screen.findByText('INVESTIGATION STARTERS')
+    const guide = await screen.findByText('조사 시작 명령')
     const commands = guide.parentElement as HTMLElement
 
     expect(commands.textContent).toContain('kubectl get pods')

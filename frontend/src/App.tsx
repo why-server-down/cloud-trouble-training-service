@@ -55,35 +55,35 @@ const scopedStorageKey = (key: string, scope: string | null) => `${key}:${scope 
 const INTRO_TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="profile"]',
-    eyebrow: 'TOUR / WELCOME',
+    eyebrow: '상단 정보',
     title: '학습 현황과 세션 정보',
     body: '상단에서는 프로필, 점수, 현재 실습 namespace를 확인할 수 있어요. 프로필을 열면 완료한 미션과 학습 기록도 볼 수 있습니다.',
     placement: 'bottom',
   },
   {
     target: '[data-tour="env-tabs"]',
-    eyebrow: 'TOUR / ENVIRONMENT',
+    eyebrow: '훈련 환경',
     title: '훈련 환경 선택',
     body: 'Kubernetes 훈련이 먼저 열려 있습니다. Docker와 Linux는 준비가 끝나면 탭이 열리고, Application·DB는 후속 연구 영역입니다.',
     placement: 'bottom',
   },
   {
     target: '[data-tour="mission-list"]',
-    eyebrow: 'TOUR / MISSIONS',
+    eyebrow: '미션',
     title: '미션을 고르고 시작',
     body: '왼쪽 목록에서 장애 상황을 선택하면 실제 조사와 복구 흐름이 시작됩니다. 잠긴 미션은 앞 단계 완료 후 열립니다.',
     placement: 'right',
   },
   {
     target: '[data-tour="field-guide"]',
-    eyebrow: 'TOUR / FIELD GUIDE',
+    eyebrow: '시작 가이드',
     title: '시작 전 가이드',
     body: '미션이 없을 때는 오른쪽에 조사 순서와 자주 쓰는 kubectl 명령 힌트가 표시됩니다.',
     placement: 'left',
   },
   {
     target: '[data-tour="learning-dashboard"]',
-    eyebrow: 'TOUR / DASHBOARD',
+    eyebrow: '학습 현황',
     title: '학습 대시보드',
     body: '아직 미션을 시작하지 않은 상태에서는 진행률과 기록을 볼 수 있고, 미션 중에는 관측 대시보드로 바뀝니다.',
     placement: 'left',
@@ -93,21 +93,21 @@ const INTRO_TOUR_STEPS: TourStep[] = [
 const MISSION_TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="mission-progress"]',
-    eyebrow: 'MISSION TOUR / STATUS',
+    eyebrow: '진행 상태',
     title: '미션 진행 상태',
     body: '남은 시간, 현재 점수, 힌트 사용 횟수를 확인하고 완료 확인, 힌트 사용, 포기 같은 액션을 실행할 수 있어요.',
     placement: 'right',
   },
   {
     target: '[data-tour="terminal"]',
-    eyebrow: 'MISSION TOUR / TERMINAL',
+    eyebrow: '터미널',
     title: '터미널에서 원인 조사',
     body: '여기에서 kubectl 명령을 입력해 Pod, Service, Deployment 상태를 조사하고 복구 명령을 실행합니다.',
     placement: 'right',
   },
   {
     target: '[data-tour="grafana"]',
-    eyebrow: 'MISSION TOUR / OBSERVE',
+    eyebrow: '관측',
     title: 'Grafana로 상태 관측',
     body: '장애 지표와 복구 상태를 보면서 명령 결과가 실제 환경에 반영되는지 확인할 수 있습니다.',
     placement: 'left',
@@ -518,26 +518,43 @@ function App() {
     }
   }, [])
 
-  if (isLoading) return <div className="app-loading">불러오는 중...</div>
+  if (isLoading) return <div className="app-loading" role="status">불러오는 중...</div>
   if (!token) return <Login onLoginSuccess={handleLoginSuccess} />
 
   return (
     <div className="app">
       <header className="app-header">
-        <div className="brand-lockup">
-          <span className="brand-index">OPS / 01</span>
-          <h1>AfterFail</h1>
-          <span className="brand-subtitle">Incident drill console</span>
-        </div>
+        <h1 className="brand-wordmark">AfterFail</h1>
         <div className="header-info">
           {profile && (
-            <button className="profile-summary" type="button" onClick={() => setIsProfileOpen(true)} data-tour="profile">
-              {profile.username} | 완료 {profile.missions_completed} | 총점 {profile.total_score}
+            <button
+              className="profile-summary"
+              type="button"
+              title="프로필과 학습 기록 보기"
+              onClick={() => setIsProfileOpen(true)}
+              data-tour="profile"
+            >
+              <span className="profile-avatar" aria-hidden="true">
+                {profile.username.charAt(0).toUpperCase()}
+              </span>
+              <span className="profile-name">{profile.username}</span>
+              <span className="ui-chip profile-score">
+                총점 <span className="profile-score-value">{profile.total_score}</span>
+              </span>
             </button>
           )}
-          {namespace && <span className="namespace-badge">Namespace: {namespace.startsWith('user-') ? namespace.slice(0, 20) + '...' : namespace}</span>}
-          <button className="tour-replay-button" type="button" onClick={replayIntroTour}>GUIDE</button>
-          <button className="logout-button" type="button" onClick={handleLogout}>로그아웃</button>
+          {namespace && (
+            <span className="namespace-badge" title={namespace}>
+              <span className="namespace-badge-label">네임스페이스</span>
+              <span className="namespace-badge-value">{namespace}</span>
+            </span>
+          )}
+          <button className="ui-button plain small tour-replay-button" type="button" onClick={replayIntroTour}>
+            둘러보기
+          </button>
+          <button className="ui-button plain small logout-button" type="button" onClick={handleLogout}>
+            로그아웃
+          </button>
         </div>
       </header>
       <main className="app-main">
@@ -549,7 +566,7 @@ function App() {
               <section className="env-notice env-notice-error" role="alert">
                 <span className="env-notice-title">환경 목록을 불러오지 못했습니다</span>
                 <p>{environmentsError}</p>
-                <button className="env-notice-action" type="button" onClick={() => void loadEnvironments()}>
+                <button className="ui-button small env-notice-action" type="button" onClick={() => void loadEnvironments()}>
                   다시 시도
                 </button>
               </section>
@@ -650,7 +667,7 @@ function App() {
                               <span className="env-notice-title">터미널 세션을 준비하지 못했습니다</span>
                               <p>{activeSessionState.message}</p>
                               <button
-                                className="env-notice-action"
+                                className="ui-button small env-notice-action"
                                 type="button"
                                 onClick={() => retry(activeAttempt.environment)}
                               >
@@ -668,33 +685,37 @@ function App() {
                       ) : (
                         <section className="tutorial-panel" data-tour="field-guide">
                           <div className="tutorial-panel-header">
-                            <span className="terminal-label">GETTING STARTED / FIELD GUIDE</span>
+                            <span className="panel-label">시작 가이드</span>
                           </div>
                           <div className="tutorial-content">
-                            <span className="tutorial-kicker">AfterFail</span>
-                            <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
-                            <p>
-                              왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다.
-                              {fieldGuideLabel
-                                ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
-                                : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
-                            </p>
-                            <div className="tutorial-steps">
-                              <article>
-                                <strong>01 / 미션 선택</strong>
-                                <span>왼쪽에서 잠금 해제된 미션을 고르고 시작합니다.</span>
-                              </article>
-                              <article>
-                                <strong>02 / 상태 조사</strong>
-                                <span>{fieldGuideInvestigationHint}</span>
-                              </article>
-                              <article>
-                                <strong>03 / 복구 및 검증</strong>
-                                <span>원인을 수정한 뒤 미션 패널에서 완료 확인을 실행합니다.</span>
-                              </article>
+                            <div className="tutorial-intro">
+                              <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
+                              <p>
+                                왼쪽 목록에서 미션을 시작하면 이 영역에 터미널이 열립니다.
+                                {fieldGuideLabel
+                                  ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
+                                  : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
+                              </p>
                             </div>
+                            <ol className="tutorial-steps">
+                              <li>
+                                <span className="tutorial-step-index" aria-hidden="true">01</span>
+                                <strong>미션 선택</strong>
+                                <span>왼쪽에서 잠금 해제된 미션을 고르고 시작합니다.</span>
+                              </li>
+                              <li>
+                                <span className="tutorial-step-index" aria-hidden="true">02</span>
+                                <strong>상태 조사</strong>
+                                <span>{fieldGuideInvestigationHint}</span>
+                              </li>
+                              <li>
+                                <span className="tutorial-step-index" aria-hidden="true">03</span>
+                                <strong>복구 및 검증</strong>
+                                <span>원인을 수정한 뒤 미션 패널에서 완료 확인을 실행합니다.</span>
+                              </li>
+                            </ol>
                             <div className="tutorial-commands">
-                              <span>INVESTIGATION STARTERS</span>
+                              <span className="panel-label">조사 시작 명령</span>
                               {fieldGuideStarters.map((command) => (
                                 <code key={command}>{command}</code>
                               ))}
@@ -705,13 +726,23 @@ function App() {
                       )}
                       <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
                         <div className="grafana-panel-header">
-                          <span className="terminal-label">
-                            {hasActiveAttempt
-                              ? `OBSERVABILITY / ${observabilityLabel.toUpperCase()}`
-                              : 'PROFILE / LEARNING DASHBOARD'}
+                          <span className="panel-label">
+                            {hasActiveAttempt ? `관측 · ${observabilityLabel}` : '학습 현황'}
                           </span>
                           {hasActiveAttempt && grafanaUrl && (
-                            <a href={grafanaUrl} target="_blank" rel="noreferrer">새 창</a>
+                            <a className="panel-link" href={grafanaUrl} target="_blank" rel="noreferrer">
+                              새 창
+                              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                                <path
+                                  d="M6.5 3.5H4a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V9.5M9.5 3H13v3.5M13 3 7.5 8.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </a>
                           )}
                         </div>
                         {!hasActiveAttempt ? (
@@ -728,7 +759,7 @@ function App() {
                             />
                             {isGrafanaLoading && (
                               <div className="grafana-loading-overlay" role="status" aria-live="polite">
-                                <strong>데이터 로딩중입니다..</strong>
+                                <span>Grafana 대시보드를 불러오는 중입니다</span>
                               </div>
                             )}
                             {!isGrafanaLoading && isObservabilityDegraded && (

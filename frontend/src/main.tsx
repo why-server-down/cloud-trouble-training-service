@@ -3,8 +3,8 @@ import ReactDOM from 'react-dom/client'
 import '@fontsource/ibm-plex-sans-kr/400.css'
 import '@fontsource/ibm-plex-sans-kr/500.css'
 import '@fontsource/ibm-plex-sans-kr/600.css'
-import App from './App'
 import './index.css'
+import App from './App'
 
 /*
  * StrictMode 는 개발 모드에서 effect 를 두 번 실행한다 (FE-16/17).
