@@ -53,7 +53,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -125,7 +124,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -197,7 +195,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -269,7 +266,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -337,7 +333,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -409,7 +404,6 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [

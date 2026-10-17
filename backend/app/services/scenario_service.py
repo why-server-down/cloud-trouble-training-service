@@ -22,6 +22,7 @@ from app.services.chaos_plan import (
 from app.services.scoring_service import ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
+from app.core import environments
 from app.core.environments import DEFAULT_ENVIRONMENT
 from app.core.metrics import AI_VALIDATION_AGREEMENT
 
@@ -51,8 +52,16 @@ class ScenarioService:
         self._compiler = ChaosPlanCompiler()
 
     async def check_unlock_status(self, db: AsyncSession, user_id: uuid.UUID) -> dict:
-        """AI 모드 잠금 해제 상태 반환."""
-        result = await db.execute(select(Mission).order_by(Mission.level))
+        """AI 모드 잠금 해제 상태 반환.
+
+        이 배포에서 열린 환경의 미션만 센다 (BE-31). 닫힌 환경의 미션은 풀 수 없어서,
+        세면 AI 모드가 영영 열리지 않는다.
+        """
+        result = await db.execute(
+            select(Mission)
+            .where(Mission.environment.in_(environments.ENABLED_ENVIRONMENTS))
+            .order_by(Mission.level)
+        )
         missions = result.scalars().all()
         total = len(missions)
 
