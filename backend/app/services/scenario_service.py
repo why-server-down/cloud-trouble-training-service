@@ -19,7 +19,7 @@ from app.services.chaos_plan import (
     FAULT_TYPE_TO_CHAOS_TYPE,
     allowed_fault_types,
 )
-from app.services.scoring_service import ScoringService
+from app.services.scoring_service import HINT_LIMIT_MESSAGE, MAX_HINT_LEVEL, ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
 from app.core import environments
@@ -478,6 +478,8 @@ class ScenarioService:
         attempt = await self._get_active_attempt(db, user_id)
         if not attempt or attempt.attempt_type != "ai_scenario":
             raise ValueError("진행 중인 AI 시나리오가 없습니다")
+        if attempt.hints_used >= MAX_HINT_LEVEL:
+            raise ValueError(HINT_LIMIT_MESSAGE)
 
         attempt.hints_used += 1
         await db.commit()
