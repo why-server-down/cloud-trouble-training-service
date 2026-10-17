@@ -10,6 +10,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.ai.tutor_service import _MOCK_HINTS, TutorService
+from app.services.chaos_injector import ChaosMeshInjector
 from app.services.command_validator import CommandValidator, LinuxPolicy
 from app.services.docker_chaos_injector import DockerChaosInjector
 from app.services.linux_chaos_injector import LinuxChaosInjector
@@ -56,7 +57,7 @@ def test_every_environment_has_all_levels_and_a_default():
 
 
 @pytest.mark.parametrize("environment, injector", [
-    ("docker", DockerChaosInjector), ("linux", LinuxChaosInjector),
+    ("kubernetes", ChaosMeshInjector), ("docker", DockerChaosInjector), ("linux", LinuxChaosInjector),
 ])
 def test_hints_cover_exactly_the_injected_chaos_types(environment, injector):
     supported = injector.__new__(injector).supported_chaos_types()
@@ -95,6 +96,15 @@ def test_no_cross_environment_or_tty_commands(environment, chaos_type, level):
         assert "kubectl" not in text and "클러스터" not in text
     if environment != "docker":
         assert "docker " not in text
+
+
+@pytest.mark.parametrize("chaos_type, fixes", [
+    ("compound_probe_cascade", ["kubectl set image deployment/nginx", "readinessProbe"]),
+    ("compound_crash_service", ["containers/0/command", "kubectl patch svc webapp-svc"]),
+])
+def test_compound_faults_fix_both_problems(chaos_type, fixes):
+    text = _hint("kubernetes", chaos_type, 3)
+    assert all(fix in text for fix in fixes)
 
 
 def test_pod_failure_fix_restores_the_image_instead_of_deleting_pods():
