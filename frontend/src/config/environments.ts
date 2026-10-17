@@ -76,7 +76,7 @@ export interface EnvironmentTerminalMeta {
 
 export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta> = {
   kubernetes: {
-    headerLabel: 'SHELL / KUBECTL',
+    headerLabel: 'kubectl 터미널',
     binary: 'kubectl',
     allowedCommands: null,
     investigationStarters: [
@@ -101,7 +101,7 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
     ],
   },
   docker: {
-    headerLabel: 'SHELL / DOCKER',
+    headerLabel: 'docker 터미널',
     binary: 'docker',
     allowedCommands: null,
     investigationStarters: [
@@ -138,7 +138,7 @@ export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta
     ],
   },
   linux: {
-    headerLabel: 'SHELL / LINUX',
+    headerLabel: 'Linux 셸',
     // Linux 는 단일 바이너리가 아니라 명령 자체가 argv[0] 이다 (BE-16 LinuxPolicy).
     binary: null,
     // LinuxPolicy 의 READ_COMMANDS + FILE_READ_COMMANDS + RECOVERY_COMMANDS 를 그대로 옮겼다.

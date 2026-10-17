@@ -1,5 +1,6 @@
 import React from 'react'
 import { UserProfileResponse } from '../../services/api'
+import { average } from '../../utils/dashboard'
 import DashboardOverview from './DashboardOverview'
 import './Profile.css'
 
@@ -19,26 +20,31 @@ const formatDate = (date: string) =>
   }).format(new Date(date))
 
 const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading, onBack, onRefresh }) => {
-  const averageScore =
-    profile.missions_completed > 0 ? Math.round(profile.total_score / profile.missions_completed) : 0
+  // 완료 0건의 평균은 0점이 아니라 '없음'이다 (설계 문서 5.5).
+  const averageScore = average(profile.total_score, profile.missions_completed)
 
   return (
     <section className="profile-page">
       <div className="profile-page-header">
-        <div>
-          <button className="profile-back-button" type="button" onClick={onBack}>
-            미션으로 돌아가기
-          </button>
-          <h2>프로필</h2>
-          <p>훈련 기록과 현재 성과를 확인합니다.</p>
-        </div>
-        <button className="profile-refresh-button" type="button" onClick={onRefresh} disabled={loading}>
-          {loading ? '갱신 중...' : '새로고침'}
+        <button className="ui-button plain small profile-back-button" type="button" onClick={onBack}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M10 3.5 5.5 8l4.5 4.5" />
+          </svg>
+          미션으로 돌아가기
         </button>
+        <div className="profile-title-row">
+          <div>
+            <h2>프로필</h2>
+            <p>훈련 기록과 현재 성과를 확인합니다.</p>
+          </div>
+          <button className="ui-button small profile-refresh-button" type="button" onClick={onRefresh} disabled={loading}>
+            {loading ? '갱신 중...' : '새로고침'}
+          </button>
+        </div>
       </div>
 
       <div className="profile-identity-card">
-        <div className="profile-avatar" aria-hidden="true">
+        <div className="profile-identity-avatar" aria-hidden="true">
           {profile.username.slice(0, 1).toUpperCase()}
         </div>
         <div>
@@ -58,7 +64,14 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading
         </article>
         <article className="profile-stat-card">
           <span>평균 점수</span>
-          <strong>{averageScore}</strong>
+          {averageScore === null ? (
+            <strong className="is-empty">
+              <span aria-hidden="true">—</span>
+              <small>완료 기록 없음</small>
+            </strong>
+          ) : (
+            <strong>{averageScore}</strong>
+          )}
         </article>
       </div>
 
@@ -71,7 +84,7 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading
           </div>
           <div>
             <dt>계정 ID</dt>
-            <dd>{profile.id}</dd>
+            <dd className="profile-mono">{profile.id}</dd>
           </div>
           <div>
             <dt>가입일</dt>
@@ -79,6 +92,8 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading
           </div>
         </dl>
       </div>
+
+      <h3 className="profile-section-title">학습 현황</h3>
       <DashboardOverview token={token} />
     </section>
   )

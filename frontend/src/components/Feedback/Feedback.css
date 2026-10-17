@@ -1,100 +1,181 @@
+/* ── 확인 시트 (설계 문서 4, 8) ─────────────────────────────── */
 .modal-backdrop {
   position: fixed;
   z-index: 20;
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 1rem;
-  background: rgba(5, 8, 7, 0.78);
+  padding: var(--space-4);
+  background: var(--scrim);
+  /*
+   * scrim 은 opacity 가 아니라 배경색으로 나타낸다. 부모에 opacity 애니메이션이 걸리면
+   * 그 부모가 backdrop root 가 되어 시트의 backdrop-filter 가 뒤 화면을 흐리지 못한다.
+   */
+  animation: scrim-in var(--dur-base) var(--ease-out) both;
 }
 
 .confirm-modal {
-  width: min(430px, 100%);
-  padding: 1.2rem;
-  border: 1px solid var(--line-strong);
-  border-top: 3px solid var(--warning);
-  background: var(--surface);
-  box-shadow: 12px 12px 0 rgba(0, 0, 0, 0.22);
+  width: min(440px, 100%);
+  padding: var(--space-6);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3);
+  animation: feedback-fade var(--dur-fast) var(--ease-out) both;
 }
 
 .confirm-modal h3 {
   color: var(--text);
-  font-size: 1rem;
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: var(--leading-xl);
 }
 
 .confirm-modal p {
-  margin-top: 0.75rem;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.76rem;
-  line-height: 1.6;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .confirm-modal-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.45rem;
-  margin-top: 1.1rem;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
 }
 
-.modal-button {
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.7rem;
-}
-
-.modal-button.primary {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.modal-button.danger {
-  border-color: var(--danger);
-  color: #e9a197;
-}
-
+/* ── 토스트 (설계 문서 5.5) ─────────────────────────────────── */
 .toast {
   position: fixed;
   z-index: 30;
-  top: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
+  /* 헤더의 프로필 버튼을 가리지 않도록 데스크톱에서는 오른쪽 아래에 둔다. */
+  right: var(--space-6);
+  bottom: var(--space-6);
   display: flex;
-  max-width: min(430px, calc(100% - 2rem));
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.2rem;
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--line-strong);
-  background: var(--surface-raised);
+  width: max-content;
+  max-width: min(400px, calc(100vw - var(--space-8)));
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
   color: var(--text);
-  box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.18);
-  font-size: 0.95rem;
+  animation: feedback-fade var(--dur-fast) var(--ease-out) both;
 }
 
-.toast.success {
-  border-left-color: var(--ok);
+.toast-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
 }
 
-.toast.info {
-  border-left-color: var(--accent);
+.toast.success .toast-icon {
+  stroke: var(--ok);
 }
 
-.toast.error {
-  border-left-color: var(--danger);
+.toast.info .toast-icon {
+  stroke: var(--info);
 }
 
-.toast button {
-  border: none;
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  font-family: var(--mono);
-  font-size: 0.68rem;
+.toast.error .toast-icon {
+  stroke: var(--danger);
+}
+
+/* 재질 위 글자는 회색 대신 --text 를 한 단계 굵게 쓴다 (설계 문서 4). */
+.toast-text {
+  min-width: 0;
+  flex: 1;
+  align-self: center;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 500;
+  line-height: var(--leading-md);
+  overflow-wrap: anywhere;
+}
+
+.toast-text strong {
+  margin-right: var(--space-1);
+  font-weight: 600;
+}
+
+.toast .ui-button.toast-close {
+  width: var(--control-height-sm);
+  flex-shrink: 0;
+  margin: calc(var(--space-1) * -1) 0;
+  padding: 0;
+}
+
+.toast-close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+
+@media (max-width: 768px) {
+  .toast {
+    right: auto;
+    /* 모바일 하단 탭 바가 생기면 --mobile-tabbar-height 만큼 띄운다. */
+    bottom: calc(var(--mobile-tabbar-height, 0px) + var(--space-4) + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+/* 움직임: 기본은 크로스페이드, 허용될 때만 확대·이동을 더한다. */
+@media (prefers-reduced-motion: no-preference) {
+  .confirm-modal {
+    animation: sheet-in var(--dur-slow) var(--ease-spring) both;
+  }
+
+  .toast {
+    animation: toast-in var(--dur-base) var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (max-width: 768px) {
+  .toast {
+    animation-name: toast-in-centered;
+  }
+}
+
+@keyframes scrim-in {
+  from {
+    background-color: transparent;
+  }
+}
+
+@keyframes feedback-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes toast-in-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
 }

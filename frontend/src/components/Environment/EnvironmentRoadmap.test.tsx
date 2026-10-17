@@ -14,8 +14,8 @@ const groupText = (title: string) => {
 
 const hasGroup = (title: string) => screen.queryByText(title) !== null
 
-const NEXT = 'NEXT / 준비 중 환경'
-const CLOSED = 'CLOSED / 이 서버에서 열지 않은 환경'
+const NEXT = '준비 중 환경'
+const CLOSED = '이 서버에서 열지 않은 환경'
 
 afterEach(cleanup)
 
@@ -73,6 +73,6 @@ describe('닫힌 환경 안내 (FE-23)', () => {
 
     expect(hasGroup(NEXT)).toBe(false)
     expect(hasGroup(CLOSED)).toBe(false)
-    expect(groupText('RESEARCH / 후속 연구')).toContain('Application')
+    expect(groupText('후속 연구')).toContain('Application')
   })
 })

@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -102,6 +103,15 @@ describe('환경 필터와 핵심 지표 (FE-13)', () => {
     // total_time_spent 360 / 3건 = 120초
     render(<DashboardOverview token="t" />)
     expect(await screen.findByText('2분 0초')).toBeTruthy()
+    // 처음 보는 사용자를 위해 약어를 풀어 쓴다 (설계 문서 7).
+    expect(screen.getByText('평균 복구 시간(MTTR)')).toBeTruthy()
+  })
+
+  it('불러오는 동안 읽을 수 있는 상태 문구를 둔다', () => {
+    mocked.getDashboardStats.mockReturnValue(new Promise(() => {}))
+    render(<DashboardOverview token="t" />)
+
+    expect(screen.getByRole('status').textContent).toContain('학습 대시보드를 불러오는 중')
   })
 
   it('완료 0건은 평균을 0 으로 위조하지 않고 데이터 없음으로 표시한다', async () => {
@@ -112,7 +122,7 @@ describe('환경 필터와 핵심 지표 (FE-13)', () => {
 
     await screen.findByText('완료 미션')
     expect(screen.getByLabelText('평균 점수 데이터 없음')).toBeTruthy()
-    expect(screen.getByLabelText('평균 MTTR 데이터 없음')).toBeTruthy()
+    expect(screen.getByLabelText('평균 복구 시간(MTTR) 데이터 없음')).toBeTruthy()
     // 0회 완료 자체는 숫자로 보여준다 — 이것은 실패가 아니다.
     expect(screen.getByText('0건')).toBeTruthy()
   })
@@ -221,6 +231,22 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     render(<DashboardOverview token="t" />)
 
     expect(await screen.findByText(/학습 곡선을 불러오지 못했습니다/)).toBeTruthy()
+  })
+})
+
+describe('첫 로딩 (FE-24)', () => {
+  it('StrictMode 이중 마운트에서도 다음 폴링 주기를 기다리지 않고 바로 그린다', async () => {
+    /*
+     * usePolling 은 진행 중 요청을 인스턴스끼리 공유한다. 공유된 요청이 취소된 첫 마운트의
+     * signal 을 들고 있으면 결과가 버려져, 다음 주기(15초)까지 로딩 화면에 머물렀다.
+     */
+    render(
+      <StrictMode>
+        <DashboardOverview token="t" />
+      </StrictMode>,
+    )
+
+    expect(await screen.findByText('완료 미션')).toBeTruthy()
   })
 })
 
