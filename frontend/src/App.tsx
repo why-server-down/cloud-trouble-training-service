@@ -898,8 +898,8 @@ function App() {
                       showFirstRunGuide={!hasSeenMissionTour}
                       onFirstRunGuideSeen={markMissionTourSeen}
                       onHintUsed={showTutor}
-                      closedEnvironmentLabels={environments
-                        .filter((item) => !isSelectableStatus(item.status))
+                      openEnvironmentLabels={environments
+                        .filter((item) => isSelectableStatus(item.status))
                         .map((item) => getEnvironmentMeta(item.id).label)}
                       onActiveAttemptChange={handleActiveAttemptChange}
                       onAttemptCompleted={handleAttemptCompleted}
