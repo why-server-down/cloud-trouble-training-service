@@ -81,6 +81,73 @@ _MOCK_HINTS: dict[str, dict[str, dict[int, str]]] = {
             2: "`kubectl describe pod <이름>`에서 Readiness 항목과 Events의 Readiness probe failed 메시지를 확인하고, `kubectl get endpoints nginx-svc`가 비어 있는지 보세요. probe가 어떤 경로를 검사하고 있고, nginx가 그 경로에 실제로 응답하나요?",
             3: "원인: nginx의 readinessProbe가 존재하지 않는 경로 `/healthz-notexist`를 검사해 Pod가 Ready가 되지 못하고(READY 0/1) Service Endpoints가 비어 있습니다.\n1. `kubectl describe pod <이름>`에서 Readiness probe 실패 경로 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/readinessProbe\"}]'`로 probe 제거 (또는 probe 경로를 nginx가 응답하는 `/`로 수정)\n3. `kubectl get endpoints nginx-svc`로 Pod IP가 잡히는지 확인\nprobe가 성공해야 Pod가 Ready가 되고, Ready인 Pod만 Service Endpoints에 들어갑니다.",
         },
+        # 아래는 AI 시나리오에만 나오는 장애다. 증상·메시지는 colima k3s 에 실제로 주입해 확인했다.
+        "crash_loop": {
+            0: "nginx Pod 중 STATUS가 Error와 CrashLoopBackOff를 오가는 Pod가 있나요? RESTARTS 숫자는 어떻게 변하고 있나요?",
+            1: "컨테이너가 시작하자마자 끝나고 있다면, 컨테이너가 마지막에 어떻게 종료됐는지와 어떤 명령으로 시작하도록 되어 있는지 살펴볼 차례예요.",
+            2: "`kubectl logs <이름>`으로 남긴 로그가 있는지 보고, `kubectl describe pod <이름>`에서 Last State의 Exit Code와 Command 항목을 확인해 보세요. 로그가 비어 있는데 바로 끝난다면 앱이 아니라 시작 명령 자체를 의심해 볼 만해요. Running 중인 기존 Pod의 Command와도 비교해 보세요.",
+            3: "원인: Deployment `nginx`의 컨테이너 command가 `sh -c 'exit 1'`로 바뀌어 새 Pod가 nginx를 띄우지 않고 곧바로 종료(Exit Code 1)되며 CrashLoopBackOff를 반복합니다. 롤링 업데이트라 기존 Pod는 Running으로 남아 있습니다.\n1. `kubectl describe pod <새 Pod>`에서 Command `sh -c 'exit 1'`과 Exit Code 1 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/command\"}]'`로 command 제거 (또는 `kubectl rollout undo deployment/nginx`)\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\ncommand를 지우면 이미지에 정해진 기본 시작 명령(nginx)으로 돌아갑니다.",
+        },
+        "liveness_probe": {
+            0: "nginx Pod의 RESTARTS 숫자가 계속 늘어나나요? 컨테이너가 시작은 하는데 얼마 못 가 다시 시작되는 것처럼 보이지는 않나요?",
+            1: "컨테이너가 스스로 죽는 게 아니라 일정 시간마다 재시작된다면, Kubernetes가 컨테이너가 살아 있는지 판단하는 설정(Liveness Probe)을 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`에서 Liveness 항목이 어떤 경로를 검사하는지와 Events의 `Liveness probe failed` 메시지를 확인해 보세요. Last State가 Exit Code 0(Completed)인데도 재시작된다면 앱이 스스로 실패한 게 아니라 kubelet이 컨테이너를 다시 시작시킨 것일 수 있어요. 검사하는 경로에 nginx가 실제로 응답하는지 생각해 보세요.",
+            3: "원인: nginx의 livenessProbe가 존재하지 않는 경로 `/healthz-notexist`를 검사해 404로 실패하고, 실패 한 번(failureThreshold 1)마다 kubelet이 컨테이너를 재시작합니다. 새 Pod가 잠깐 Ready였다가 기존 Pod를 대체했기 때문에, 재시작과 대기(CrashLoopBackOff)를 반복하는 동안 Endpoints도 대부분 비어 있습니다.\n1. `kubectl describe pod <이름>`에서 Liveness 경로와 `Liveness probe failed: HTTP probe failed with statuscode: 404` 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/livenessProbe\"}]'`로 probe 제거 (또는 경로를 nginx가 응답하는 `/`로 수정)\n3. `kubectl get pods`로 RESTARTS가 더 늘지 않고 READY 1/1인지 확인\nreadinessProbe는 실패하면 트래픽만 빼지만, livenessProbe는 실패하면 컨테이너를 죽이고 다시 띄웁니다.",
+        },
+        "configmap_misconfig": {
+            0: "새로 만들어진 nginx Pod가 Error나 CrashLoopBackOff를 반복하나요? 컨테이너가 끝나기 직전에 무언가 말을 남겼을까요?",
+            1: "nginx가 시작하다 스스로 멈춘다면 로그와, Pod에 바깥에서 붙인 설정 파일(ConfigMap 마운트)을 살펴볼 차례예요.",
+            2: "`kubectl logs <이름>`의 마지막 줄에서 nginx가 남긴 `[emerg]` 메시지를 찾고, `kubectl describe pod <이름>`의 Mounts에서 `/etc/nginx/nginx.conf`가 어디서 오는지 확인해 보세요. `kubectl get configmap nginx-broken-config -o yaml`로 그 설정 내용을 직접 볼 수 있어요.",
+            3: "원인: ConfigMap `nginx-broken-config`의 nginx.conf가 세미콜론과 닫는 괄호가 빠진 채 `/etc/nginx/nginx.conf`에 마운트되어, nginx가 `directive \"listen\" is not terminated by \";\"` 오류로 시작하지 못합니다(Exit Code 1).\n1. `kubectl logs <새 Pod>`에서 `[emerg]` 오류와 줄 번호 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/volumeMounts\"},{\"op\":\"remove\",\"path\":\"/spec/template/spec/volumes\"}]'`로 깨진 설정 마운트 제거 (또는 `kubectl rollout undo deployment/nginx`)\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n이 터미널은 `;`를 받지 않아 설정 파일을 직접 고칠 수 없어요. 마운트를 걷어 내면 이미지에 들어 있는 정상 nginx.conf로 돌아갑니다.",
+        },
+        "init_container_failure": {
+            0: "새 nginx Pod의 STATUS가 `Init:`으로 시작하나요? 메인 컨테이너는 시작이라도 했을까요?",
+            1: "STATUS가 Init 단계에 머물러 있다면 메인 컨테이너보다 먼저 실행되는 준비 컨테이너(initContainer)를 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`에서 Init Containers 항목의 이름, Command, Exit Code를 확인하고, `kubectl logs <이름> -c <init 컨테이너 이름>`으로 그 컨테이너가 남긴 메시지를 보세요. initContainer가 성공해야 메인 컨테이너가 시작해요.",
+            3: "원인: Deployment `nginx`에 항상 실패하는 initContainer `init-check`(`echo 'prerequisite check failed'; exit 1`)가 추가되어 새 Pod가 Init:Error·Init:CrashLoopBackOff에 머물고 nginx는 시작조차 못 합니다.\n1. `kubectl logs <새 Pod> -c init-check`에서 `prerequisite check failed` 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/initContainers\"}]'`로 initContainer 제거 (또는 `kubectl rollout undo deployment/nginx`)\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n메인 컨테이너는 문제가 없고 앞 단계가 막혀 있었으므로 initContainer를 걷어 내면 됩니다.",
+        },
+        "node_selector_mismatch": {
+            0: "새 nginx Pod가 Pending에서 움직이지 않나요? 이 Pod는 어느 노드에서 실행될지 정해졌을까요?",
+            1: "Pod가 Pending이고 컨테이너 오류도 없다면 스케줄러가 Pod를 놓을 노드를 찾지 못한 거예요. Pod가 노드에 요구하는 조건을 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`에서 Node-Selectors 항목과 Events의 `FailedScheduling` 메시지를 확인해 보세요. `kubectl get events`에도 같은 메시지가 남아요. 그 조건에 맞는 노드가 클러스터에 있는지 생각해 보세요.",
+            3: "원인: Deployment `nginx`에 존재하지 않는 노드 조건 `nodeSelector: disk=ssd-nonexistent`가 추가되어 새 Pod를 놓을 노드가 없습니다(`didn't match Pod's node affinity/selector`). 기존 Pod는 Running으로 남아 있습니다.\n1. `kubectl describe pod <새 Pod>`에서 Node-Selectors와 FailedScheduling 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/nodeSelector\"}]'`로 nodeSelector 제거\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n노드에 label을 붙일 권한은 없으니, 잘못된 조건을 Deployment에서 걷어 냅니다.",
+        },
+        "compound_probe_cascade": {
+            0: "새 nginx Pod는 지금 어떤 STATUS인가요? 그 문제를 고치고 나면 Pod가 바로 READY 1/1이 될까요?",
+            1: "컨테이너가 뜨기 전 단계(이미지 받기)와, 뜬 뒤 Pod의 준비 상태를 판단하는 설정(Readiness Probe)을 함께 살펴볼 차례예요. 문제가 하나가 아닐 수 있어요.",
+            2: "`kubectl describe pod <이름>`의 Events에서 이미지 관련 오류를 확인하고, 같은 출력의 Readiness 항목이 어떤 경로를 검사하는지도 보세요. 하나를 고친 뒤에도 `kubectl get pods`의 READY가 1/1인지 다시 확인해야 해요.",
+            3: "원인: 두 문제가 겹쳐 있습니다. 이미지가 존재하지 않는 태그 `nginx:wrongtag`이고(ImagePullBackOff), readinessProbe도 없는 경로 `/healthz-notexist`를 검사합니다. 이미지를 고쳐도 새 Pod가 READY 0/1에 머물러 롤아웃이 끝나지 않습니다.\n1. `kubectl describe pod <Running 중인 기존 Pod>`에서 정상 Image 값 확인\n2. `kubectl set image deployment/nginx nginx=<확인한 정상 이미지>`로 이미지 복구\n3. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/readinessProbe\"}]'`로 probe 제거\n4. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n두 번째 문제는 첫 번째를 고쳐야 드러나요. 고친 뒤 READY를 꼭 다시 확인하세요.",
+        },
+        "compound_crash_service": {
+            0: "nginx Pod와 webapp Pod는 각각 어떤 상태인가요? 증상이 한 군데에서만 나고 있을까요?",
+            1: "증상이 서로 다른 두 곳에서 날 수 있어요. 한쪽은 컨테이너가 시작하지 못하는 문제, 다른 쪽은 Service가 트래픽을 보낼 Pod를 찾지 못하는 문제인지 나눠서 살펴보세요.",
+            2: "nginx 쪽은 `kubectl describe pod <이름>`에서 Exit Code와 Command를, webapp 쪽은 `kubectl describe svc webapp-svc`의 Selector·Endpoints와 `kubectl get pods --show-labels`의 label을 비교해 보세요. 두 문제는 서로 관계가 없어서 하나를 고쳐도 다른 하나는 남아요.",
+            3: "원인: 서로 무관한 두 문제가 동시에 있습니다. nginx 컨테이너 command가 `sh -c 'exit 1'`로 바뀌어 새 Pod가 CrashLoopBackOff를 반복하고, `webapp-svc`의 selector가 `app: webapp-broken`이라 Endpoints가 비어 있습니다.\n1. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/command\"}]'`로 nginx command 제거\n2. `kubectl patch svc webapp-svc -p '{\"spec\":{\"selector\":{\"app\":\"webapp\"}}}'`로 Service selector를 Pod label에 맞추기\n3. `kubectl get pods`와 `kubectl get endpoints webapp-svc`로 둘 다 정상인지 확인\n두 문제의 조사 경로가 Deployment와 Service로 갈리므로 하나씩 따로 확인해야 합니다.",
+        },
+        "wrong_image_registry": {
+            0: "새 nginx Pod는 시작했나요? 정상으로 도는 Pod와 그렇지 않은 Pod는 어떤 이미지를 쓰고 있을까요?",
+            1: "새 Pod가 이미지를 받지 못한다면, 태그뿐 아니라 이미지를 어디서(레지스트리 주소) 받아오도록 되어 있는지도 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`의 Events에서 `Failed to pull image` 메시지에 적힌 이미지 이름 전체를 확인하고, Running 중인 기존 Pod의 Image 값과 비교해 보세요. 이미지 이름 앞부분이 레지스트리 주소예요.",
+            3: "원인: Deployment `nginx`의 이미지가 이 클러스터에서 접근할 수 없는 사설 레지스트리 주소 `private.registry.internal/nginx:latest`로 바뀌어 새 Pod가 이미지를 받지 못합니다(ImagePullBackOff). 기존 Pod는 Running으로 남아 있습니다.\n1. `kubectl describe pod <Running 중인 기존 Pod>`에서 정상 Image 값 확인\n2. `kubectl set image deployment/nginx nginx=<확인한 정상 이미지>` 또는 `kubectl rollout undo deployment/nginx`로 이미지 되돌리기\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n태그 오류와 달리 레지스트리 주소 자체가 틀렸으므로, 같은 이름의 다른 태그로 바꿔도 해결되지 않아요.",
+        },
+        "secret_ref_missing": {
+            0: "새 nginx Pod의 STATUS가 무엇인가요? 컨테이너가 시작했다가 죽은 걸까요, 아니면 시작하기 전에 멈춘 걸까요?",
+            1: "컨테이너가 만들어지기 전에 멈췄다면, 컨테이너를 만들 때 필요한 설정(환경변수로 읽어 오는 Secret이나 ConfigMap)을 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`에서 Environment Variables from 항목과 Events의 오류 메시지를 확인하고, `kubectl get secrets`로 그 이름의 Secret이 실제로 있는지 보세요.",
+            3: "원인: Deployment `nginx`가 존재하지 않는 Secret `missing-app-secret`을 envFrom으로 참조해 새 Pod가 CreateContainerConfigError에 멈춰 있습니다(`secret \"missing-app-secret\" not found`).\n1. `kubectl describe pod <새 Pod>`에서 참조하는 Secret 이름 확인\n2. `kubectl create secret generic missing-app-secret --from-literal=key=value`로 Secret 만들기 (또는 `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/envFrom\"}]'`로 참조 제거)\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\nSecret을 만들면 kubelet이 같은 Pod를 다시 시도해서 Pod를 지우지 않아도 시작됩니다.",
+        },
+        "pvc_unbound": {
+            0: "새 nginx Pod가 Pending에서 움직이지 않나요? 이 Pod가 시작하려면 무엇이 먼저 준비되어야 할까요?",
+            1: "Pod가 Pending이라면 스케줄러가 기다리는 조건을 봐야 해요. 이번에는 노드가 아니라 Pod가 붙이려는 저장소(PersistentVolumeClaim)를 살펴볼 차례예요.",
+            2: "`kubectl describe pod <이름>`의 Events에서 `FailedScheduling` 메시지를 확인하고, `kubectl get pvc`와 `kubectl describe pvc nginx-data`로 PVC 상태와 그 Events를 보세요. PVC가 어떤 storageClass를 요청하고 있나요?",
+            3: "원인: Deployment `nginx`가 PVC `nginx-data`를 마운트하는데, 이 PVC가 존재하지 않는 storageClass `nonexistent-storage`를 요청해 Pending에 머물고(`ProvisioningFailed`), 새 Pod도 스케줄되지 못합니다(`unbound immediate PersistentVolumeClaims`).\n1. `kubectl describe pvc nginx-data`에서 storageClass 오류 확인\n2. `kubectl patch deployment nginx --type=json -p='[{\"op\":\"remove\",\"path\":\"/spec/template/spec/containers/0/volumeMounts\"},{\"op\":\"remove\",\"path\":\"/spec/template/spec/volumes\"}]'`로 볼륨 마운트 제거\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인한 뒤, 쓰지 않는 PVC는 `kubectl delete pvc nginx-data`로 정리 (확인 후 실행)\n이 터미널에서는 PVC를 새로 만들 수 없으니, 바인딩되지 않는 볼륨을 Deployment에서 걷어 냅니다.",
+        },
+        "cpu_throttle": {
+            0: "새 nginx Pod의 STATUS는 Running인데 READY 열은 어떻게 보이나요? RESTARTS는 늘지 않는데 왜 준비가 안 될까요?",
+            1: "Pod가 Running인데 Ready가 아니라면 준비 상태를 판단하는 검사(Readiness Probe)가 왜 실패하는지 봐야 해요. 검사 설정이 틀렸는지, 컨테이너가 검사를 제시간에 끝낼 자원이 없는지 나눠서 살펴보세요.",
+            2: "`kubectl describe pod <이름>`에서 Events의 `Readiness probe failed` 메시지가 어떤 이유로 실패했는지 보고, 같은 출력의 Limits에서 cpu 값을 Running 중인 기존 Pod와 비교해 보세요. 검사가 시간 초과(timed out)로 실패한다면 CPU 상한을 의심해 볼 만해요.",
+            3: "원인: nginx의 CPU limit이 1m(CPU의 0.1%)로 줄어, CPU를 조금 쓰는 readiness 검사가 1초 안에 끝나지 못하고 시간 초과로 실패합니다(`command timed out`). 새 Pod는 READY 0/1에 머물고 기존 Pod가 남아 있습니다. 메모리와는 관계없습니다.\n1. `kubectl describe pod <새 Pod>`에서 Limits cpu 1m과 Readiness probe 시간 초과 확인\n2. `kubectl set resources deployment/nginx --limits=cpu=100m --requests=cpu=50m`으로 CPU 상한 복구\n3. `kubectl get pods`로 새 Pod가 Running이고 READY 1/1인지 확인\n검사 내용은 정상이에요. probe를 지우면 증상만 가려지고 CPU 부족은 그대로 남으니 상한을 올려야 합니다.",
+        },
         "default": {
             0: "지금 어떤 증상이 보이나요? 정상이 아닌 리소스가 무엇이고, 언제부터 그랬는지 먼저 살펴볼까요?",
             1: "정상이 아닌 리소스를 찾았다면, 그 리소스의 상세 정보와 최근 이벤트를 살펴볼 차례예요.",
@@ -646,7 +713,7 @@ class TutorService:
         environment: str = "kubernetes",
     ) -> str:
         hints = _MOCK_HINTS.get(environment, _MOCK_HINTS["kubernetes"])
-        # 다른 환경의 chaos_type 이 오면(예: AI 시나리오의 기본 매핑 pod_failure) 쓰지 않는다.
+        # 다른 환경의 chaos_type 이 오면(예: Docker 시도에 Kubernetes 의 pod_failure) 쓰지 않는다.
         # 그 환경의 중립 답변으로 대신해야 Docker/Linux 에서 kubectl 을 안내하지 않는다.
         scenario = hints.get(chaos_type, hints["default"])
         return scenario.get(hint_level, scenario[0])
