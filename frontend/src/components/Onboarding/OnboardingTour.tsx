@@ -46,46 +46,51 @@ const getVisibleRect = (selector: string): TargetRect | null => {
   }
 }
 
+/** 카드 높이 어림값. 문구가 세 줄일 때 약 230px 이라 넉넉히 잡는다. */
+const CARD_HEIGHT_ESTIMATE = 260
+
+type Placement = NonNullable<TourStep['placement']>
+
+/**
+ * 카드 위치. 원하는 방향에 자리가 없으면 아래 → 위 순서로 옮기고, 그래도 없으면
+ * 화면 아래 가운데에 둔다 (FE-28). 모바일에서는 대상이 화면 폭을 다 쓰므로 left/right 가
+ * 들어갈 수 없다 — 예전에는 그 좌표를 화면 안으로 끌어와 카드가 대상 한가운데를 덮었다.
+ */
 const getTooltipPosition = (rect: TargetRect | null, placement: TourStep['placement']) => {
-  const width = Math.min(TOOLTIP_WIDTH, window.innerWidth - EDGE_GUTTER * 2)
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.min(TOOLTIP_WIDTH, vw - EDGE_GUTTER * 2)
+  const centeredLeft = (vw - width) / 2
 
   if (!rect) {
-    return {
-      width,
-      left: (window.innerWidth - width) / 2,
-      top: Math.max(EDGE_GUTTER, window.innerHeight * 0.22),
-    }
+    return { width, left: centeredLeft, top: Math.max(EDGE_GUTTER, vh * 0.22) }
   }
 
-  const preferredPlacement = placement || 'bottom'
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-  let left = centerX - width / 2
-  let top = rect.top + rect.height + TOOLTIP_GAP
-
-  if (preferredPlacement === 'top') top = rect.top - TOOLTIP_GAP
-  if (preferredPlacement === 'left') {
-    left = rect.left - width - TOOLTIP_GAP
-    top = centerY
+  const right = rect.left + rect.width
+  const bottom = rect.top + rect.height
+  const fits: Record<Placement, boolean> = {
+    right: right + TOOLTIP_GAP + width <= vw - EDGE_GUTTER,
+    left: rect.left - TOOLTIP_GAP - width >= EDGE_GUTTER,
+    bottom: bottom + TOOLTIP_GAP + CARD_HEIGHT_ESTIMATE <= vh - EDGE_GUTTER,
+    top: rect.top - TOOLTIP_GAP - CARD_HEIGHT_ESTIMATE >= EDGE_GUTTER,
   }
-  if (preferredPlacement === 'right') {
-    left = rect.left + rect.width + TOOLTIP_GAP
-    top = centerY
+  const chosen = ([placement ?? 'bottom', 'bottom', 'top'] as Placement[]).find((p) => fits[p])
+
+  const alignedLeft = clamp(rect.left + rect.width / 2 - width / 2, EDGE_GUTTER, vw - width - EDGE_GUTTER)
+  const sideTop = clamp(rect.top + rect.height / 2 - 120, EDGE_GUTTER, vh - CARD_HEIGHT_ESTIMATE - EDGE_GUTTER)
+
+  switch (chosen) {
+    case 'right':
+      return { width, left: right + TOOLTIP_GAP, top: sideTop }
+    case 'left':
+      return { width, left: rect.left - width - TOOLTIP_GAP, top: sideTop }
+    case 'bottom':
+      return { width, left: alignedLeft, top: bottom + TOOLTIP_GAP }
+    case 'top':
+      return { width, left: alignedLeft, bottom: vh - rect.top + TOOLTIP_GAP }
+    default:
+      return { width, left: centeredLeft, bottom: EDGE_GUTTER }
   }
-
-  left = clamp(left, EDGE_GUTTER, window.innerWidth - width - EDGE_GUTTER)
-
-  if (preferredPlacement === 'top') {
-    return { width, left, bottom: window.innerHeight - rect.top + TOOLTIP_GAP }
-  }
-
-  if (preferredPlacement === 'left' || preferredPlacement === 'right') {
-    top = clamp(top - 120, EDGE_GUTTER, window.innerHeight - 260)
-  } else {
-    top = clamp(top, EDGE_GUTTER, window.innerHeight - 260)
-  }
-
-  return { width, left, top }
 }
 
 function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourProps) {
@@ -244,13 +249,17 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-tour-title"
-        aria-describedby="onboarding-tour-body"
+        aria-describedby="onboarding-tour-step onboarding-tour-body"
         tabIndex={-1}
       >
         <div className="tour-card-header">
           <span>{currentStep.eyebrow}</span>
-          <span className="tour-count">
+          {/* 화면에는 짧게, 스크린리더에는 한국어 문장으로 단계를 알린다. */}
+          <span className="tour-count" aria-hidden="true">
             {stepIndex + 1} / {steps.length}
+          </span>
+          <span id="onboarding-tour-step" className="sr-only">
+            {steps.length}단계 중 {stepIndex + 1}단계
           </span>
         </div>
         <h2 id="onboarding-tour-title">{currentStep.title}</h2>
