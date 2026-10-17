@@ -21,9 +21,9 @@ const missionCopy: Record<string, MissionCopy> = {
   },
   memory_stress: {
     name: '메모리 부족',
-    description: '애플리케이션 Pod가 메모리 부족으로 종료됩니다. 리소스 제한을 확인하고 조정하세요.',
+    description: '새로 배포한 Pod가 메모리 한도를 넘어 계속 종료됩니다(종료 코드 137). 리소스 제한을 확인하고 조정하세요.',
     cause:
-      '컨테이너 메모리 한도(limit)가 지나치게 낮아 새 Pod가 OOMKilled로 반복 종료됐습니다. `kubectl describe pod`의 Last State와 Limits를 확인하고 `kubectl set resources deployment/nginx --limits=memory=128Mi`로 한도를 올리면 복구됩니다.',
+      '앱이 시작할 때 쓰는 메모리보다 컨테이너 메모리 한도(limit, 6Mi)가 낮아 새 Pod가 반복 종료(종료 코드 137)됐습니다. `kubectl describe pod`의 Last State(Exit Code 137)와 Limits를 확인하고 `kubectl set resources deployment/nginx --limits=memory=128Mi`로 한도를 올리면 복구됩니다.',
   },
   service_misconfig: {
     name: '끊어진 연결',
