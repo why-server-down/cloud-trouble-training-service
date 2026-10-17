@@ -1074,8 +1074,7 @@
   /* 미션 탭 밖에서는 한 줄: 이름 | 남은 시간 | 완료 확인. "남은 시간" 글자는 읽기 전용으로 남긴다. */
   .workspace-grid:not([data-tab='missions']) .incident-slot .incident-bar {
     grid-template-areas:
-      "identity metrics actions"
-      "stale stale stale";
+      "identity metrics actions";
     grid-template-columns: minmax(0, 1fr) auto auto;
     column-gap: var(--space-3);
   }
