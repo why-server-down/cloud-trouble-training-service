@@ -58,6 +58,24 @@ class TestRAGServiceInitialization:
         assert rag_service.collection_name == "test_k8s_docs"
         assert rag_service.EMBEDDING_DIMENSION == 1536
     
+    def test_gemini_embeddings_use_openai_compatible_rest(self):
+        """Gemini 임베딩은 채팅과 같은 OpenAI 호환 REST 로 부른다.
+
+        langchain-google-genai(gRPC)는 새 형식 키에서 504 로 멈춰 적재와 검색이 모두 실패했다.
+        """
+        service = RAGService(
+            collection_name="test_gemini_rest",
+            use_memory=True,
+            settings=AISettings(AI_BACKEND="gemini", GEMINI_API_KEY="test-gemini-key"),
+        )
+
+        embeddings = service.embeddings
+        assert type(embeddings).__name__ == "OpenAIEmbeddings"
+        assert embeddings.openai_api_base.endswith("/v1beta/openai/")
+        assert embeddings.model == "gemini-embedding-001"
+        assert embeddings.check_embedding_ctx_length is False
+        assert service.EMBEDDING_DIMENSION == 3072
+
     def test_collection_creation(self, rag_service):
         """Test collection is created"""
         stats = rag_service.get_collection_stats()
