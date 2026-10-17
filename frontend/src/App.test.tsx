@@ -645,3 +645,35 @@ describe('모바일 탭 전환 (FE-17)', () => {
     expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('작업 상태 보존 (FE-25)', () => {
+  it('미션 중 프로필을 열고 닫아도 Terminal 을 unmount 하지 않는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    const sessionId = (await screen.findByTestId('terminal-stub')).getAttribute('data-session-id')
+    const profileButton = await screen.findByRole('button', { name: /tester/ })
+
+    // 프로필은 작업 화면을 대체하지 않고 시트로 덮는다.
+    fireEvent.click(profileButton)
+    expect(await screen.findByRole('dialog', { name: '프로필' })).toBeTruthy()
+    expect(screen.getByTestId('terminal-stub').getAttribute('data-session-id')).toBe(sessionId)
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 닫기' }))
+    expect(screen.queryByRole('dialog', { name: '프로필' })).toBeNull()
+    expect(screen.getByTestId('terminal-stub').getAttribute('data-session-id')).toBe(sessionId)
+    expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('Esc 로 프로필 시트를 닫는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /tester/ }))
+    expect(await screen.findByRole('dialog', { name: '프로필' })).toBeTruthy()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '프로필' })).toBeNull()
+  })
+})

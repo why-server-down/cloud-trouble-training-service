@@ -4,54 +4,64 @@
  */
 
 /* ── 프로필 화면 ────────────────────────────────────────────── */
-.profile-page {
-  width: min(980px, 100%);
-  margin: 0 auto;
-  padding: var(--space-8);
-  overflow-y: auto;
+.profile-sheet {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
 }
 
-.profile-page-header {
-  display: grid;
+.profile-sheet-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: var(--space-4);
-  margin-bottom: var(--space-6);
+  padding: var(--space-5) var(--space-5) var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--separator);
 }
 
-.profile-page-header .ui-button.profile-back-button {
-  justify-self: start;
+.profile-sheet-header h2 {
+  color: var(--text);
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: var(--leading-xl);
+}
+
+/* 재질 위 글자는 회색 대신 본문색을 쓴다 (설계 문서 4) */
+.profile-sheet-header p {
+  margin-top: var(--space-1);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.profile-sheet-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
   gap: var(--space-1);
-  margin-left: calc(var(--space-2) * -1);
-  padding-left: var(--space-2);
 }
 
-.profile-back-button svg {
+.profile-sheet-actions .ui-button.profile-close-button {
+  width: var(--control-height-sm);
+  padding: 0;
+}
+
+.profile-close-button svg {
   width: 16px;
   height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
-  stroke-linejoin: round;
   stroke-width: 1.75;
 }
 
-.profile-title-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-
-.profile-page-header h2 {
-  color: var(--text);
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  line-height: var(--leading-2xl);
-}
-
-.profile-page-header p {
-  margin-top: var(--space-1);
-  color: var(--text-secondary);
-  font-size: var(--text-md);
+.profile-page {
+  min-height: 0;
+  flex: 1;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+  overflow-y: auto;
 }
 
 .profile-identity-card,
@@ -671,11 +681,11 @@
 
 @media (max-width: 640px) {
   .profile-page {
-    padding: var(--space-4);
+    padding: var(--space-4) var(--space-4) var(--space-8);
   }
 
-  .profile-title-row {
-    align-items: flex-start;
+  .profile-sheet-header {
+    padding: var(--space-4) var(--space-3) var(--space-3) var(--space-4);
   }
 
   .profile-stat-grid {
