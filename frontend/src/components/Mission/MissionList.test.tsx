@@ -257,17 +257,17 @@ describe('환경별 미션 (FE-06)', () => {
     })
 
     expect(screen.getByText('컨테이너가 계속 죽습니다')).toBeTruthy()
-    expect(screen.queryByText('사라진 애플리케이션')).toBeNull()
+    expect(screen.queryByText('멈춰 버린 배포')).toBeNull()
   })
 
   it('환경을 바꾸면 이전 목록을 즉시 비운다', async () => {
     const { switchTo } = renderList('kubernetes')
-    expect(await screen.findByText('사라진 애플리케이션')).toBeTruthy()
+    expect(await screen.findByText('멈춰 버린 배포')).toBeTruthy()
 
     mocked.listMissions.mockReturnValue(new Promise<MissionResponse[]>(() => {}))
     switchTo('docker')
 
-    expect(screen.queryByText('사라진 애플리케이션')).toBeNull()
+    expect(screen.queryByText('멈춰 버린 배포')).toBeNull()
     expect(screen.getByText('미션을 불러오는 중...')).toBeTruthy()
   })
 
@@ -339,11 +339,11 @@ describe('미션 카드 접근성 (FE-24)', () => {
   it('열린 카드는 눌러서 시작 확인을 연다', async () => {
     renderList()
 
-    const card = await screen.findByRole('button', { name: /사라진 애플리케이션/ })
+    const card = await screen.findByRole('button', { name: /멈춰 버린 배포/ })
     expect(card.getAttribute('aria-disabled')).toBeNull()
     fireEvent.click(card)
     // 시작 시트는 누르기 전에 걸린 것(시간·점수 규칙·장애 주입)을 보여준다 (FE-27).
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' })
     expect(sheet.textContent).toContain('장애가 주입되고 타이머가 바로 시작됩니다')
     expect(screen.getByRole('button', { name: '장애 주입하고 시작' })).toBeTruthy()
   })
@@ -449,7 +449,7 @@ describe('미션 생명주기 (FE-27)', () => {
     mocked.startMission.mockResolvedValue(attempt)
     const { onActiveAttemptChange } = renderList()
 
-    fireEvent.click(await screen.findByRole('button', { name: /사라진 애플리케이션/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /멈춰 버린 배포/ }))
     // 점수 규칙은 누르기 전에 보인다.
     expect(await screen.findByText('20분')).toBeTruthy()
     expect(screen.getByText('−5점')).toBeTruthy()
@@ -458,7 +458,7 @@ describe('미션 생명주기 (FE-27)', () => {
     fireEvent.click(screen.getByRole('button', { name: '장애 주입하고 시작' }))
 
     await waitFor(() => expect(mocked.startMission).toHaveBeenCalledWith('test-token', 'mission-1'))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: '사라진 애플리케이션' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '멈춰 버린 배포' })).toBeNull())
     expect(onActiveAttemptChange).toHaveBeenCalledWith(expect.objectContaining({ attemptId: 'attempt-1' }))
   })
 
@@ -466,10 +466,10 @@ describe('미션 생명주기 (FE-27)', () => {
     mocked.startMission.mockRejectedValue(new Error('이미 진행 중인 미션이 있습니다'))
     renderList()
 
-    fireEvent.click(await screen.findByRole('button', { name: /사라진 애플리케이션/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /멈춰 버린 배포/ }))
     fireEvent.click(await screen.findByRole('button', { name: '장애 주입하고 시작' }))
 
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' })
     expect(await screen.findByText('이미 진행 중인 미션이 있습니다')).toBeTruthy()
     expect(sheet).toBeTruthy()
   })
@@ -500,7 +500,7 @@ describe('미션 생명주기 (FE-27)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '완료 확인' }))
 
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' })
     expect(sheet.textContent).toContain('복구 완료')
     expect(sheet.textContent).toContain('91')
     expect(sheet.textContent).toContain('4분 12초')
@@ -520,7 +520,7 @@ describe('미션 생명주기 (FE-27)', () => {
     })
     renderList()
 
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' }, { timeout: 8000 })
     expect(mocked.getAttempt).toHaveBeenCalledWith('test-token', 'attempt-1')
     expect(sheet.textContent).toContain('시간 초과')
     expect(sheet.textContent).toContain('최종 점수20')
@@ -535,7 +535,7 @@ describe('미션 생명주기 (FE-27)', () => {
     mocked.getAttempt.mockResolvedValue({ ...attempt, status: 'abandoned', end_time: '2026-08-28T00:02:00Z', final_score: 0 })
     renderList()
 
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' }, { timeout: 8000 })
     expect(sheet.textContent).toContain('미션 포기')
   }, 10000)
 
@@ -547,7 +547,7 @@ describe('미션 생명주기 (FE-27)', () => {
       .mockImplementation(notFound)
     renderList()
 
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' }, { timeout: 8000 })
     expect(sheet.textContent).toContain('시간 초과')
     // 서버가 확정한 점수를 받지 못했으므로 점수는 비워 둔다.
     expect(sheet.textContent).toContain('최종 점수—')
@@ -572,7 +572,7 @@ describe('미션 생명주기 (FE-27)', () => {
     renderList()
 
     // 첫 응답으로 진행 중 시도가 복원되고, 이어진 상태 폴링이 끝난 시도를 받는다.
-    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    const sheet = await screen.findByRole('dialog', { name: '멈춰 버린 배포' }, { timeout: 8000 })
     expect(sheet.textContent).toContain('시간 초과')
     expect(sheet.textContent).toContain('20분 0초')
   }, 10000)

@@ -142,6 +142,21 @@ describe('환경별 터미널 설정 (FE-07)', () => {
     }
   })
 
+  it('복구 명령은 주입기가 실제로 깨뜨린 설정을 고치는 것만 제안한다', () => {
+    // chaos_injector: 이미지(pod_failure)·memory limit(memory_stress), docker_chaos_injector: --cpus 0.05.
+    const kubernetes = ENVIRONMENT_TERMINAL.kubernetes.completions
+    expect(kubernetes).toContain('kubectl set image deployment/nginx nginx=')
+    expect(kubernetes).toContain('kubectl set resources deployment/nginx --limits=memory=')
+    expect(kubernetes).toContain('kubectl rollout undo deployment/nginx')
+    // Pod 를 지우면 같은 잘못된 설정으로 다시 만들어진다. 고쳐지지 않는 길을 Tab 으로 권하지 않는다.
+    expect(kubernetes.some((c) => c.startsWith('kubectl delete'))).toBe(false)
+    expect(kubernetes.some((c) => c.startsWith('kubectl apply'))).toBe(false)
+
+    const docker = ENVIRONMENT_TERMINAL.docker.completions
+    expect(docker).toContain('docker update --cpus ')
+    expect(docker.some((c) => c.includes('--memory'))).toBe(false)
+  })
+
   it('환경마다 헤더 라벨이 다르다', () => {
     const labels = ENVIRONMENT_IDS.map((id) => ENVIRONMENT_TERMINAL[id].headerLabel)
 
@@ -241,12 +256,19 @@ describe('Linux 터미널 설정 (FE-09)', () => {
 
   it('모든 환경이 조사 시작 명령을 갖고, 그 명령은 자동완성 정책과 같은 범위다', () => {
     for (const environment of ENVIRONMENT_IDS) {
-      const { binary, allowedCommands, investigationStarters } = ENVIRONMENT_TERMINAL[environment]
+      const { binary, allowedCommands, investigationStarters, investigationClues } = ENVIRONMENT_TERMINAL[environment]
       expect(investigationStarters.length, environment).toBeGreaterThan(0)
       for (const starter of investigationStarters) {
         if (binary) expect(starter.startsWith(`${binary} `), starter).toBe(true)
         else expect(allowedCommands, starter).toContain(starter.split(/\s+/)[0])
+        // 명령을 바꾸면 단서도 같이 바꾼다. 빠지면 명령 아래가 조용히 비어 보인다.
+        expect(investigationClues[starter], starter).toBeTruthy()
       }
     }
+  })
+
+  it('노드 전체 값인 /proc/loadavg 로 조사를 시작시키지 않는다', () => {
+    // 샌드박스 장애가 아니라 노드 부하를 보여 줘 엉뚱한 단서가 된다.
+    expect(linux.investigationStarters.some((c) => c.includes('/proc/loadavg'))).toBe(false)
   })
 })

@@ -14,16 +14,16 @@ interface MissionCopy {
 
 const missionCopy: Record<string, MissionCopy> = {
   pod_failure: {
-    name: '사라진 애플리케이션',
-    description: 'Nginx Pod가 ImagePullBackOff 상태입니다. 이미지 이름을 수정하여 Pod를 정상 상태로 복구하세요.',
+    name: '멈춰 버린 배포',
+    description: '새로 배포한 Nginx Pod가 잘못된 이미지 때문에 ImagePullBackOff에 멈춰 있습니다. 이미지를 바로잡아 배포를 끝내세요.',
     cause:
-      'Deployment의 컨테이너 이미지가 존재하지 않는 태그로 바뀌어 Pod가 이미지를 받지 못했습니다. `kubectl describe pod`의 Events에서 실패한 이미지 이름을 확인하고 `kubectl set image`로 올바른 이미지로 되돌리면 복구됩니다.',
+      'Deployment의 이미지가 존재하지 않는 태그로 바뀌어 새 Pod가 이미지를 받지 못했고, 기존 Pod만 Running으로 남아 응답하고 있었습니다. `kubectl describe pod`의 Events에서 실패한 이미지를 확인하고, 아직 Running인 기존 Pod의 이미지로 `kubectl set image`하거나 `kubectl rollout undo deployment/nginx`로 되돌리면 복구됩니다. Pod를 지우면 같은 잘못된 이미지로 다시 만들어질 뿐입니다.',
   },
   memory_stress: {
     name: '메모리 부족',
     description: '애플리케이션 Pod가 메모리 부족으로 종료됩니다. 리소스 제한을 확인하고 조정하세요.',
     cause:
-      '컨테이너 메모리 한도(limit)가 지나치게 낮아 프로세스가 OOMKilled로 반복 종료됐습니다. `kubectl describe pod`의 Last State와 Limits를 보고 Deployment의 memory limit을 올리면 복구됩니다.',
+      '컨테이너 메모리 한도(limit)가 지나치게 낮아 새 Pod가 OOMKilled로 반복 종료됐습니다. `kubectl describe pod`의 Last State와 Limits를 확인하고 `kubectl set resources deployment/nginx --limits=memory=128Mi`로 한도를 올리면 복구됩니다.',
   },
   service_misconfig: {
     name: '끊어진 연결',
@@ -33,7 +33,7 @@ const missionCopy: Record<string, MissionCopy> = {
   },
   network_latency: {
     name: '응답 없는 서버',
-    description: 'Pod에 지속적인 장애가 발생합니다. 상태 확인 설정을 점검하고 자동 복구되도록 구성하세요.',
+    description: 'Pod는 Running인데 Ready가 되지 않아 Service가 트래픽을 보내지 못합니다. Readiness Probe 설정을 확인해 다시 트래픽을 받게 하세요.',
     cause:
       'readinessProbe가 존재하지 않는 경로를 검사해 Pod가 Running이어도 Ready가 되지 못했습니다. `kubectl describe pod`의 Readiness 실패 이벤트를 보고 probe를 고치거나 제거하면 복구됩니다.',
   },
@@ -46,7 +46,7 @@ const missionCopy: Record<string, MissionCopy> = {
   },
   docker_cpu_throttle: {
     cause:
-      '컨테이너 CPU 상한이 아주 낮게 줄어 응답이 느려졌습니다. `docker stats`와 `docker inspect`로 상한을 확인하고 `docker update --cpus`로 올리면 복구됩니다.',
+      '컨테이너 CPU 상한이 0.05 CPU로 줄어 응답이 느려졌습니다. 상한은 `docker stats`에 드러나지 않고 `docker inspect`의 HostConfig.NanoCpus로 확인합니다. `docker update --cpus 1`로 올리면 복구됩니다.',
   },
   linux_process_flood: {
     cause: '`afterfail-worker` 프로세스가 대량으로 생겨 있었습니다. `ps`로 같은 이름이 많은 것을 확인하고 `pkill -f`로 정리하면 복구됩니다.',
