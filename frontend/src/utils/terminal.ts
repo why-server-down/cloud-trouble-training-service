@@ -51,3 +51,14 @@ export const getOfflineCommandNotice = (environment: EnvironmentId, command: str
   // 명령 정책을 모르는 환경에서는 무엇이 허용되는지 단정하지 않는다.
   return notConnected
 }
+
+/** 브리핑의 조사 명령을 터미널 입력줄에 넣으라는 신호 (FE-26). */
+export const TERMINAL_INSERT_EVENT = 'afterfail:terminal-insert'
+
+/**
+ * 명령을 실행하지 않고 터미널 입력줄에만 넣는다. 터미널과 브리핑은 서로 다른 영역에
+ * 있어 prop 으로 잇지 않고 window 이벤트로 알린다. 열린 터미널이 없으면 아무 일도 없다.
+ */
+export const insertTerminalCommand = (command: string) => {
+  window.dispatchEvent(new CustomEvent<string>(TERMINAL_INSERT_EVENT, { detail: command }))
+}

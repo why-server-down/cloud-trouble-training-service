@@ -5,7 +5,7 @@ import ConfirmModal from '../Feedback/ConfirmModal'
 import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
 import { getEnvironmentTerminal } from '../../config/environments'
 import { EnvironmentId } from '../../types/training'
-import { getOfflineCommandNotice, getTerminalPrompt } from '../../utils/terminal'
+import { getOfflineCommandNotice, getTerminalPrompt, TERMINAL_INSERT_EVENT } from '../../utils/terminal'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
@@ -208,6 +208,20 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
       processNextCommand()
     }
 
+    /*
+     * 브리핑에서 누른 조사 명령 (FE-26). 실행하지 않고 입력줄에만 붙인다 —
+     * 사용자가 확인하고 Enter 를 누른다. 입력 중이던 내용은 지우지 않는다.
+     */
+    const handleInsert = (event: Event) => {
+      const command = (event as CustomEvent<unknown>).detail
+      if (typeof command !== 'string' || !command) return
+      const text = currentLineRef.current && !currentLineRef.current.endsWith(' ') ? ` ${command}` : command
+      currentLineRef.current += text
+      terminal.write(text)
+      terminal.focus()
+    }
+    window.addEventListener(TERMINAL_INSERT_EVENT, handleInsert)
+
     terminal.onData((data) => {
       if (data.length > 1 && (data.includes('\r') || data.includes('\n'))) {
         let normalizedData = data.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
@@ -270,6 +284,7 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
 
     return () => {
       disposed = true
+      window.removeEventListener(TERMINAL_INSERT_EVENT, handleInsert)
       window.clearTimeout(fitTimer)
       resizeObserver?.disconnect()
       window.removeEventListener('resize', handleResize)
