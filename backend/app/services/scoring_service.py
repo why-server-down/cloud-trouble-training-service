@@ -1,5 +1,10 @@
 from datetime import datetime, timezone
 
+# 힌트는 튜터 답의 구체성 단계다(0 질문만 → 3 원인과 복구, ai-data/prompts/socratic_tutor.md).
+# 3단계를 넘게 사도 튜터가 더 주는 것이 없으니 감점만 받지 않게 막는다.
+MAX_HINT_LEVEL = 3
+HINT_LIMIT_MESSAGE = "힌트는 3단계까지입니다. 튜터가 이미 가장 구체적인 단계로 답하고 있습니다."
+
 
 class ScoringService:
     MIN_SCORE: int = 20

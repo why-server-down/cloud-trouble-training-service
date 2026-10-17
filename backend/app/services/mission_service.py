@@ -11,7 +11,7 @@ from app.core.metrics import MISSION_COMPLETIONS
 from app.core import environments
 from app.core.environments import DEFAULT_ENVIRONMENT
 from app.services.chaos_injector import BaseChaosInjector
-from app.services.scoring_service import ScoringService
+from app.services.scoring_service import HINT_LIMIT_MESSAGE, MAX_HINT_LEVEL, ScoringService
 from app.services.validation_service import BaseValidationService
 
 
@@ -301,6 +301,8 @@ class MissionService:
         attempt = result.scalar_one_or_none()
         if not attempt or attempt.status != "in_progress":
             raise ValueError("진행 중인 시도가 없습니다")
+        if attempt.hints_used >= MAX_HINT_LEVEL:
+            raise ValueError(HINT_LIMIT_MESSAGE)
 
         attempt.hints_used += 1
         await db.commit()

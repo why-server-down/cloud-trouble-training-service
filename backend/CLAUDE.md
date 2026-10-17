@@ -149,7 +149,7 @@ app/
 - `GET /api/missions/status` - 진행 중 미션 상태
 - `POST /api/missions/check` - 해결 여부 확인
 - `POST /api/missions/abandon` - 미션 포기
-- `POST /api/missions/hint` - 힌트 사용
+- `POST /api/missions/hint` - 힌트 사용. 3단계(`MAX_HINT_LEVEL`)까지만 받고 그 뒤는 400
 - `POST /api/missions/debug/resolve` - (Mock 전용) 수동 해결
 
 ### AI 시나리오 (캡스톤 1 핵심)
@@ -159,7 +159,7 @@ app/
 - `GET /api/scenarios/status` - 현재 AI 시나리오 진행 상태 🔒
 - `POST /api/scenarios/current/check` - AI 시나리오 완료 검증 🔒
 - `POST /api/scenarios/current/abandon` - AI 시나리오 포기 🔒
-- `POST /api/scenarios/current/hint` - 힌트 사용 (감점) 🔒
+- `POST /api/scenarios/current/hint` - 힌트 사용 (감점, 3단계까지) 🔒
 - `POST /api/scenarios/debug/resolve` - (Mock 전용) 수동 해결 🔒
 
 ### 대시보드 / 게이미피케이션
