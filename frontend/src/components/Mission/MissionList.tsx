@@ -38,7 +38,7 @@ import {
   EnvironmentId,
 } from '../../types/training'
 import MissionCard from './MissionCard'
-import { getMissionCause, getMissionCopy } from './missionCopy'
+import { getMissionCause, getMissionCopy, HINT_LEVELS, hintLevelOf, MAX_HINT_LEVEL } from './missionCopy'
 import StartSheet from './StartSheet'
 import DebriefSheet, { Debrief, DebriefOutcome } from './DebriefSheet'
 import { TERMINAL_COMMAND_EVENT } from '../../utils/terminal'
@@ -643,18 +643,30 @@ const MissionList: React.FC<MissionListProps> = ({
       setAutoHintKey((key) => key + 1)
       onHintUsed?.()
     } else {
-      showToast('info', `힌트 ${Math.min(level, 3)}단계가 열렸습니다.`)
+      showToast('info', `힌트 ${hintLevelOf(level)}단계가 열렸습니다.`)
+    }
+  }
+
+  /**
+   * 힌트 확인 문구 (설계 문서 6.3.1). 깎이는 점수와 함께 **무엇이 얼마 동안** 바뀌는지 말한다 —
+   * 힌트는 한 번 받는 답이 아니라 미션 끝까지 유지되는 튜터의 단계다.
+   */
+  const hintConfirmCopy = (used: number, penalty?: number | null) => {
+    const next = hintLevelOf(used) + 1
+    const cost = penalty ? `${penalty}점이 깎입니다.` : '점수가 깎입니다.'
+    return {
+      title: `힌트 ${next}단계 열기`,
+      message: canUseTutor
+        ? `튜터의 답이 '${HINT_LEVELS[next].name}' 단계로 올라갑니다. ${HINT_LEVELS[next].detail} 확인하면 바로 이 단계의 답을 보여 주고, 미션이 끝날 때까지 모든 질문에 적용됩니다. ${cost}`
+        : `힌트가 ${next}단계로 올라갑니다. ${cost}`,
+      confirmLabel: penalty ? `${next}단계 열기 −${penalty}점` : `${next}단계 열기`,
     }
   }
 
   const handleUseHint = () => {
-    const penalty = activeMission?.hint_penalty
+    if (hintLevelOf(hintsUsed) >= MAX_HINT_LEVEL) return
     setConfirmation({
-      title: '힌트 사용',
-      message: `${penalty ? `${penalty}점이 깎입니다. ` : '점수가 깎입니다. '}${
-        canUseTutor ? '튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다.' : '힌트 단계가 한 단계 올라갑니다.'
-      }`,
-      confirmLabel: penalty ? `힌트 사용 −${penalty}점` : '힌트 사용',
+      ...hintConfirmCopy(hintsUsed, activeMission?.hint_penalty),
       kind: 'hint',
       action: async () => {
         try {
@@ -817,12 +829,9 @@ const MissionList: React.FC<MissionListProps> = ({
   }
 
   const handleUseScenarioHint = () => {
+    if (hintLevelOf(scenarioHintsUsed) >= MAX_HINT_LEVEL) return
     setConfirmation({
-      title: '힌트 사용',
-      message: `점수가 깎입니다. ${
-        canUseTutor ? '튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다.' : '힌트 단계가 한 단계 올라갑니다.'
-      }`,
-      confirmLabel: '힌트 사용',
+      ...hintConfirmCopy(scenarioHintsUsed),
       kind: 'hint',
       action: async () => {
         try {
@@ -863,6 +872,8 @@ const MissionList: React.FC<MissionListProps> = ({
     missionId: string,
     tutorEnvironment: EnvironmentId,
     tutorHintsUsed: number,
+    onRequestHint: () => void,
+    hintPenalty?: number | null,
   ) => {
     if (!canUseTutor) return null
     const conversationKey = activeAttemptId ? `${activeAttemptId}:${tutorEnvironment}` : undefined
@@ -876,11 +887,14 @@ const MissionList: React.FC<MissionListProps> = ({
           environment={tutorEnvironment}
           hintsUsed={tutorHintsUsed}
           autoHintKey={autoHintKey}
+          onRequestHint={onRequestHint}
+          hintPenalty={hintPenalty}
           disabled={loading}
         />,
         tutorSlot,
       )
     }
+    // 떠 있는 튜터는 확인 시트보다 위에 떠서 시트를 가린다. 단계 열기 버튼은 고정 패널에만 둔다.
     return (
       <TutorChat
         token={token}
@@ -986,7 +1000,13 @@ const MissionList: React.FC<MissionListProps> = ({
               onHint={handleUseHint}
             />,
           )}
-          {renderTutorPanel(activeMissionId, activeMissionEnvironment ?? environment, hintsUsed)}
+          {renderTutorPanel(
+            activeMissionId,
+            activeMissionEnvironment ?? environment,
+            hintsUsed,
+            handleUseHint,
+            activeMission?.hint_penalty,
+          )}
         </>
       )}
 
@@ -1000,7 +1020,7 @@ const MissionList: React.FC<MissionListProps> = ({
               environmentLabel={getEnvironmentMeta(activeScenario.environment).label}
               remainingSeconds={activeScenario.remaining_seconds}
               score={activeScenario.current_score}
-              hintsUsed={activeScenario.hints_used}
+              hintsUsed={scenarioHintsUsed}
               pendingAction={pendingAction}
               busy={loading}
               abandonLabel="포기"
@@ -1010,7 +1030,7 @@ const MissionList: React.FC<MissionListProps> = ({
               onAbandon={handleAbandonScenario}
             />,
           )}
-          {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
+          {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed, handleUseScenarioHint)}
         </>
       )}
 

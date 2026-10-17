@@ -189,7 +189,7 @@ describe('액션별 진행 표시 (FE-16)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '완료 확인' }))
     expect(props.onCheck).toHaveBeenCalledTimes(1)
-    fireEvent.click(screen.getByRole('button', { name: '힌트 사용' }))
+    fireEvent.click(screen.getByRole('button', { name: '힌트 2단계' }))
     expect(props.onHint).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '미션 포기' }))
     expect(props.onAbandon).toHaveBeenCalledTimes(1)
@@ -218,8 +218,25 @@ describe('액션별 진행 표시 (FE-16)', () => {
     const { props } = renderStatus({ hintPenalty: 5 })
     await screen.findByText('10:00')
 
-    fireEvent.click(screen.getByRole('button', { name: '힌트 사용 −5점' }))
+    fireEvent.click(screen.getByRole('button', { name: '힌트 2단계 −5점' }))
     expect(props.onHint).toHaveBeenCalledTimes(1)
+  })
+
+  it('힌트 버튼은 올라갈 단계를 말하고, 3단계를 다 쓰면 잠근다', async () => {
+    // statusFor 기본값은 힌트 1번을 산 상태다.
+    const { view } = renderStatus()
+    expect(await screen.findByText('1/3')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '힌트 2단계' }).getAttribute('title')).toContain('진단 명령')
+    view.unmount()
+
+    const base = statusFor()
+    mocked.getMissionStatus.mockResolvedValue({ ...base, attempt: { ...base.attempt, hints_used: 4 } })
+    const { props } = renderStatus()
+    expect(await screen.findByText('3/3')).toBeTruthy()
+    const exhausted = screen.getByRole('button', { name: '힌트 모두 사용' })
+    expect(exhausted.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(exhausted)
+    expect(props.onHint).not.toHaveBeenCalled()
   })
 
   it('남은 시간이 5분·1분 아래로 내려가면 색과 함께 글자로 알린다', async () => {

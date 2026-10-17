@@ -6,6 +6,7 @@ import { getSafeSourceHref } from '../../utils/tutorSources'
 import { markStart, measureSince, PERF } from '../../utils/perf'
 import { EnvironmentId, isEnvironmentId } from '../../types/training'
 import { AlertIcon } from './Icons'
+import { HINT_LEVELS, hintLevelOf, MAX_HINT_LEVEL } from './missionCopy'
 
 interface TutorChatProps {
   token: string
@@ -26,6 +27,13 @@ interface TutorChatProps {
    * 점수를 내고도 아무것도 받지 못하는 일이 없게 한다.
    */
   autoHintKey?: number
+  /**
+   * 다음 힌트 단계를 연다(확인 시트를 거친다). 단계 안내 바로 옆에서 올릴 수 있게 한다 —
+   * 모바일은 튜터 탭에 인시던트 바의 힌트 버튼이 없다.
+   */
+  onRequestHint?: () => void
+  /** 힌트 한 단계 감점. 알 때만 버튼에 적는다. */
+  hintPenalty?: number | null
   disabled?: boolean
   floating?: boolean
   floatingOpen?: boolean
@@ -41,6 +49,8 @@ interface ChatMessage {
   observations?: string[]
   /** 프로바이더 실패로 받은 대체 응답인가. */
   fallback?: boolean
+  /** 이 답이 나온 힌트 단계. 힌트를 산 뒤 답이 어떻게 달라졌는지 대화 안에서 보이게 한다. */
+  hintLevel?: number
   /** 질문 전송부터 답변 도착까지 걸린 ms (FE-20). 숨기지 않고 그대로 보여준다. */
   latencyMs?: number | null
   /**
@@ -182,6 +192,8 @@ const TutorChat: React.FC<TutorChatProps> = ({
   conversationKey,
   hintsUsed,
   autoHintKey = 0,
+  onRequestHint,
+  hintPenalty,
   disabled,
   floating = false,
   floatingOpen = true,
@@ -215,7 +227,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
   const [isFloatingViewport, setIsFloatingViewport] = useState(() =>
     typeof window === 'undefined' || !window.matchMedia ? false : window.matchMedia(FLOATING_TUTOR_QUERY).matches,
   )
-  const hintLevel = Math.min(hintsUsed, 3)
+  const hintLevel = hintLevelOf(hintsUsed)
   const isChatDisabled = loading || !missionId || disabled || cooldown > 0
   const environmentLabel = getEnvironmentMeta(environment).label
   const isRateLimited = cooldown > 0
@@ -341,6 +353,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
           sources: response.sources ?? [],
           observations: response.observations_used ?? [],
           fallback: Boolean(response.fallback_used),
+          hintLevel: response.hint_level,
           latencyMs,
           mismatchedEnvironment: answered !== null && answered !== environment ? answered : null,
         },
@@ -437,10 +450,6 @@ const TutorChat: React.FC<TutorChatProps> = ({
             <span className="ui-chip tutor-environment-badge" data-environment={environment}>
               {environmentLabel}
             </span>
-            <span className="ui-chip tutor-hint-level" title="힌트를 쓸수록 더 구체적으로 안내합니다">
-              힌트 {hintLevel}단계
-              <span className="sr-only"> · 힌트를 쓸수록 더 구체적으로 안내합니다</span>
-            </span>
           </div>
           {floating && (
             <button className="ui-button plain small tutor-floating-close" type="button" onClick={onToggleFloating}>
@@ -448,10 +457,46 @@ const TutorChat: React.FC<TutorChatProps> = ({
             </button>
           )}
         </div>
+        {/*
+          * 힌트 단계는 튜터가 얼마나 구체적으로 답하는지다 (설계 문서 6.3.1). 예전에는 머리의 작은 칩과
+          * 마우스를 올려야 보이는 설명뿐이라, 힌트를 사면 답이 달라진다는 것이 전달되지 않았다.
+          */}
+        <div className="tutor-hint-ladder">
+          <span className="tutor-hint-meter" aria-hidden="true">
+            {HINT_LEVELS.slice(1).map((level, index) => (
+              <i key={level.name} className={index < hintLevel ? 'is-on' : undefined} />
+            ))}
+          </span>
+          <p>
+            <strong>
+              힌트 {hintLevel}단계 · {HINT_LEVELS[hintLevel].name}
+            </strong>
+            <span>
+              {hintLevel < MAX_HINT_LEVEL
+                ? `힌트를 쓰면 ${HINT_LEVELS[hintLevel + 1].name}까지 알려 줍니다.`
+                : '가장 구체적인 단계입니다.'}
+            </span>
+          </p>
+          {onRequestHint && hintLevel < MAX_HINT_LEVEL && (
+            <button
+              className="ui-button small tutor-hint-next"
+              type="button"
+              onClick={onRequestHint}
+              disabled={disabled}
+            >
+              {hintLevel + 1}단계 열기{hintPenalty ? ` −${hintPenalty}점` : ''}
+            </button>
+          )}
+        </div>
         <div className="chat-messages" aria-live="polite" ref={messagesRef} tabIndex={-1} aria-label="튜터 대화">
           {messages.map((message, index) => (
             <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-              <span className="chat-message-role">{message.role === 'user' ? '나' : '튜터'}</span>
+              <span className="chat-message-role">
+                {message.role === 'user' ? '나' : '튜터'}
+                {message.role === 'assistant' && message.hintLevel !== undefined
+                  ? ` · 힌트 ${hintLevelOf(message.hintLevel)}단계`
+                  : ''}
+              </span>
               {message.mismatchedEnvironment && (
                 /*
                  * 색이나 아이콘만으로 구분하지 않는다 (FE-17) — 두 환경 이름을 문장에

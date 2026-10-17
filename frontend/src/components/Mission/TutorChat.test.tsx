@@ -443,6 +443,37 @@ describe('튜터 대화 보존 (FE-25)', () => {
   })
 })
 
+describe('힌트 단계를 보인다', () => {
+  it('지금 단계와 힌트를 쓰면 무엇이 달라지는지 늘 보인다', () => {
+    const view = renderChat({ hintsUsed: 0 })
+    expect(screen.getByText('힌트 0단계 · 질문으로 방향만')).toBeTruthy()
+    expect(screen.getByText('힌트를 쓰면 조사할 곳까지 알려 줍니다.')).toBeTruthy()
+
+    view.rerender(<TutorChat token="t" missionId="mission-1" environment="docker" hintsUsed={3} />)
+    expect(screen.getByText('힌트 3단계 · 원인과 복구 방법')).toBeTruthy()
+    expect(screen.getByText('가장 구체적인 단계입니다.')).toBeTruthy()
+  })
+
+  it('단계 안내 옆에서 다음 단계를 열 수 있고, 3단계면 버튼이 없다', () => {
+    const onRequestHint = vi.fn()
+    const view = renderChat({ hintsUsed: 1, onRequestHint, hintPenalty: 5 })
+    fireEvent.click(screen.getByRole('button', { name: '2단계 열기 −5점' }))
+    expect(onRequestHint).toHaveBeenCalledTimes(1)
+
+    view.rerender(<TutorChat token="t" missionId="mission-1" environment="docker" hintsUsed={3} onRequestHint={onRequestHint} />)
+    expect(screen.queryByRole('button', { name: /단계 열기/ })).toBeNull()
+  })
+
+  it('답마다 어느 단계에서 나온 답인지 붙인다', async () => {
+    mocked.askTutor.mockResolvedValue(answer({ response: '진단 명령을 알려 드릴게요.', hint_level: 2 }))
+    renderChat({ hintsUsed: 2 })
+    await askOnce()
+
+    const bubble = (await screen.findByText('진단 명령을 알려 드릴게요.')).closest('.chat-message')
+    expect(bubble?.querySelector('.chat-message-role')?.textContent).toBe('튜터 · 힌트 2단계')
+  })
+})
+
 describe('힌트를 사면 튜터가 바로 답한다 (FE-28)', () => {
   it('힌트 신호가 바뀌면 올라간 단계의 힌트를 한 번 묻는다', async () => {
     const view = renderChat({ hintsUsed: 0, autoHintKey: 0 })

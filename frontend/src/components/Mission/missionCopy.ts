@@ -68,3 +68,20 @@ export const getMissionCopy = (mission: Pick<MissionResponse, 'chaos_type' | 'na
 
 /** 디브리프의 원인 설명. 모르는 장애면 null — 없는 원인을 지어내지 않는다. */
 export const getMissionCause = (chaosType: string): string | null => missionCopy[chaosType]?.cause ?? null
+
+/**
+ * 힌트 단계 (설계 문서 6.3.1). 힌트를 살 때마다 한 단계 올라가고, 미션이 끝날 때까지 튜터의
+ * **모든 답**이 그 단계로 구체적이 된다 — 한 번 받고 끝나는 쪽지가 아니다. 뜻은 튜터 프롬프트
+ * (`ai-data/prompts/socratic_tutor.md` 의 Hint levels)와 맞춘다. 0단계는 사지 않은 기본값이다.
+ */
+export const HINT_LEVELS = [
+  { name: '질문으로 방향만', detail: '되묻는 질문으로 어디를 볼지 이끕니다. 원인과 명령은 말하지 않습니다.' },
+  { name: '조사할 곳', detail: '관찰한 증거를 바탕으로 어디를 조사할지 짚어 줍니다.' },
+  { name: '진단 명령', detail: '원인을 찾는 명령까지 알려 줍니다. 고치는 방법은 아직 말하지 않습니다.' },
+  { name: '원인과 복구 방법', detail: '원인을 밝히고 고치는 명령과 그 이유를 알려 줍니다.' },
+] as const
+
+export const MAX_HINT_LEVEL = HINT_LEVELS.length - 1
+
+/** 산 힌트 수 → 튜터 단계. 예전 시도처럼 3번 넘게 샀어도 3단계다. */
+export const hintLevelOf = (hintsUsed: number) => Math.min(Math.max(hintsUsed, 0), MAX_HINT_LEVEL)

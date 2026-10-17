@@ -6,6 +6,7 @@ import {
   MISSION_POLL_HIDDEN_MS,
   MISSION_POLL_INTERVAL_MS,
 } from '../../config/polling'
+import { HINT_LEVELS, hintLevelOf, MAX_HINT_LEVEL } from './missionCopy'
 
 /** 진행 중인 액션. 요청 중 중복 클릭을 막고 어떤 액션이 도는지 문구로 알린다 (FE-16). */
 export type MissionAction = 'check' | 'hint' | 'abandon'
@@ -90,7 +91,16 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
   onAbandon,
 }) => {
   const timeState = remainingSeconds < 60 ? 'danger' : remainingSeconds < 300 ? 'warning' : ''
-  const hintLabel = hintPenalty ? `힌트 사용 −${hintPenalty}점` : '힌트 사용'
+  /*
+   * 버튼은 '힌트 사용'이 아니라 올라갈 단계를 말한다. 힌트는 튜터 답의 구체성 단계라서,
+   * 3단계를 넘게 사도 더 받는 것이 없다 — 그때는 잠근다.
+   */
+  const hintLevel = hintLevelOf(hintsUsed)
+  const hintsExhausted = hintLevel >= MAX_HINT_LEVEL
+  const nextHint = hintsExhausted ? null : HINT_LEVELS[hintLevel + 1]
+  const hintLabel = hintsExhausted
+    ? '힌트 모두 사용'
+    : `힌트 ${hintLevel + 1}단계${hintPenalty ? ` −${hintPenalty}점` : ''}`
 
   return (
     <section className="mission-status-panel incident-bar" data-tour="mission-progress" aria-label={title}>
@@ -122,15 +132,23 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
           <span className="status-value">{score}점</span>
         </div>
         <div className="status-item">
-          <span className="status-label">사용한 힌트</span>
-          <span className="status-value">{hintsUsed}개</span>
+          <span className="status-label">힌트 단계</span>
+          <span className="status-value">
+            {hintLevel}/{MAX_HINT_LEVEL}
+          </span>
         </div>
       </div>
       <div className="status-actions">
         <button className="ui-button primary" type="button" onClick={onCheck} disabled={busy}>
           {pendingAction === 'check' ? ACTION_LABELS.check : '완료 확인'}
         </button>
-        <button className="ui-button" type="button" onClick={onHint} disabled={busy}>
+        <button
+          className="ui-button"
+          type="button"
+          onClick={onHint}
+          disabled={busy || hintsExhausted}
+          title={nextHint ? `${nextHint.name}: ${nextHint.detail}` : '튜터가 가장 구체적인 단계로 답하고 있습니다.'}
+        >
           {pendingAction === 'hint' ? ACTION_LABELS.hint : hintLabel}
         </button>
         <span className="status-actions-divider" aria-hidden="true" />

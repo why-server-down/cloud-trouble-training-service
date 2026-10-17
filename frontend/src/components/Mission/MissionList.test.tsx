@@ -604,9 +604,11 @@ describe('힌트 확인 문구 (FE-28)', () => {
     })
     renderList()
 
-    fireEvent.click(await screen.findByRole('button', { name: /^힌트 사용/ }))
-    const dialog = await screen.findByRole('dialog', { name: '힌트 사용' })
+    fireEvent.click(await screen.findByRole('button', { name: /^힌트 1단계/ }))
+    const dialog = await screen.findByRole('dialog', { name: '힌트 1단계 열기' })
     expect(dialog.textContent).toContain('5점이 깎입니다')
-    expect(dialog.textContent).toContain('튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다')
+    // 무엇이 얼마 동안 바뀌는지 말한다 — 힌트는 미션 끝까지 유지되는 튜터의 단계다.
+    expect(dialog.textContent).toContain("튜터의 답이 '조사할 곳' 단계로 올라갑니다")
+    expect(dialog.textContent).toContain('미션이 끝날 때까지 모든 질문에 적용됩니다')
   })
 })
