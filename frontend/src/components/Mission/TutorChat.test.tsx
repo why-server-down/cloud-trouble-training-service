@@ -409,3 +409,36 @@ describe('Retry-After 파싱', () => {
     expect(api.parseRetryAfter('나중에')).toBeNull()
   })
 })
+
+describe('튜터 대화 보존 (FE-25)', () => {
+  it('같은 시도라면 다시 마운트돼도 대화가 남는다', async () => {
+    const first = renderChat({ conversationKey: 'attempt-1:docker' })
+    await askOnce('로그를 어떻게 보나요')
+    expect(await screen.findByText('먼저 컨테이너 상태를 확인하세요.')).toBeTruthy()
+    first.unmount()
+
+    renderChat({ conversationKey: 'attempt-1:docker' })
+    expect(screen.getByText('로그를 어떻게 보나요')).toBeTruthy()
+    expect(screen.getByText('먼저 컨테이너 상태를 확인하세요.')).toBeTruthy()
+  })
+
+  it('다른 시도면 이전 대화를 보여주지 않는다', async () => {
+    const first = renderChat({ conversationKey: 'attempt-2:docker' })
+    await askOnce('이전 시도의 질문')
+    await screen.findByText('먼저 컨테이너 상태를 확인하세요.')
+    first.unmount()
+
+    renderChat({ conversationKey: 'attempt-3:docker' })
+    expect(screen.queryByText('이전 시도의 질문')).toBeNull()
+  })
+
+  it('key 가 없으면 보존하지 않는다', async () => {
+    const first = renderChat()
+    await askOnce('보존되면 안 되는 질문')
+    await screen.findByText('먼저 컨테이너 상태를 확인하세요.')
+    first.unmount()
+
+    renderChat()
+    expect(screen.queryByText('보존되면 안 되는 질문')).toBeNull()
+  })
+})
