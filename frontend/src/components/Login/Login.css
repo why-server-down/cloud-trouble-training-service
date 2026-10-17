@@ -140,3 +140,33 @@
     padding: var(--space-6);
   }
 }
+
+/* iOS Safari 는 16px 보다 작은 입력창에 focus 가 가면 화면을 확대한다. 터치 기기에서만 16px 로 올린다. */
+@media (pointer: coarse) {
+  .form-group input {
+    font-size: var(--text-lg);
+  }
+}
+
+/*
+ * 키보드가 열렸거나 가로로 눕힌 휴대폰처럼 화면이 짧을 때 (FE-28).
+ * 위아래 여백을 줄여 입력창과 버튼이 한 화면에 더 많이 들어오게 한다. 넘치면 .login-container 가 스크롤된다.
+ */
+@media (max-height: 560px) {
+  .login-container {
+    padding-top: var(--space-6);
+    padding-bottom: var(--space-6);
+  }
+
+  .login-column {
+    gap: var(--space-4);
+  }
+
+  .login-box {
+    padding: var(--space-5) var(--space-6);
+  }
+
+  .login-title {
+    margin-bottom: var(--space-4);
+  }
+}
