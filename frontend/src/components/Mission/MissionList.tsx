@@ -66,6 +66,13 @@ interface MissionListProps {
   /** 첫 미션이면 시작 시트에 작업 화면 안내를 넣는다 (FE-27, 타이머가 도는 투어 대신). */
   showFirstRunGuide?: boolean
   onFirstRunGuideSeen?: () => void
+  /** 힌트를 샀다. App 이 튜터를 앞으로 꺼낸다 (FE-28). */
+  onHintUsed?: () => void
+  /**
+   * 이 배포에서 열리지 않은 환경 이름 (FE-28). AI 잠금 조건은 모든 환경의 기본 미션을
+   * 세므로, 닫힌 환경이 있으면 지금은 조건을 채울 수 없다는 사실을 함께 말한다.
+   */
+  closedEnvironmentLabels?: string[]
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
   /**
@@ -131,6 +138,8 @@ const MissionList: React.FC<MissionListProps> = ({
   tutorSlot,
   showFirstRunGuide = false,
   onFirstRunGuideSeen,
+  onHintUsed,
+  closedEnvironmentLabels = [],
   onActiveAttemptChange,
   onAttemptCompleted,
 }) => {
@@ -177,6 +186,11 @@ const MissionList: React.FC<MissionListProps> = ({
   const [startError, setStartError] = useState<string | null>(null)
   /** 미션이 끝난 뒤의 결과 시트와, "다시 도전"이 다시 열 시작 요청. */
   const [debrief, setDebrief] = useState<{ data: Debrief; again: StartRequest } | null>(null)
+  /**
+   * 힌트를 산 횟수 신호 (FE-28). 바뀌면 튜터가 올라간 단계의 힌트를 바로 요청해 보여 준다.
+   * 예전에는 점수만 깎이고 화면에 아무것도 나오지 않았다.
+   */
+  const [autoHintKey, setAutoHintKey] = useState(0)
   /** 완료 확인이 통과하지 못한 이유. 토스트 대신 인시던트 바 안에 남긴다. */
   const [checkFeedback, setCheckFeedback] = useState<string | null>(null)
   /** 이번 시도에서 터미널에 보낸 명령. 디브리프에만 쓰므로 렌더를 일으키지 않게 ref 로 둔다. */
@@ -594,18 +608,33 @@ const MissionList: React.FC<MissionListProps> = ({
     })
   }
 
+  const canUseTutor = hasCapability(capabilities, 'tutor')
+
+  /** 산 힌트를 보여 준다. 튜터가 있으면 튜터가 바로 답하고, 없으면 단계만 알린다. */
+  const revealHint = (level: number) => {
+    if (canUseTutor) {
+      setAutoHintKey((key) => key + 1)
+      onHintUsed?.()
+    } else {
+      showToast('info', `힌트 ${Math.min(level, 3)}단계가 열렸습니다.`)
+    }
+  }
+
   const handleUseHint = () => {
+    const penalty = activeMission?.hint_penalty
     setConfirmation({
       title: '힌트 사용',
-      message: '힌트를 사용하시겠습니까? 현재 미션 점수가 차감됩니다.',
-      confirmLabel: '힌트 사용',
+      message: `${penalty ? `${penalty}점이 깎입니다. ` : '점수가 깎입니다. '}${
+        canUseTutor ? '튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다.' : '힌트 단계가 한 단계 올라갑니다.'
+      }`,
+      confirmLabel: penalty ? `힌트 사용 −${penalty}점` : '힌트 사용',
       kind: 'hint',
       action: async () => {
         try {
           const attempt = await requestHint(token)
           setHintsUsed(attempt.hints_used)
           setStatusRefreshKey((k) => k + 1)
-          showToast('info', '힌트를 사용했습니다. 현재 점수를 확인해 주세요.')
+          revealHint(attempt.hints_used)
         } catch (err) {
           const msg = err instanceof Error ? err.message : '힌트 사용에 실패했습니다.'
           setError(msg)
@@ -757,14 +786,16 @@ const MissionList: React.FC<MissionListProps> = ({
   const handleUseScenarioHint = () => {
     setConfirmation({
       title: '힌트 사용',
-      message: '힌트를 사용하시겠습니까? 점수가 차감됩니다.',
+      message: `점수가 깎입니다. ${
+        canUseTutor ? '튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다.' : '힌트 단계가 한 단계 올라갑니다.'
+      }`,
       confirmLabel: '힌트 사용',
       kind: 'hint',
       action: async () => {
         try {
           const attempt = await requestScenarioHint(token)
           setScenarioHintsUsed(attempt.hints_used)
-          showToast('info', '힌트를 사용했습니다.')
+          revealHint(attempt.hints_used)
         } catch (err) {
           const msg = err instanceof Error ? err.message : '힌트 사용에 실패했습니다.'
           setError(msg)
@@ -789,7 +820,6 @@ const MissionList: React.FC<MissionListProps> = ({
    */
   const canUseStaticMission = hasCapability(capabilities, 'static_mission')
   const canUseAiScenario = hasCapability(capabilities, 'ai_scenario')
-  const canUseTutor = hasCapability(capabilities, 'tutor')
 
   /*
    * 튜터 패널은 세 자리(정적 미션 / AI 시나리오 / 모바일 AI 시나리오)에서 같은 모양으로
@@ -812,6 +842,7 @@ const MissionList: React.FC<MissionListProps> = ({
           conversationKey={conversationKey}
           environment={tutorEnvironment}
           hintsUsed={tutorHintsUsed}
+          autoHintKey={autoHintKey}
           disabled={loading}
         />,
         tutorSlot,
@@ -824,6 +855,7 @@ const MissionList: React.FC<MissionListProps> = ({
         conversationKey={conversationKey}
         environment={tutorEnvironment}
         hintsUsed={tutorHintsUsed}
+        autoHintKey={autoHintKey}
         disabled={loading}
         floating
         floatingOpen={isTutorFloatingOpen}
@@ -970,8 +1002,15 @@ const MissionList: React.FC<MissionListProps> = ({
               <LockIcon />
               <p>
                 AI 문제 모드는 계정 단위로 열립니다. Kubernetes · Docker · Linux 를 합친
-                기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
+                서로 다른 기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
                 활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
+                {closedEnvironmentLabels.length > 0 && (
+                  <>
+                    {' '}
+                    다만 이 서버에서는 {closedEnvironmentLabels.join(' · ')} 환경이 열려 있지 않아
+                    지금은 조건을 모두 채울 수 없습니다.
+                  </>
+                )}
               </p>
             </div>
           )}

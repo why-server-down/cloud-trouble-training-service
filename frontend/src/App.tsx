@@ -5,6 +5,7 @@ import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour
 import DashboardOverview from './components/Profile/DashboardOverview'
 import ProfileDetails from './components/Profile/ProfileDetails'
 import Sheet from './components/Feedback/Sheet'
+import ConfirmModal from './components/Feedback/ConfirmModal'
 import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
 import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
@@ -483,13 +484,21 @@ function App() {
    * 종료 후에도 K8s 쿼리를 계속 던졌다. Prometheus 가 영구히 죽어 있어도
    * 1초마다 무한히 두드리지 않도록 시도 상한과 backoff 를 둔다 (FE-16).
    */
+  /** 관측을 다시 확인한 횟수 (FE-28). 바뀌면 iframe 을 다시 열고 probe 를 처음부터 돈다. */
+  const [observabilityRetry, setObservabilityRetry] = useState(0)
+  const retryObservability = () => {
+    setIsGrafanaFrameReady(false)
+    setIsGrafanaDataReady(false)
+    setIsObservabilityDegraded(false)
+    setObservabilityRetry((count) => count + 1)
+  }
   const probeAttemptsRef = useRef(0)
   const probeFailuresRef = useRef(0)
 
   useEffect(() => {
     probeAttemptsRef.current = 0
     probeFailuresRef.current = 0
-  }, [grafanaProbeUrl, hasActiveAttempt])
+  }, [grafanaProbeUrl, hasActiveAttempt, observabilityRetry])
 
   const probeGrafanaData = useCallback(async () => {
     probeAttemptsRef.current += 1
@@ -536,7 +545,7 @@ function App() {
     hiddenIntervalMs: GRAFANA_PROBE_HIDDEN_MS,
     maxBackoffMs: MAX_BACKOFF_MS,
     enabled: hasActiveAttempt && grafanaProbeUrl !== null,
-    restartKey: `${grafanaProbeUrl ?? ''}:${isGrafanaFrameReady}`,
+    restartKey: `${grafanaProbeUrl ?? ''}:${isGrafanaFrameReady}:${observabilityRetry}`,
   })
 
   const handleLoginSuccess = (newToken: string) => {
@@ -548,7 +557,16 @@ function App() {
    * 로그아웃. 샌드박스 정리와 로그아웃 요청은 best-effort 로 던져 두고
    * 화면은 즉시 로그인으로 되돌린다 — 정리 실패가 로그아웃을 막으면 안 된다.
    */
+  /** 미션 중 로그아웃 확인 (FE-28). 실수로 누르면 터미널 연결과 작업 맥락을 잃는다. */
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false)
+
+  const requestLogout = () => {
+    if (hasActiveAttempt) setIsLogoutConfirmOpen(true)
+    else handleLogout()
+  }
+
   const handleLogout = () => {
+    setIsLogoutConfirmOpen(false)
     const expiringToken = token
     void closeAll()
     if (expiringToken) {
@@ -593,6 +611,12 @@ function App() {
       setAuxTab('observe')
     }
   }
+
+  /** 힌트를 사면 튜터를 앞으로 꺼낸다. 튜터가 그 단계의 힌트를 바로 보여 준다 (FE-28). */
+  const showTutor = useCallback(() => {
+    setAuxTab('tutor')
+    setActiveTab('tutor')
+  }, [])
 
   /**
    * 브리핑의 조사 명령을 터미널 입력줄에 넣는다 (FE-26). 모바일에서는 터미널 탭으로
@@ -663,7 +687,7 @@ function App() {
           <button className="ui-button plain small tour-replay-button" type="button" onClick={replayIntroTour}>
             둘러보기
           </button>
-          <button className="ui-button plain small logout-button" type="button" onClick={handleLogout}>
+          <button className="ui-button plain small logout-button" type="button" onClick={requestLogout}>
             로그아웃
           </button>
         </div>
@@ -743,62 +767,11 @@ function App() {
                   {/* 인시던트 바 자리. MissionList 가 진행 상황을 여기에 portal 한다 (FE-26). */}
                   <div className="incident-slot" ref={setIncidentSlot} />
 
-                  {hasActiveAttempt && (
-                    <div className="aux-header">
-                      <div
-                        className="aux-tabs"
-                        role="tablist"
-                        aria-label="보조 패널"
-                        onKeyDown={(event) => moveTabFocus(event, auxTabs.map((tab) => tab.id), auxTab, setAuxTab)}
-                      >
-                        {auxTabs.map((tab) => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            role="tab"
-                            id={`aux-tab-${tab.id}`}
-                            aria-selected={auxTab === tab.id}
-                            aria-controls={AREA_IDS[tab.area]}
-                            tabIndex={auxTab === tab.id ? 0 : -1}
-                            className={auxTab === tab.id ? 'active' : ''}
-                            onClick={() => setAuxTab(tab.id)}
-                          >
-                            {tab.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <section
-                    className="area area-mission"
-                    id={AREA_IDS.missions}
-                    aria-label={hasActiveAttempt ? '브리핑' : '미션'}
-                    data-tour="mission-list"
-                  >
-                    <MissionList
-                      token={token}
-                      storageScope={accountStorageScope}
-                      environment={activeEnvironment}
-                      capabilities={activeEnvironmentCapabilities}
-                      incidentSlot={incidentSlot}
-                      tutorSlot={tutorSlot}
-                      showFirstRunGuide={!hasSeenMissionTour}
-                      onFirstRunGuideSeen={markMissionTourSeen}
-                      onActiveAttemptChange={handleActiveAttemptChange}
-                      onAttemptCompleted={handleAttemptCompleted}
-                    />
-                    {activeAttempt && (
-                      <section className="briefing-guide" aria-label="조사 순서">
-                        <InvestigationGuide
-                          environment={activeAttempt.environment}
-                          active
-                          onInsertCommand={canUseTerminal && activeSession ? insertCommand : undefined}
-                        />
-                      </section>
-                    )}
-                  </section>
-
+                  {/*
+                    * DOM 순서는 미션 중 읽는 순서다: 인시던트 바 → 터미널 → 보조 패널.
+                    * 화면 배치는 grid-area 이름이 정하므로 순서를 바꿔도 위치는 같다.
+                    * (미션 전 시작 가이드에는 누를 것이 없어 목록이 첫 Tab 대상이 된다)
+                    */}
                   <section className="area area-terminal" id={AREA_IDS.terminal} aria-label={hasActiveAttempt ? '터미널' : '시작 가이드'}>
                     {activeAttempt && !canUseTerminal ? (
                       /*
@@ -871,6 +844,66 @@ function App() {
                     )}
                   </section>
 
+                  {hasActiveAttempt && (
+                    <div className="aux-header">
+                      <div
+                        className="aux-tabs"
+                        role="tablist"
+                        aria-label="보조 패널"
+                        onKeyDown={(event) => moveTabFocus(event, auxTabs.map((tab) => tab.id), auxTab, setAuxTab)}
+                      >
+                        {auxTabs.map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            role="tab"
+                            id={`aux-tab-${tab.id}`}
+                            aria-selected={auxTab === tab.id}
+                            aria-controls={AREA_IDS[tab.area]}
+                            tabIndex={auxTab === tab.id ? 0 : -1}
+                            className={auxTab === tab.id ? 'active' : ''}
+                            onClick={() => setAuxTab(tab.id)}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <section
+                    className="area area-mission"
+                    id={AREA_IDS.missions}
+                    aria-label={hasActiveAttempt ? '브리핑' : '미션'}
+                    data-tour="mission-list"
+                  >
+                    <MissionList
+                      token={token}
+                      storageScope={accountStorageScope}
+                      environment={activeEnvironment}
+                      capabilities={activeEnvironmentCapabilities}
+                      incidentSlot={incidentSlot}
+                      tutorSlot={tutorSlot}
+                      showFirstRunGuide={!hasSeenMissionTour}
+                      onFirstRunGuideSeen={markMissionTourSeen}
+                      onHintUsed={showTutor}
+                      closedEnvironmentLabels={environments
+                        .filter((item) => !isSelectableStatus(item.status))
+                        .map((item) => getEnvironmentMeta(item.id).label)}
+                      onActiveAttemptChange={handleActiveAttemptChange}
+                      onAttemptCompleted={handleAttemptCompleted}
+                    />
+                    {activeAttempt && (
+                      <section className="briefing-guide" aria-label="조사 순서">
+                        <InvestigationGuide
+                          environment={activeAttempt.environment}
+                          active
+                          onInsertCommand={canUseTerminal && activeSession ? insertCommand : undefined}
+                        />
+                      </section>
+                    )}
+                  </section>
+
                   <section className="area area-tutor" id={AREA_IDS.tutor} aria-label="AI 튜터">
                     {/* MissionList 가 튜터를 여기에 portal 한다 (FE-26). */}
                     <div className="tutor-slot" ref={setTutorSlot} />
@@ -909,6 +942,7 @@ function App() {
                       ) : hasObservability && grafanaUrl ? (
                         <div className="grafana-frame-wrap">
                           <iframe
+                            key={observabilityRetry}
                             className="grafana-frame"
                             src={grafanaUrl}
                             title={`${observabilityLabel} Grafana dashboard`}
@@ -920,10 +954,26 @@ function App() {
                             </div>
                           )}
                           {!isGrafanaLoading && isObservabilityDegraded && (
-                            <p className="grafana-degraded-note" role="status" aria-live="polite">
-                              Prometheus 지표 확인에 실패했습니다. 대시보드는 열려 있지만 값이 비어
-                              있을 수 있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
-                            </p>
+                            /*
+                             * iframe 의 load 는 오류 페이지에서도 온다. 그래서 "열려 있다"고 단정하지 않고,
+                             * 확인하지 못했다는 사실과 할 수 있는 일을 말한다 (FE-28).
+                             */
+                            <div className="grafana-degraded-note" role="status" aria-live="polite">
+                              <p>
+                                관측 데이터를 확인하지 못했습니다. 대시보드가 비어 있거나 열리지 않았을 수
+                                있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
+                              </p>
+                              <div className="grafana-degraded-actions">
+                                <button className="ui-button small" type="button" onClick={retryObservability}>
+                                  다시 확인
+                                </button>
+                                {grafanaUrl && (
+                                  <a className="ui-button plain small" href={grafanaUrl} target="_blank" rel="noreferrer">
+                                    새 창에서 열기
+                                  </a>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       ) : (
@@ -996,6 +1046,16 @@ function App() {
             onRefresh={() => void loadProfile()}
           />
         </Sheet>
+      )}
+      {isLogoutConfirmOpen && (
+        <ConfirmModal
+          title="진행 중인 미션이 있습니다"
+          message="로그아웃하면 터미널 연결이 끊깁니다. 미션은 서버에 남아 다시 로그인하면 이어서 할 수 있지만, 그동안에도 남은 시간은 계속 줄어듭니다."
+          confirmLabel="로그아웃"
+          danger
+          onConfirm={handleLogout}
+          onCancel={() => setIsLogoutConfirmOpen(false)}
+        />
       )}
       <OnboardingTour
         run={Boolean(activeTour)}

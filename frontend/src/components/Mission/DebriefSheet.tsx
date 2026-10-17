@@ -63,8 +63,8 @@ const renderInline = (text: string) =>
  * "무엇이 문제였고 내가 무엇을 쳤는지"가 다음 훈련에 쓸모 있으므로 둘을 함께 둔다.
  */
 const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPrimary, onClose, returnFocus }) => {
-  const primaryRef = useRef<HTMLButtonElement | null>(null)
-  const closeRef = useRef<HTMLButtonElement | null>(null)
+  // 처음 focus 는 제목. 버튼에 두면 스크린리더가 결과를 건너뛰고 행동부터 읽는다.
+  const titleRef = useRef<HTMLHeadingElement | null>(null)
   const commands = debrief.commands.slice(-MAX_COMMANDS)
   const skipped = debrief.commands.length - commands.length
 
@@ -73,7 +73,7 @@ const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPr
       className={`debrief-sheet outcome-${debrief.outcome}`}
       labelledBy="debrief-title"
       describedBy="debrief-outcome"
-      initialFocusRef={onPrimary ? primaryRef : closeRef}
+      initialFocusRef={titleRef}
       returnFocus={returnFocus}
       onClose={onClose}
     >
@@ -81,7 +81,7 @@ const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPr
         {debrief.outcome === 'completed' ? <CheckIcon /> : <AlertIcon />}
         {OUTCOME_LABELS[debrief.outcome]}
       </p>
-      <h2 id="debrief-title" className="sheet-title">{debrief.missionTitle}</h2>
+      <h2 id="debrief-title" className="sheet-title" ref={titleRef} tabIndex={-1}>{debrief.missionTitle}</h2>
       <div className="sheet-chips">
         <span className="ui-chip">{debrief.environmentLabel}</span>
       </div>
@@ -139,11 +139,11 @@ const DebriefSheet: React.FC<DebriefSheetProps> = ({ debrief, primaryLabel, onPr
       </section>
 
       <div className="sheet-actions">
-        <button ref={closeRef} className="ui-button plain" type="button" onClick={onClose}>
+        <button className="ui-button plain" type="button" onClick={onClose}>
           닫기
         </button>
         {onPrimary && primaryLabel && (
-          <button ref={primaryRef} className="ui-button primary" type="button" onClick={onPrimary}>
+          <button className="ui-button primary" type="button" onClick={onPrimary}>
             {primaryLabel}
           </button>
         )}

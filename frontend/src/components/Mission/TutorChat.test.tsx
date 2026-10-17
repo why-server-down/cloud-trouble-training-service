@@ -442,3 +442,40 @@ describe('튜터 대화 보존 (FE-25)', () => {
     expect(screen.queryByText('보존되면 안 되는 질문')).toBeNull()
   })
 })
+
+describe('힌트를 사면 튜터가 바로 답한다 (FE-28)', () => {
+  it('힌트 신호가 바뀌면 올라간 단계의 힌트를 한 번 묻는다', async () => {
+    const view = renderChat({ hintsUsed: 0, autoHintKey: 0 })
+    expect(mocked.askTutor).not.toHaveBeenCalled()
+
+    view.rerender(<TutorChat token="t" missionId="mission-1" environment="docker" hintsUsed={1} autoHintKey={1} />)
+    await waitFor(() => expect(mocked.askTutor).toHaveBeenCalledTimes(1))
+    expect(mocked.askTutor.mock.calls[0][1]).toBe('힌트 1단계를 주세요.')
+    expect(mocked.askTutor.mock.calls[0][2]).toBe(1)
+    expect(await screen.findByText('먼저 컨테이너 상태를 확인하세요.')).toBeTruthy()
+  })
+
+  it('다시 마운트돼도 이미 처리한 힌트를 또 묻지 않는다', async () => {
+    renderChat({ hintsUsed: 1, autoHintKey: 3 })
+    await act(async () => {})
+    expect(mocked.askTutor).not.toHaveBeenCalled()
+  })
+})
+
+describe('힌트 질문은 버리지 않는다 (FE-28)', () => {
+  it('다른 질문에 답하는 중에 힌트를 사면 답이 끝난 뒤 힌트를 묻는다', async () => {
+    let finishFirst: (value: api.ChatResponse) => void = () => {}
+    mocked.askTutor.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+    const view = renderChat({ hintsUsed: 0, autoHintKey: 0 })
+    await askOnce('먼저 묻는 질문')
+    expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+
+    view.rerender(<TutorChat token="t" missionId="mission-1" environment="docker" hintsUsed={1} autoHintKey={1} />)
+    await act(async () => {})
+    expect(mocked.askTutor).toHaveBeenCalledTimes(1)
+
+    await act(async () => finishFirst(answer()))
+    await waitFor(() => expect(mocked.askTutor).toHaveBeenCalledTimes(2))
+    expect(mocked.askTutor.mock.calls[1][1]).toBe('힌트 1단계를 주세요.')
+  })
+})

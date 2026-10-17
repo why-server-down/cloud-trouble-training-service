@@ -852,6 +852,18 @@
   color: var(--accent);
 }
 
+.guide-command-row {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.guide-command-clue {
+  padding: 0 var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
 .investigation-guide .tutorial-commands {
   margin-top: var(--space-5);
 }
@@ -921,6 +933,24 @@
 
 .grafana-degraded-note::before {
   background: var(--warning);
+}
+
+.grafana-degraded-note {
+  flex-wrap: wrap;
+}
+
+.grafana-degraded-note > p {
+  min-width: 0;
+  flex: 1;
+}
+
+/* 점(8px)과 간격만큼 들여 문장 첫 글자와 맞춘다 */
+.grafana-degraded-actions {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-left: calc(8px + var(--space-3));
 }
 
 .grafana-loading-overlay {
@@ -1069,6 +1099,32 @@
 
   .workspace-grid:not([data-tab='missions']) .incident-slot .status-metrics .status-item {
     display: none;
+  }
+
+  /* 미션 탭에서는 이름 → 지표 → 동작 순으로 쌓는다. 한 줄에 두면 버튼이 미션 이름을 덮는다. */
+  .workspace-grid[data-tab='missions'] .incident-slot .incident-bar {
+    grid-template-areas:
+      "identity"
+      "metrics"
+      "actions";
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: var(--space-3);
+  }
+
+  .workspace-grid[data-tab='missions'] .incident-slot .status-metrics {
+    justify-content: start;
+  }
+
+  .workspace-grid[data-tab='missions'] .incident-slot .status-actions {
+    flex-wrap: wrap;
+  }
+
+  .workspace-grid[data-tab='missions'] .incident-slot .status-actions-divider {
+    display: none;
+  }
+
+  .workspace-grid[data-tab='missions'] .incident-slot .status-actions .ui-button.danger {
+    margin-left: auto;
   }
 
   /* 미션 탭 밖에서는 한 줄: 이름 | 남은 시간 | 완료 확인. "남은 시간" 글자는 읽기 전용으로 남긴다. */

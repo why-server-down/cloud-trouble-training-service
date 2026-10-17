@@ -31,6 +31,34 @@
   line-height: var(--leading-sm);
 }
 
+/* 키보드 사용자에게 빠져나가는 방법을 늘 보여 준다. 연결 상태 앞에 붙는다. */
+.terminal-exit-hint {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  /* 터치 기기에는 Esc 키가 없다 */
+  .terminal-exit-hint {
+    display: none;
+  }
+}
+
+/* Esc 로 나온 뒤의 자리. 보이지 않는 점이고, 그동안 터미널 테두리에 링을 그려 위치를 알린다. */
+.terminal-exit-target {
+  width: 0;
+  height: 0;
+  outline: none;
+}
+
+.terminal-container:has(.terminal-exit-target:focus) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .terminal-connection {
   display: inline-flex;
   align-items: center;
