@@ -105,6 +105,22 @@ class TestEnvironmentAvailabilityApi:
             assert by_id[env]["status"] == "preparing"
             assert by_id[env]["capabilities"] == []
 
+    @pytest.mark.asyncio
+    async def test_closed_environment_reason_reaches_the_response(self, client, monkeypatch):
+        """availability() 가 붙인 reason 이 스키마에서 떨어지지 않는다 (BE-32).
+
+        필드가 없으면 Pydantic 이 조용히 버려서 프론트는 항상 "준비 중" 으로 떨어진다.
+        """
+        monkeypatch.setattr(environments, "ENABLED_ENVIRONMENTS", ("kubernetes", "linux"))
+        async with client:
+            items = (await client.get("/api/environments")).json()["items"]
+        by_id = {item["id"]: item for item in items}
+
+        assert by_id["docker"]["status"] == "preparing"
+        assert by_id["docker"]["reason"] == "not_deployed"
+        assert by_id["kubernetes"]["status"] == "available"
+        assert by_id["kubernetes"]["reason"] is None
+
 
 class TestMissionEnvironmentPassthrough:
     @pytest.mark.asyncio

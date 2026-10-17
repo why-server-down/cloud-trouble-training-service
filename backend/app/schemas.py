@@ -75,6 +75,8 @@ class EnvironmentItem(BaseModel):
     id: EnvironmentId
     status: str  # available | preparing
     capabilities: list[str] = []
+    # 닫힌 환경에만 붙는다: not_deployed | not_implemented. 열린 환경은 None.
+    reason: Optional[str] = None
 
 
 class EnvironmentListResponse(BaseModel):
