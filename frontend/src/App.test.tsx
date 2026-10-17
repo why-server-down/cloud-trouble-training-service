@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -128,15 +128,15 @@ describe('환경 가용성 화면 (FE-03)', () => {
     render(<App />)
 
     expect(await screen.findByText(/훈련 환경 목록을 불러오는 중/)).toBeTruthy()
-    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '환경 선택' })).toBeNull()
   })
 
   it('성공하면 서버가 준 환경만 탭으로 그리고 available 을 선택한다', async () => {
     mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_PREPARING, LINUX_PREPARING])
     render(<App />)
 
-    await screen.findByRole('tablist')
-    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    await screen.findByRole('tablist', { name: '환경 선택' })
+    expect(within(screen.getByRole('tablist', { name: '환경 선택' })).getAllByRole('tab')).toHaveLength(3)
     /*
      * 탭 목록이 뜨는 것과 활성 환경이 정해지는 것은 다른 응답에 달려 있다
      * (환경 목록 / 저장된 환경을 담은 프로필). 느린 실행에서는 목록만 먼저 그려진
@@ -156,7 +156,7 @@ describe('환경 가용성 화면 (FE-03)', () => {
     ])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     await waitFor(() => expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true'))
     expect(screen.getByRole('alert').textContent).toContain('일부 기능이 불안정')
     expect(screen.getByRole('tabpanel')).toBeTruthy()
@@ -169,12 +169,12 @@ describe('환경 가용성 화면 (FE-03)', () => {
     // 제목과 서버 메시지가 같은 문장일 수 있으므로 alert 영역 전체로 확인한다.
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('환경 목록을 불러오지 못했습니다')
-    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByRole('tablist', { name: '환경 선택' })).toBeNull()
 
     mocked.getEnvironments.mockResolvedValue([K8S])
     fireEvent.click(screen.getByRole('button', { name: '다시 시도' }))
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     expect(mocked.getEnvironments).toHaveBeenCalledTimes(2)
   })
 
@@ -185,10 +185,10 @@ describe('환경 가용성 화면 (FE-03)', () => {
     ])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     expect(screen.getByText(/지금 선택할 수 있는 훈련 환경이 없습니다/)).toBeTruthy()
     expect(screen.getByText(/준비 중 환경/)).toBeTruthy()
-    expect(screen.getAllByRole('tab').every((node) => node.getAttribute('aria-disabled') === 'true')).toBe(true)
+    expect(within(screen.getByRole('tablist', { name: '환경 선택' })).getAllByRole('tab').every((node) => node.getAttribute('aria-disabled') === 'true')).toBe(true)
   })
 
   it('사용자별 마지막 환경을 저장하고 복원한다', async () => {
@@ -196,7 +196,7 @@ describe('환경 가용성 화면 (FE-03)', () => {
     localStorage.setItem('afterfail:environment:v1:user-1', 'docker')
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     await waitFor(() => expect(tab('Docker').getAttribute('aria-selected')).toBe('true'))
 
     fireEvent.click(tab('Kubernetes'))
@@ -210,7 +210,7 @@ describe('환경 가용성 화면 (FE-03)', () => {
     localStorage.setItem('afterfail:environment:v1:user-1', 'docker')
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     await waitFor(() => expect(tab('Kubernetes').getAttribute('aria-selected')).toBe('true'))
     expect(tab('Docker').getAttribute('aria-selected')).toBe('false')
   })
@@ -222,7 +222,7 @@ describe('활성 attempt 환경 잠금 (FE-05)', () => {
     mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     await waitFor(() => expect(tab('Docker').getAttribute('aria-disabled')).toBe('true'))
     expect(screen.getByText(/다른 환경으로 전환할 수 없습니다/)).toBeTruthy()
 
@@ -237,20 +237,22 @@ describe('활성 attempt 환경 잠금 (FE-05)', () => {
     mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('docker'))
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     await waitFor(() => expect(tab('Docker').getAttribute('aria-selected')).toBe('true'))
     expect(tab('Kubernetes').getAttribute('aria-disabled')).toBe('true')
   })
 })
 
 describe('환경별 터미널 세션 지연 생성 (FE-04)', () => {
-  const workspaceTab = (label: string) => screen.getByRole('button', { name: label })
+  /** 작업 화면 탭. 미션 전에는 터미널 자리가 시작 가이드라 탭 이름이 '가이드'다 (FE-26). */
+  const workspaceTab = (label: string) =>
+    screen.getByRole('tab', { name: label === '터미널' ? '가이드' : label })
 
   it('로그인하고 미션 화면에 있는 동안에는 세션을 만들지 않는다', async () => {
     mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     expect(mocked.createTerminalSession).not.toHaveBeenCalled()
   })
 
@@ -258,7 +260,7 @@ describe('환경별 터미널 세션 지연 생성 (FE-04)', () => {
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     fireEvent.click(workspaceTab('터미널'))
 
     await waitFor(() =>
@@ -270,7 +272,7 @@ describe('환경별 터미널 세션 지연 생성 (FE-04)', () => {
     mocked.getEnvironments.mockResolvedValue([K8S, DOCKER_AVAILABLE])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     fireEvent.click(workspaceTab('터미널'))
     await waitFor(() =>
       expect(mocked.createTerminalSession).toHaveBeenCalledWith('test-token', 'kubernetes'),
@@ -333,7 +335,7 @@ describe('환경별 터미널 세션 지연 생성 (FE-04)', () => {
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     fireEvent.click(workspaceTab('터미널'))
     await waitFor(() => expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1))
 
@@ -351,8 +353,8 @@ describe('세션 정리 경로 (FE-04)', () => {
   const openTerminalWorkspace = async () => {
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
-    await screen.findByRole('tablist')
-    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+    await screen.findByRole('tablist', { name: '환경 선택' })
+    fireEvent.click(screen.getByRole('tab', { name: '가이드' }))
     await waitFor(() => expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1))
   }
 
@@ -404,8 +406,8 @@ describe('세션을 만드는 시점 (FE-04 회귀)', () => {
     localStorage.setItem('afterfail:environment:v1:user-1', 'docker')
     render(<App />)
 
-    await screen.findByRole('tablist')
-    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+    await screen.findByRole('tablist', { name: '환경 선택' })
+    fireEvent.click(screen.getByRole('tab', { name: '가이드' }))
 
     // 아직 kubernetes 로 보이지만, 저장값이 반영되기 전이라 세션을 만들면 안 된다.
     expect(mocked.createTerminalSession).not.toHaveBeenCalled()
@@ -483,7 +485,7 @@ describe('환경별 관측 패널 (FE-08)', () => {
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     expect(screen.getByText('학습 현황')).toBeTruthy()
     expect(probe).not.toHaveBeenCalled()
   })
@@ -554,9 +556,9 @@ describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
     mocked.getEnvironments.mockResolvedValue([withCapabilities([])])
     render(<App />)
 
-    await screen.findByRole('tablist')
+    await screen.findByRole('tablist', { name: '환경 선택' })
     expect(screen.getByText(/Kubernetes 환경은 아직 준비 중입니다/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '미션' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: '미션' })).toBeNull()
   })
 
   it('계약에 없는 capability 가 섞여 와도 아는 기능은 그대로 동작한다', async () => {
@@ -588,8 +590,8 @@ describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
 
 describe('환경별 field guide (FE-09)', () => {
   const openTerminalTab = async () => {
-    await screen.findByRole('tablist')
-    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+    await screen.findByRole('tablist', { name: '환경 선택' })
+    fireEvent.click(screen.getByRole('tab', { name: '가이드' }))
   }
 
   it('Linux 탭에서는 kubectl / docker 가이드가 섞이지 않는다', async () => {
@@ -642,11 +644,11 @@ describe('모바일 탭 전환 (FE-17)', () => {
     const sessionId = stub.getAttribute('data-session-id')
 
     // 미션 화면으로 전환 — CSS 로 숨기고 unmount 하지 않는다.
-    fireEvent.click(screen.getByRole('button', { name: '미션' }))
+    fireEvent.click(screen.getByRole('tab', { name: '미션' }))
     const afterMissions = screen.getByTestId('terminal-stub')
     expect(afterMissions.getAttribute('data-session-id')).toBe(sessionId)
 
-    fireEvent.click(screen.getByRole('button', { name: '터미널' }))
+    fireEvent.click(screen.getByRole('tab', { name: '터미널' }))
     expect(screen.getByTestId('terminal-stub').getAttribute('data-session-id')).toBe(sessionId)
 
     // 다시 마운트됐다면 세션을 또 만들었을 것이다.

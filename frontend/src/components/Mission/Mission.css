@@ -273,6 +273,107 @@
   background: var(--separator-strong);
 }
 
+/* ── 인시던트 바 (FE-26) ──────────────────────────────────
+ * 터미널 위 전용 높이의 불투명 툴바. 터미널 출력 위에 겹치지 않는다.
+ * 왼쪽: 진행 중 표시와 미션 이름 / 가운데: 남은 시간·점수·힌트 / 오른쪽: 동작.
+ */
+.incident-slot {
+  container-type: inline-size;
+}
+
+.incident-identity {
+  display: none;
+}
+
+.incident-slot .incident-bar {
+  display: grid;
+  grid-template-areas:
+    "identity metrics actions"
+    "stale stale stale";
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--space-6);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.incident-slot .incident-bar.is-loading {
+  display: block;
+}
+
+.incident-slot .incident-bar.is-loading .empty-state {
+  padding: var(--space-2) 0;
+  text-align: left;
+}
+
+.incident-slot .incident-identity {
+  display: grid;
+  min-width: 0;
+  grid-area: identity;
+  gap: 2px;
+}
+
+.incident-live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: var(--leading-xs);
+}
+
+.incident-title.status-header {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incident-slot .status-metrics {
+  grid-area: metrics;
+  grid-template-columns: auto auto auto;
+  column-gap: var(--space-5);
+}
+
+.incident-slot .status-actions {
+  flex-wrap: nowrap;
+  grid-area: actions;
+  margin-top: 0;
+}
+
+.incident-slot .status-actions-divider {
+  margin: 0 var(--space-1);
+}
+
+.incident-slot .status-stale-note {
+  grid-area: stale;
+  margin: var(--space-3) 0 0;
+}
+
+/* 터미널 칸이 좁으면 두 줄로: 이름과 동작이 위, 지표가 아래. */
+@container (max-width: 760px) {
+  .incident-slot .incident-bar {
+    grid-template-areas:
+      "identity actions"
+      "metrics metrics"
+      "stale stale";
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--space-2);
+  }
+
+  .incident-slot .status-metrics {
+    justify-content: start;
+  }
+}
+
 /* ── 빈 상태와 안내 ─────────────────────────────────────── */
 .empty-state {
   padding: var(--space-8) var(--space-4);

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import Toast, { ToastMessage } from '../Feedback/Toast'
 import {
@@ -35,6 +36,7 @@ import {
   EnvironmentId,
 } from '../../types/training'
 import MissionCard from './MissionCard'
+import { getMissionCopy } from './missionCopy'
 import MissionStatus, { MissionAction, MissionStatusView } from './MissionStatus'
 import { CheckIcon, LockIcon } from './Icons'
 import TutorChat from './TutorChat'
@@ -51,6 +53,12 @@ interface MissionListProps {
    * `hasCapability` 한 곳에 있다.
    */
   capabilities: EnvironmentCapability[] | null
+  /**
+   * 진행 상황(인시던트 바)과 튜터를 그릴 자리 (FE-26). App 이 터미널 위와 보조 패널에
+   * 둔 요소다. 없으면 이 컴포넌트 안에 그대로 그린다(단독 렌더·테스트).
+   */
+  incidentSlot?: HTMLElement | null
+  tutorSlot?: HTMLElement | null
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
   /**
@@ -88,6 +96,8 @@ const MissionList: React.FC<MissionListProps> = ({
   storageScope,
   environment,
   capabilities,
+  incidentSlot,
+  tutorSlot,
   onActiveAttemptChange,
   onAttemptCompleted,
 }) => {
@@ -601,12 +611,28 @@ const MissionList: React.FC<MissionListProps> = ({
     missionId: string,
     tutorEnvironment: EnvironmentId,
     tutorHintsUsed: number,
-  ) =>
-    canUseTutor ? (
+  ) => {
+    if (!canUseTutor) return null
+    const conversationKey = activeAttemptId ? `${activeAttemptId}:${tutorEnvironment}` : undefined
+    // 보조 패널 자리가 있으면 거기에 고정해서 그린다. 없을 때만 떠 있는 튜터를 쓴다.
+    if (tutorSlot) {
+      return createPortal(
+        <TutorChat
+          token={token}
+          missionId={missionId}
+          conversationKey={conversationKey}
+          environment={tutorEnvironment}
+          hintsUsed={tutorHintsUsed}
+          disabled={loading}
+        />,
+        tutorSlot,
+      )
+    }
+    return (
       <TutorChat
         token={token}
         missionId={missionId}
-        conversationKey={activeAttemptId ? `${activeAttemptId}:${tutorEnvironment}` : undefined}
+        conversationKey={conversationKey}
         environment={tutorEnvironment}
         hintsUsed={tutorHintsUsed}
         disabled={loading}
@@ -614,7 +640,11 @@ const MissionList: React.FC<MissionListProps> = ({
         floatingOpen={isTutorFloatingOpen}
         onToggleFloating={() => setIsTutorFloatingOpen((open) => !open)}
       />
-    ) : null
+    )
+  }
+
+  /** 진행 상황은 터미널 위 인시던트 바 자리에 그린다 (FE-26). */
+  const placeIncident = (node: React.ReactNode) => (incidentSlot ? createPortal(node, incidentSlot) : node)
 
   return (
     <div className={`mission-panel${activeMissionId || isActiveScenario ? ' mission-active' : ''}`}>
@@ -684,17 +714,21 @@ const MissionList: React.FC<MissionListProps> = ({
       {/* 정적 미션 진행 중 상태 */}
       {activeMissionId && (
         <>
-          <MissionStatus
-            token={token}
-            refreshKey={statusRefreshKey}
-            pendingAction={pendingAction}
-            hintPenalty={activeMission?.hint_penalty}
-            onStatusChange={handleStatusChange}
-            onMissionEnd={handleMissionEnd}
-            onCheck={handleCheckMission}
-            onAbandon={handleAbandonMission}
-            onHint={handleUseHint}
-          />
+          {placeIncident(
+            <MissionStatus
+              token={token}
+              refreshKey={statusRefreshKey}
+              pendingAction={pendingAction}
+              hintPenalty={activeMission?.hint_penalty}
+              missionTitle={activeMission ? getMissionCopy(activeMission).name : undefined}
+              environmentLabel={getEnvironmentMeta(activeMissionEnvironment ?? environment).label}
+              onStatusChange={handleStatusChange}
+              onMissionEnd={handleMissionEnd}
+              onCheck={handleCheckMission}
+              onAbandon={handleAbandonMission}
+              onHint={handleUseHint}
+            />,
+          )}
           {renderTutorPanel(activeMissionId, activeMissionEnvironment ?? environment, hintsUsed)}
         </>
       )}
@@ -702,18 +736,22 @@ const MissionList: React.FC<MissionListProps> = ({
       {isActiveScenario && activeScenario && (
         <>
           {/* ScenarioStatusResponse 에는 힌트 감점이 없어 비용을 적지 않는다. */}
-          <MissionStatusView
-            title="AI 시나리오 진행 상황"
-            remainingSeconds={activeScenario.remaining_seconds}
-            score={activeScenario.current_score}
-            hintsUsed={activeScenario.hints_used}
-            pendingAction={pendingAction}
-            busy={loading}
-            abandonLabel="포기"
-            onCheck={handleCheckScenario}
-            onHint={handleUseScenarioHint}
-            onAbandon={handleAbandonScenario}
-          />
+          {placeIncident(
+            <MissionStatusView
+              title="AI 시나리오 진행 상황"
+              missionTitle={activeScenario.title}
+              environmentLabel={getEnvironmentMeta(activeScenario.environment).label}
+              remainingSeconds={activeScenario.remaining_seconds}
+              score={activeScenario.current_score}
+              hintsUsed={activeScenario.hints_used}
+              pendingAction={pendingAction}
+              busy={loading}
+              abandonLabel="포기"
+              onCheck={handleCheckScenario}
+              onHint={handleUseScenarioHint}
+              onAbandon={handleAbandonScenario}
+            />,
+          )}
           {renderTutorPanel(activeScenario.scenario_id, activeScenario.environment, scenarioHintsUsed)}
         </>
       )}
