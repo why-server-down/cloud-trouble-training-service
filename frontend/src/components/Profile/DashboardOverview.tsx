@@ -18,7 +18,13 @@ import {
 } from '../../config/polling'
 import { usePolling } from '../../hooks/usePolling'
 import { markStart, measureSince, nextFrame, PERF } from '../../utils/perf'
-import { average, curvePolyline, formatDuration, radarPolygon } from '../../utils/dashboard'
+import {
+  achievementText,
+  average,
+  curvePolyline,
+  formatDuration,
+  radarPolygon,
+} from '../../utils/dashboard'
 
 interface DashboardOverviewProps {
   token: string
@@ -35,10 +41,10 @@ interface DashboardOverviewProps {
 }
 
 const SKILL_AXES = [
-  ['Troubleshooting', 'troubleshooting'],
-  ['Resources', 'resource'],
-  ['Network', 'network'],
-  ['Operations', 'ops'],
+  ['문제 해결', 'troubleshooting'],
+  ['리소스', 'resource'],
+  ['네트워크', 'network'],
+  ['운영', 'ops'],
 ] as const
 
 const FILTERS: DashboardEnvironmentFilter[] = ['all', ...ENVIRONMENT_ORDER]
@@ -442,21 +448,24 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
           {achievements?.items.length ? (
             <div className="achievement-list">
-              {achievements.items.map((achievement) => (
-                <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
-                  <svg viewBox="0 0 16 16" aria-hidden="true">
-                    <circle cx="8" cy="8" r="6.25" />
-                    {achievement.unlocked && <path d="m5.4 8.2 1.8 1.8 3.4-3.6" />}
-                  </svg>
-                  <div>
-                    <strong>
-                      {achievement.name}
-                      <span className="sr-only">{achievement.unlocked ? ' (달성)' : ' (미달성)'}</span>
-                    </strong>
-                    <span>{achievement.description}</span>
-                  </div>
-                </article>
-              ))}
+              {achievements.items.map((achievement) => {
+                const text = achievementText(achievement)
+                return (
+                  <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.25" />
+                      {achievement.unlocked && <path d="m5.4 8.2 1.8 1.8 3.4-3.6" />}
+                    </svg>
+                    <div>
+                      <strong>
+                        {text.name}
+                        <span className="sr-only">{achievement.unlocked ? ' (달성)' : ' (미달성)'}</span>
+                      </strong>
+                      <span>{text.description}</span>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           ) : (
             <p className="dashboard-empty">업적 데이터가 아직 없습니다.</p>

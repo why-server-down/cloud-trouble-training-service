@@ -1,4 +1,4 @@
-import { LearningCurveEntry } from '../services/api'
+import { AchievementItem, LearningCurveEntry } from '../services/api'
 
 /** 초를 사람이 읽는 분/초로 (FE-13 인수 조건). */
 export const formatDuration = (seconds: number): string => {
@@ -56,3 +56,30 @@ export const curvePolyline = (entries: readonly LearningCurveEntry[]): string =>
  */
 export const average = (total: number, count: number): number | null =>
   count > 0 ? Math.round(total / count) : null
+
+type AchievementText = Pick<AchievementItem, 'name' | 'description'>
+
+/**
+ * 업적 표시 문구 (FE-28). 서버는 영어 이름을 보내므로 id 로 한국어 문구를 고른다.
+ * 모르는 id 는 서버 문구를 그대로 쓴다 — 새 업적이 생겨도 빈칸이 되지 않는다.
+ */
+const ACHIEVEMENT_TEXT: Record<string, AchievementText> = {
+  'first-recovery': { name: '첫 복구', description: '미션을 처음으로 완료' },
+  environmentalist: { name: '힌트 없이 해결', description: '힌트를 쓰지 않고 미션 완료' },
+  'speed-runner': { name: '5분 안에 복구', description: '미션을 5분 안에 완료' },
+  'persistent-resolver': {
+    name: '끈질긴 해결사',
+    description: '같은 미션을 10번 이상 시도한 끝에 완료',
+  },
+}
+
+/** 숨은 업적은 달성 전까지 서버도 내용을 감춘다. 위 표가 그 내용을 새어 나가게 하면 안 된다. */
+const HIDDEN_ACHIEVEMENT: AchievementText = {
+  name: '숨은 업적',
+  description: '계속 조사하면 드러납니다',
+}
+
+export const achievementText = (item: AchievementItem): AchievementText => {
+  if (item.is_hidden && !item.unlocked) return HIDDEN_ACHIEVEMENT
+  return ACHIEVEMENT_TEXT[item.id] ?? { name: item.name, description: item.description }
+}

@@ -156,8 +156,10 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     fireEvent.click(filterButton('Docker'))
 
     const radar = await screen.findByRole('img', { name: /스킬 레이더/ })
-    expect(radar.getAttribute('aria-label')).toContain('Troubleshooting 60')
+    expect(radar.getAttribute('aria-label')).toContain('문제 해결 60')
     expect(radar.querySelector('.skill-radar-value')?.getAttribute('points')?.split(' ')).toHaveLength(4)
+    // 축 이름은 한국어다 (설계 문서 2 — 문구는 한국어).
+    expect(screen.getByText('운영')).toBeTruthy()
   })
 
   it('완료가 0건이면 환경 역량을 0 축으로 그리지 않고 안내를 띄운다', async () => {
@@ -231,6 +233,46 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     render(<DashboardOverview token="t" />)
 
     expect(await screen.findByText(/학습 곡선을 불러오지 못했습니다/)).toBeTruthy()
+  })
+})
+
+describe('업적 표시 문구 (FE-28)', () => {
+  const item = (overrides: Partial<api.AchievementItem>): api.AchievementItem => ({
+    id: 'first-recovery',
+    name: 'First Recovery',
+    description: 'Complete your first mission.',
+    points_bonus: 0,
+    is_hidden: false,
+    unlocked: true,
+    ...overrides,
+  })
+
+  it('서버의 영어 이름 대신 id 로 고른 한국어 문구를 보여 주고, 모르는 id 는 서버 문구를 쓴다', async () => {
+    mocked.getAchievements.mockResolvedValue({
+      unlocked: 1,
+      total: 3,
+      progress: 33.3,
+      items: [
+        item({}),
+        // 달성 전 숨은 업적: 서버가 감춘 내용을 프론트 표가 새어 나가게 하지 않는다.
+        item({
+          id: 'persistent-resolver',
+          name: 'Hidden achievement',
+          description: 'Keep investigating to reveal this achievement.',
+          is_hidden: true,
+          unlocked: false,
+        }),
+        item({ id: 'new-badge', name: 'New Badge', description: 'Server text', unlocked: false }),
+      ],
+    })
+    render(<DashboardOverview token="t" />)
+
+    expect(await screen.findByText('첫 복구')).toBeTruthy()
+    expect(screen.getByText('미션을 처음으로 완료')).toBeTruthy()
+    expect(screen.queryByText('First Recovery')).toBeNull()
+    expect(screen.getByText('숨은 업적')).toBeTruthy()
+    expect(screen.queryByText('끈질긴 해결사')).toBeNull()
+    expect(screen.getByText('New Badge')).toBeTruthy()
   })
 })
 
