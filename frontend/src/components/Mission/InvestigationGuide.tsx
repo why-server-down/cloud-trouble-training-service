@@ -14,6 +14,36 @@ interface InvestigationGuideProps {
 }
 
 /**
+ * 명령은 띄어쓰기에서만 줄을 바꾼다. 브라우저는 하이픈 뒤에서도 끊어서 `--sort-` / `by=...` 처럼
+ * 보였고, 따라 치기 헷갈렸다. 단어 하나가 칸보다 길 때만 그 단어 안에서 끊기고, 그때는 `=` 뒤를
+ * 먼저 쓴다(`--sort-by=` / `.metadata.creationTimestamp`).
+ */
+const CommandText = ({ command }: { command: string }) => (
+  <code>
+    {command
+      .trim()
+      .split(' ')
+      .map((word, index) => (
+        <React.Fragment key={index}>
+          {index > 0 && ' '}
+          <span className="command-word">
+            {word.split('=').map((part, partIndex, parts) => (
+              <React.Fragment key={partIndex}>
+                {part}
+                {partIndex < parts.length - 1 && (
+                  <>
+                    =<wbr />
+                  </>
+                )}
+              </React.Fragment>
+            ))}
+          </span>
+        </React.Fragment>
+      ))}
+  </code>
+)
+
+/**
  * 조사 순서와 조사 시작 명령 (FE-09, FE-26).
  *
  * 미션 전 시작 가이드와 미션 중 브리핑이 같이 쓴다. 예전에는 미션을 시작하면 이 안내가
@@ -67,7 +97,7 @@ const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, ac
                   onClick={() => onInsertCommand(command)}
                   aria-label={`${command.trim()} — 터미널 입력줄에 넣기`}
                 >
-                  <code>{command}</code>
+                  <CommandText command={command} />
                   <span className="guide-command-action" aria-hidden="true">입력</span>
                 </button>
                 {investigationClues[command] && <p className="guide-command-clue">{investigationClues[command]}</p>}
@@ -78,7 +108,7 @@ const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, ac
         ) : (
           investigationStarters.map((command) => (
             <div key={command} className="guide-command-row">
-              <code>{command}</code>
+              <CommandText command={command} />
               {investigationClues[command] && <p className="guide-command-clue">{investigationClues[command]}</p>}
             </div>
           ))
