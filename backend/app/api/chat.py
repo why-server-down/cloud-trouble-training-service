@@ -9,33 +9,10 @@ from app.core.rate_limit import RateLimiter
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.schemas import ChatRequest, ChatResponse, TutorResult
 from app.ai.tutor_service import get_tutor_service
+from app.services.chaos_plan import FAULT_TYPE_TO_CHAOS_TYPE
 from app.services.service_factory import get_mission_service
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
-
-# AI fault_type → 튜터 mock 응답에 사용할 chaos_type 매핑
-_FAULT_TO_CHAOS: dict[str, str] = {
-    "image_pull_error":          "pod_failure",
-    "pod_failure":               "pod_failure",
-    "crash_loop":                "pod_failure",
-    "probe_failure":             "pod_failure",
-    "configmap_misconfig":       "pod_failure",
-    "liveness_probe_failure":    "pod_failure",
-    "init_container_failure":    "pod_failure",
-    "node_selector_mismatch":    "pod_failure",
-    "wrong_image_registry":      "pod_failure",
-    "secret_ref_missing":        "pod_failure",
-    "pvc_unbound":               "pod_failure",
-    "oom_killed":                "memory_stress",
-    "memory_stress":             "memory_stress",
-    "service_selector_mismatch": "service_misconfig",
-    "service_misconfig":         "service_misconfig",
-    "compound_crash_service":    "service_misconfig",
-    "network_latency":           "network_latency",
-    "compound_probe_cascade":    "network_latency",
-    "cpu_throttle":              "network_latency",
-}
-
 
 # 사용자당 호출 빈도 제한. chat 은 호출마다 LLM 비용이 나가므로,
 # 제한이 없으면 한 사용자가 반복 요청만으로 전체 예산을 소진할 수 있다.
@@ -139,5 +116,8 @@ async def _get_scenario_info(db, attempt: MissionAttempt) -> tuple[str, int, str
     difficulty_level = {"beginner": 1, "intermediate": 2, "advanced": 3, "expert": 4}.get(
         scenario.difficulty, 2
     )
-    chaos_type = _FAULT_TO_CHAOS.get(scenario.fault_type, "pod_failure")
+    # 튜터에는 실제로 주입된 장애를 넘긴다. 주입 계획과 같은 표를 쓴다 — 예전에는 이 파일에 따로 둔
+    # 표가 probe_failure·crash_loop 를 pod_failure(이미지 문제)로, cpu_throttle 을 network_latency 로
+    # 묶어 튜터가 다른 장애를 기준으로 답했다. 표에 없는 이름(docker_*·linux_*)은 주입기 이름 그대로다.
+    chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(scenario.fault_type, scenario.fault_type)
     return scenario.title, difficulty_level, chaos_type
