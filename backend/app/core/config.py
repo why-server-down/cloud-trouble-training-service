@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
@@ -137,7 +141,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = ""
     KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"
 
-    model_config = SettingsConfigDict(env_file=".env")
+    # 실행 위치가 아니라 backend/.env 를 읽는다. 저장소 루트의 .env 는 docker compose 전용이라
+    # (GF_SECURITY_ADMIN_PASSWORD 등) 루트에서 실행하면 모르는 키로 기동이 실패했다.
+    model_config = SettingsConfigDict(env_file=BACKEND_ENV_FILE)
 
 
 settings = Settings()
