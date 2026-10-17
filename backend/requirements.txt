@@ -7,7 +7,7 @@ langchain-openai==0.1.7
 langchain-google-genai>=0.0.11
 langsmith==0.1.17
 openai>=1.24.0,<2
-qdrant-client>=1.7.0
+qdrant-client==1.19.0  # 1.19.1 에서 로컬 모드 검색 결과가 달라져 ai-data 오프라인 테스트 5건이 깨진다
 tiktoken>=0.5.2
 kubernetes==29.0.0
 pydantic==2.5.3
