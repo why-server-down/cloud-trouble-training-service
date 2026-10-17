@@ -95,35 +95,35 @@ const INTRO_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="profile"]',
     eyebrow: '상단 정보',
     title: '학습 현황과 세션 정보',
-    body: '상단에서는 프로필, 점수, 현재 실습 namespace를 확인할 수 있어요. 프로필을 열면 완료한 미션과 학습 기록도 볼 수 있습니다.',
+    body: '프로필과 총점이 여기 있습니다. 프로필을 열면 완료한 미션, 학습 기록, 훈련 환경 로드맵을 볼 수 있어요.',
     placement: 'bottom',
   },
   {
     target: '[data-tour="env-tabs"]',
     eyebrow: '훈련 환경',
     title: '훈련 환경 선택',
-    body: 'Kubernetes 훈련이 먼저 열려 있습니다. Docker와 Linux는 준비가 끝나면 탭이 열리고, Application·DB는 후속 연구 영역입니다.',
+    body: '훈련할 환경을 고릅니다. 열리지 않은 환경은 탭 안에 그 이유가 적혀 있습니다.',
     placement: 'bottom',
   },
   {
     target: '[data-tour="mission-list"]',
     eyebrow: '미션',
     title: '미션을 고르고 시작',
-    body: '왼쪽 목록에서 장애 상황을 선택하면 실제 조사와 복구 흐름이 시작됩니다. 잠긴 미션은 앞 단계 완료 후 열립니다.',
+    body: '장애 상황을 고르면 시작 전에 제한 시간과 점수 규칙을 보여 줍니다. 잠긴 미션은 이전 레벨을 완료하면 열립니다.',
     placement: 'right',
   },
   {
     target: '[data-tour="field-guide"]',
     eyebrow: '시작 가이드',
     title: '시작 전 가이드',
-    body: '미션이 없을 때는 오른쪽에 조사 순서와 자주 쓰는 kubectl 명령 힌트가 표시됩니다.',
+    body: '조사 순서와 자주 쓰는 명령을 미리 볼 수 있습니다. 미션을 시작하면 이 자리에 터미널이 열립니다.',
     placement: 'left',
   },
   {
     target: '[data-tour="learning-dashboard"]',
     eyebrow: '학습 현황',
     title: '학습 대시보드',
-    body: '아직 미션을 시작하지 않은 상태에서는 진행률과 기록을 볼 수 있고, 미션 중에는 관측 대시보드로 바뀝니다.',
+    body: '진행률과 기록을 볼 수 있습니다. 미션 중에는 이 자리가 관측 대시보드로 바뀝니다.',
     placement: 'left',
   },
 ]
@@ -133,21 +133,21 @@ const MISSION_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="mission-progress"]',
     eyebrow: '진행 상태',
     title: '미션 진행 상태',
-    body: '남은 시간, 현재 점수, 힌트 사용 횟수를 확인하고 완료 확인, 힌트 사용, 포기 같은 액션을 실행할 수 있어요.',
-    placement: 'right',
+    body: '남은 시간·점수·힌트와 완료 확인 버튼이 있습니다. 완료 확인이 통과하지 못하면 그 이유가 이 바 안에 남습니다.',
+    placement: 'bottom',
   },
   {
     target: '[data-tour="terminal"]',
     eyebrow: '터미널',
     title: '터미널에서 원인 조사',
-    body: '여기에서 kubectl 명령을 입력해 Pod, Service, Deployment 상태를 조사하고 복구 명령을 실행합니다.',
+    body: '명령으로 상태를 조사하고 원인을 고칩니다. 브리핑의 조사 명령을 누르면 실행하지 않고 입력줄에만 들어옵니다.',
     placement: 'right',
   },
   {
     target: '[data-tour="grafana"]',
     eyebrow: '관측',
-    title: 'Grafana로 상태 관측',
-    body: '장애 지표와 복구 상태를 보면서 명령 결과가 실제 환경에 반영되는지 확인할 수 있습니다.',
+    title: '관측과 튜터',
+    body: '관측 탭에서 장애 지표와 복구 상태를 확인합니다. 막히면 튜터 탭에서 물어보세요. 질문은 감점이 없습니다.',
     placement: 'left',
   },
 ]
@@ -866,7 +866,6 @@ function App() {
                             </p>
                           </div>
                           <InvestigationGuide environment={activeEnvironment} />
-                          <EnvironmentRoadmap items={environments} />
                         </div>
                       </section>
                     )}
@@ -991,6 +990,7 @@ function App() {
           <ProfileDetails
             token={token}
             profile={profile}
+            environments={environments}
             loading={isProfileLoading}
             onClose={() => setIsProfileOpen(false)}
             onRefresh={() => void loadProfile()}

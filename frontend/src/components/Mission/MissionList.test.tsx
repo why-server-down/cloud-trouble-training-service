@@ -529,3 +529,19 @@ describe('미션 생명주기 (FE-27)', () => {
     expect(sheet.textContent).toContain('20분 0초')
   }, 10000)
 })
+
+describe('시연 모드 (FE-28)', () => {
+  afterEach(() => window.history.replaceState({}, '', '/'))
+
+  it('학생 화면에는 시연용 잠금 해제 버튼이 없다', async () => {
+    renderList()
+    expect(await screen.findByText(/계정 단위로 열립니다/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '시연용 잠금 해제' })).toBeNull()
+  })
+
+  it('주소에 ?demo=1 이 있을 때만 시연용 잠금 해제 버튼을 보인다', async () => {
+    window.history.replaceState({}, '', '/?demo=1')
+    renderList()
+    expect(await screen.findByRole('button', { name: '시연용 잠금 해제' })).toBeTruthy()
+  })
+})

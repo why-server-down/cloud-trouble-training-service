@@ -120,6 +120,11 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
       lineHeight: 1.1,
       fontFamily: fonts?.check(fontSpec) === false ? TERMINAL_FALLBACK_FONT : TERMINAL_FONT,
       theme: TERMINAL_THEME,
+      /*
+       * 스크린리더가 출력과 입력줄을 읽을 수 있게 접근성 트리를 함께 그린다 (FE-28).
+       * 꺼 두면 캔버스만 있어 화면을 읽는 사용자에게 터미널은 빈 상자다.
+       */
+      screenReaderMode: true,
       rows: 30,
       cols: 100,
     })
