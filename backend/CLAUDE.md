@@ -153,7 +153,8 @@ app/
 - `POST /api/missions/debug/resolve` - (Mock 전용) 수동 해결
 
 ### AI 시나리오 (캡스톤 1 핵심)
-- `GET /api/scenarios/unlock-status` - AI 모드 잠금 해제 상태 (기본 4개 미션 완료 필요) 🔒
+- `GET /api/scenarios/unlock-status` - AI 모드 잠금 해제 상태 (이 배포에서 열린 환경의 고정 미션 전체 완료 필요) 🔒
+  - Response: `{"unlocked": bool, "completed_static": int, "total_static": int}`
 - `POST /api/scenarios/start-random` - 난이도 선택 → AI 시나리오 생성+장애 주입 원스텝 🔒
 - `GET /api/scenarios/status` - 현재 AI 시나리오 진행 상태 🔒
 - `POST /api/scenarios/current/check` - AI 시나리오 완료 검증 🔒
@@ -782,7 +783,10 @@ toolbox ServiceAccount의 RBAC이 `Forbidden`으로 거절한다. validator와 R
 | `prometheus` | Prometheus PromQL로 메트릭 기반 검증 |
 
 ### AI 시나리오 잠금 해제 조건
-- 기본 4개 미션 전체 완료 필요
+- **이 배포에서 열린 환경(`ENABLED_ENVIRONMENTS`)의 고정 미션 전체** 완료 필요 (BE-31)
+  - 전체·완료 수 모두 열린 환경만 센다. 닫힌 환경의 미션을 세면 풀 수 없어서 AI 모드가 영영 열리지 않는다
+  - 예: `ENABLED_ENVIRONMENTS=kubernetes,linux`면 Docker 미션 3개는 `total_static`에서 빠진다
+- `DEMO_UNLOCK_AI_SCENARIOS=true`면 완료 여부와 무관하게 열린다
 - 미완료 상태에서 start-random 호출 시 400 에러 반환
 
 ## 데이터 모델
