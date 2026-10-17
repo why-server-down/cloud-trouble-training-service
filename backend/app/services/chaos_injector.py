@@ -99,6 +99,15 @@ class MockChaosInjector(BaseChaosInjector):
         return True
 
 
+# memory_stress 의 앱 시작 명령. 48MB 를 한 번 쓴 뒤 nginx 로 바뀐다. limit 이 그보다 작으면
+# 할당이 강제 종료(137)되고 && 때문에 컨테이너가 끝난다. 128Mi 에서는 정상으로 뜬다(실측).
+MEMORY_DEMAND_COMMAND = [
+    "sh",
+    "-c",
+    'head -c 48m /dev/zero | tail > /dev/null && exec nginx -g "daemon off;"',
+]
+
+
 class ChaosMeshInjector(BaseChaosInjector):
     """Chaos Mesh 기반 실제 장애 주입 구현.
 
@@ -131,6 +140,11 @@ class ChaosMeshInjector(BaseChaosInjector):
     async def inject(self, chaos_type: str, namespace: str) -> ChaosResult:
         loop = asyncio.get_event_loop()
         try:
+            # 화면은 미션을 시작한 뒤에 터미널 세션(=네임스페이스·nginx 준비)을 연다. 처음 미션을 하는
+            # 계정은 주입 시점에 nginx 가 없어 404 로 시작이 실패했다. 대상이 없으면 먼저 만든다(멱등).
+            from app.services.k8s_setup import get_k8s_setup_service
+
+            await get_k8s_setup_service().setup_user_namespace(namespace)
             return await loop.run_in_executor(
                 None, lambda: self._inject_sync(chaos_type, namespace)
             )
@@ -214,35 +228,21 @@ class ChaosMeshInjector(BaseChaosInjector):
         # 사용자 Fix: kubectl set image deployment/nginx nginx={TRAINING_K8S_IMAGE} -n {namespace}
         self._patch_nginx_container(namespace, image="nginx:wrongtag")
 
-    def _apply_stress_chaos(self, chaos_id: str, namespace: str):
-        # nginx 메모리 limit을 6Mi로 낮춘 뒤 StressChaos로 메모리 압박 → OOMKilled 유발
-        # 사용자 Fix: kubectl patch deployment/nginx 으로 memory limit 상향 조정
+    def _apply_stress_chaos(self, _chaos_id: str, namespace: str):
+        # 앱이 시작할 때 48MB 를 쓰는데 메모리 limit 을 6Mi 로 낮춘다 → 새 Pod 가 한도를 넘어
+        # 반복 종료된다(종료 코드 137, CrashLoopBackOff). 사용자 Fix: limit 을 128Mi 로 되돌린다.
+        #
+        # 예전에는 limit 만 낮추고 Chaos Mesh StressChaos 로 압박했다. nginx 는 6Mi 로도 잘 돌아서
+        # 증상이 전적으로 StressChaos 에 달려 있었고, Chaos Mesh 가 없는 클러스터에서는 CR 생성이
+        # 404 로 실패하며 limit 6Mi 만 남겼다(실클러스터 확인). 컨테이너 안의 수요로 바꿔 어느 클러스터
+        # 에서나 같은 증상이 나게 한다.
         self._patch_nginx_container(
             namespace,
+            command=MEMORY_DEMAND_COMMAND,
             resources={
                 "requests": {"memory": "6Mi"},
                 "limits": {"memory": "6Mi"},
             },
-        )
-        body = {
-            "apiVersion": f"{self.CHAOS_GROUP}/{self.CHAOS_VERSION}",
-            "kind": "StressChaos",
-            "metadata": {"name": chaos_id, "namespace": self.CHAOS_NAMESPACE},
-            "spec": {
-                "mode": "all",
-                "selector": {"namespaces": [namespace]},
-                "stressors": {
-                    "memory": {"workers": 1, "size": "64MB"}
-                },
-                "duration": "30m",
-            },
-        }
-        self._custom_api.create_namespaced_custom_object(
-            group=self.CHAOS_GROUP,
-            version=self.CHAOS_VERSION,
-            namespace=self.CHAOS_NAMESPACE,
-            plural="stresschaos",
-            body=body,
         )
 
     def _apply_network_chaos(self, _chaos_id: str, namespace: str):
@@ -548,14 +548,11 @@ class ChaosMeshInjector(BaseChaosInjector):
         # 이미지를 정상으로 복구
         self._patch_nginx_container(namespace, image=settings.TRAINING_K8S_IMAGE)
 
-    def _revert_memory_stress(self, chaos_id: str, namespace: str):
-        # StressChaos 삭제 + 메모리 limit 복구
-        self._custom_api.delete_namespaced_custom_object(
-            group=self.CHAOS_GROUP, version=self.CHAOS_VERSION,
-            namespace=self.CHAOS_NAMESPACE, plural="stresschaos", name=chaos_id,
-        )
+    def _revert_memory_stress(self, _chaos_id: str, namespace: str):
+        # 메모리 수요 명령을 걷어 내고 limit 을 k8s_setup 의 기본값으로 되돌린다.
         self._patch_nginx_container(
             namespace,
+            command=None,
             resources={"requests": {"memory": "64Mi"}, "limits": {"memory": "128Mi"}},
         )
 

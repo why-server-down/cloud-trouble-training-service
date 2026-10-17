@@ -35,6 +35,11 @@ class _FakeSandboxService:
         self.responses = responses or {}
         self.fail_on = None
 
+    async def ensure(self, *, user_id, namespace, environment):
+        # 주입은 샌드박스를 먼저 준비한다(처음 미션을 하는 계정은 아직 없다).
+        self.ensured = getattr(self, "ensured", []) + [(user_id, namespace, environment)]
+        return self.reference_for(user_id=user_id, namespace=namespace, environment=environment)
+
     def reference_for(self, *, user_id, namespace, environment):
         return SandboxRef(
             id="s1",
