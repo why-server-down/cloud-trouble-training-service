@@ -171,3 +171,27 @@ describe('Toast live region (FE-17)', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('시트 중첩 (FE-25)', () => {
+  it('위에 뜬 시트만 Esc 로 닫히고 아래 시트는 남는다', async () => {
+    const { default: Sheet } = await import('./Sheet')
+    const closeOuter = vi.fn()
+    const closeInner = vi.fn()
+    render(
+      <>
+        <Sheet labelledBy="outer-title" onClose={closeOuter}>
+          <h2 id="outer-title">바깥</h2>
+          <button type="button">바깥 버튼</button>
+        </Sheet>
+        <Sheet labelledBy="inner-title" onClose={closeInner}>
+          <h2 id="inner-title">안쪽</h2>
+          <button type="button">안쪽 버튼</button>
+        </Sheet>
+      </>,
+    )
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(closeInner).toHaveBeenCalledTimes(1)
+    expect(closeOuter).not.toHaveBeenCalled()
+  })
+})

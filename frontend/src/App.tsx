@@ -394,11 +394,12 @@ function App() {
   }, [activeTour, hasSeenIntroTour, isProfileOpen, token])
 
   useEffect(() => {
-    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour) return
+    // 프로필 시트가 열려 있으면 투어를 미룬다. 두 오버레이가 겹치면 Esc 가 아래 시트부터 닫는다.
+    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour || isProfileOpen) return
     setActiveTab(window.innerWidth <= 768 ? 'missions' : 'terminal')
     const timer = window.setTimeout(() => setActiveTour('mission'), 650)
     return () => window.clearTimeout(timer)
-  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, token])
+  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, isProfileOpen, token])
 
   useEffect(() => {
     setIsGrafanaFrameReady(false)

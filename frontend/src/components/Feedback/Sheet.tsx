@@ -15,9 +15,31 @@ interface SheetProps {
   children: React.ReactNode
 }
 
-/** Tab 순환에 참여하는 요소. */
-const FOCUSABLE =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+/** Tab 순환에 참여하는 요소. 숨겼거나 tabIndex=-1 인 것은 실제 Tab 대상이 아니므로 뺀다. */
+const FOCUSABLE = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]',
+].map((selector) => `${selector}:not([tabindex="-1"])`).join(', ')
+
+const isTabbable = (element: HTMLElement) => !element.closest('[hidden], [inert]')
+
+/**
+ * 열려 있는 시트들. 위에 뜬 시트만 키보드를 처리한다 (프로필 위에 확인 시트가 뜨는 경우).
+ * 같은 document 에 건 처리기는 stopPropagation 으로 서로 막지 못한다.
+ */
+const openSheets: HTMLElement[] = []
+
+/** 시트가 하나라도 열려 있으면 앱 본문을 inert 로 만들어 뒤 화면 조작과 focus 를 막는다. */
+const syncBackgroundInert = () => {
+  const root = document.getElementById('root')
+  if (!root) return
+  if (openSheets.length > 0) root.setAttribute('inert', '')
+  else root.removeAttribute('inert')
+}
 
 /**
  * 모달 시트 (FE-25). 확인 시트·프로필·시작/디브리프 시트가 함께 쓴다.
@@ -43,10 +65,18 @@ const Sheet: React.FC<SheetProps> = ({
   onCloseRef.current = onClose
 
   useEffect(() => {
+    const sheet = sheetRef.current
+    if (sheet) openSheets.push(sheet)
+    syncBackgroundInert()
+
     openerRef.current = document.activeElement
-    ;(initialFocusRef?.current ?? sheetRef.current)?.focus()
+    ;(initialFocusRef?.current ?? sheet)?.focus()
 
     return () => {
+      const index = sheet ? openSheets.indexOf(sheet) : -1
+      if (index >= 0) openSheets.splice(index, 1)
+      syncBackgroundInert()
+
       const opener = openerRef.current
       if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
     }
@@ -56,6 +86,9 @@ const Sheet: React.FC<SheetProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const sheet = sheetRef.current
+      if (!sheet || openSheets[openSheets.length - 1] !== sheet) return
+
       if (event.key === 'Escape') {
         event.stopPropagation()
         onCloseRef.current()
@@ -64,10 +97,7 @@ const Sheet: React.FC<SheetProps> = ({
 
       if (event.key !== 'Tab') return
 
-      const sheet = sheetRef.current
-      if (!sheet) return
-
-      const focusable = Array.from(sheet.querySelectorAll<HTMLElement>(FOCUSABLE))
+      const focusable = Array.from(sheet.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(isTabbable)
       if (focusable.length === 0) {
         event.preventDefault()
         sheet.focus()
