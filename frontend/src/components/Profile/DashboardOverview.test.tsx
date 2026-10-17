@@ -1,5 +1,5 @@
 import { StrictMode } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DashboardOverview from './DashboardOverview'
@@ -138,15 +138,35 @@ describe('환경 필터와 핵심 지표 (FE-13)', () => {
 })
 
 describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
-  it('전체 보기에서는 3축 환경 역량 레이더를 그린다', async () => {
+  it('세 환경 모두 값이 있으면 3축 환경 역량 레이더를 그린다', async () => {
+    mocked.getDashboardStats.mockResolvedValue(
+      stats({
+        environment_stats: {
+          kubernetes: envEntry(),
+          docker: envEntry({ competency: 40 }),
+          linux: envEntry({ competency: 55 }),
+        },
+      }),
+    )
     render(<DashboardOverview token="t" />)
 
     const radar = await screen.findByRole('img', { name: /환경 역량 레이더/ })
     expect(radar.getAttribute('aria-label')).toContain('Kubernetes 70')
     expect(radar.getAttribute('aria-label')).toContain('Docker 40')
-    // 시도가 없는 환경은 0 이 아니라 데이터 없음이다.
-    expect(radar.getAttribute('aria-label')).toContain('Linux 데이터 없음')
+    expect(radar.getAttribute('aria-label')).toContain('Linux 55')
     expect(radar.querySelector('.skill-radar-value')?.getAttribute('points')?.split(' ')).toHaveLength(3)
+  })
+
+  it('값이 있는 환경이 셋 미만이면 레이더 대신 막대 목록으로 보여 준다 (FE-29)', async () => {
+    // 기본 픽스처: Kubernetes 70, Docker 40, Linux 는 완료 0건이라 competency 가 없다.
+    render(<DashboardOverview token="t" />)
+
+    const list = await screen.findByRole('list', { name: '환경 역량' })
+    expect(screen.queryByRole('img', { name: /환경 역량 레이더/ })).toBeNull()
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows.map((row) => row.textContent)).toEqual(['Kubernetes70', 'Docker40', 'Linux— 데이터 없음'])
+    // 시도가 없는 환경은 0 길이 막대가 아니라 데이터 없음이다.
+    expect(rows[2].querySelector('.competency-bar')).toBeNull()
   })
 
   it('단일 환경 보기에서는 기존 4축 스킬 레이더를 유지한다', async () => {
@@ -182,6 +202,7 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
 
     expect(await screen.findByText(/환경 역량을 계산할 수 없습니다/)).toBeTruthy()
     expect(screen.queryByRole('img', { name: /환경 역량 레이더/ })).toBeNull()
+    expect(screen.queryByRole('list', { name: '환경 역량' })).toBeNull()
   })
 
   it('environment_stats 가 비어 있어도 안내를 띄운다', async () => {
@@ -191,7 +212,7 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     expect(await screen.findByText(/환경 역량을 계산할 수 없습니다/)).toBeTruthy()
   })
 
-  it('한 환경만 완료했으면 레이더를 그리고 나머지는 대체 텍스트로 구분한다', async () => {
+  it('한 환경만 완료했으면 그 환경만 막대로 그리고 나머지는 데이터 없음으로 구분한다', async () => {
     mocked.getDashboardStats.mockResolvedValue(
       stats({
         environment_stats: {
@@ -203,9 +224,10 @@ describe('환경 역량 레이더와 성장 곡선 (FE-14)', () => {
     )
     render(<DashboardOverview token="t" />)
 
-    const radar = await screen.findByRole('img', { name: /환경 역량 레이더/ })
-    expect(radar.getAttribute('aria-label')).toContain('Kubernetes 70')
-    expect(radar.getAttribute('aria-label')).toContain('Docker 데이터 없음')
+    const list = await screen.findByRole('list', { name: '환경 역량' })
+    expect(within(list).getByText('70')).toBeTruthy()
+    expect(within(list).getAllByText('데이터 없음')).toHaveLength(2)
+    expect(list.querySelectorAll('.competency-bar')).toHaveLength(1)
   })
 
   it('학습 곡선에 점수를 함께 표시하고 대체 텍스트로 수치를 읽을 수 있다', async () => {

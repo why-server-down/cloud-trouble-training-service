@@ -193,6 +193,13 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
    */
   const hasEnvironmentBreakdown =
     isAllView && environmentAxes.some((axis) => axis.entry?.competency != null)
+  /*
+   * 값이 있는 축이 셋 미만이면 레이더 대신 막대 목록을 쓴다 (FE-29).
+   * 축 하나짜리 레이더는 중심에서 뻗은 선 한 줄이라 모양이 아무것도 말하지 않는다.
+   */
+  const showEnvironmentBars =
+    hasEnvironmentBreakdown &&
+    environmentAxes.filter((axis) => axis.entry?.competency != null).length < 3
 
   const radarValues = isAllView
     ? environmentAxes.map((axis) => axis.entry?.competency ?? 0)
@@ -276,8 +283,8 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           <>
             <div>
               <span className="dashboard-label">현재 티어 · {filterLabel(filter)}</span>
-              {/* 티어 색은 서버가 정한 값이다. */}
-              <h3 style={{ color: stats?.current_tier.color }}>{stats?.current_tier.name}</h3>
+              {/* 티어 이름은 중립 글자다. 주황은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
+              <h3>{stats?.current_tier.name}</h3>
               <p>
                 {stats?.total_score ?? 0}점 · 완료 {completed}건
               </p>
@@ -348,6 +355,30 @@ const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             <p className="dashboard-empty">
               완료한 미션이 없어 환경 역량을 계산할 수 없습니다. 미션을 하나 완료해 보세요.
             </p>
+          ) : showEnvironmentBars ? (
+            <ul className="competency-bars" aria-label="환경 역량">
+              {environmentAxes.map((axis) => {
+                const value = axis.entry?.competency ?? null
+                return (
+                  <li key={axis.id}>
+                    <span>{axis.label}</span>
+                    {/* 시도가 없는 환경은 0 길이 막대가 아니라 데이터 없음이다 (설계 문서 5.5). */}
+                    {value === null ? (
+                      <span className="competency-empty">
+                        <span aria-hidden="true">— </span>데이터 없음
+                      </span>
+                    ) : (
+                      <>
+                        <span className="competency-bar" aria-hidden="true">
+                          <i style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+                        </span>
+                        <strong>{value}</strong>
+                      </>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           ) : (
             <>
               <svg className="skill-radar" viewBox="0 0 200 200" role="img" aria-label={radarLabel}>
