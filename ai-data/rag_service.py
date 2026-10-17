@@ -185,10 +185,14 @@ class RAGService:
                 gemini_key = self.settings.GEMINI_API_KEY
                 if not gemini_key:
                     raise RAGServiceError("Gemini API key not configured")
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-                self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model=self.settings.GEMINI_EMBEDDING_MODEL,
-                    google_api_key=gemini_key,
+                # 채팅과 같은 OpenAI 호환 REST 엔드포인트를 쓴다. langchain-google-genai(gRPC)는
+                # 새 형식 키(AQ.)에서 응답 없이 504 Deadline Exceeded 로 멈췄다(REST 는 1초 안에 응답).
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=gemini_key,
+                    openai_api_base=self.settings.api_base_url,
+                    model=self.settings.GEMINI_EMBEDDING_MODEL.removeprefix("models/"),
+                    # 문자열을 그대로 보낸다. 길이 검사용 tiktoken 토큰 배열은 OpenAI 전용이다.
+                    check_embedding_ctx_length=False,
                 )
             else:
                 api_key = self.settings.OPENAI_API_KEY
