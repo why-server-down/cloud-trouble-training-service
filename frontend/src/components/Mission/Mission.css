@@ -230,6 +230,7 @@
 
 /* 시작 안내는 보조 글자다. 누를 수 있다는 신호는 hover·focus 때만 강조색으로 준다 (FE-29). */
 .mission-start-cue {
+  gap: var(--space-1);
   font-weight: 500;
   transition: color var(--dur-fast) var(--ease-out);
 }

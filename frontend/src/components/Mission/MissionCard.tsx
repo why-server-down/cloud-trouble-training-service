@@ -63,7 +63,7 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
         </span>
       ) : (
         <span className="mission-state mission-start-cue">
-          시작<span aria-hidden="true"> →</span>
+          시작<span aria-hidden="true">→</span>
         </span>
       )}
     </button>

@@ -78,7 +78,8 @@ const ProgressSummary: React.FC<ProgressSummaryProps> = ({ token, refreshKey = 0
             >
               <i style={{ width: `${tier.progress}%` }} />
             </div>
-            <span className="progress-summary-number">{tier.progress}%</span>
+            {/* 서버 진행률은 소수일 수 있다. 막대는 그대로, 글자는 정수로 보여 준다. */}
+            <span className="progress-summary-number">{Math.round(tier.progress)}%</span>
           </div>
         </div>
       )}
