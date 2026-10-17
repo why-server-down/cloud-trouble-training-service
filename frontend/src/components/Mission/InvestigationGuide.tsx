@@ -70,7 +70,7 @@ const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, ac
                   <code>{command}</code>
                   <span className="guide-command-action" aria-hidden="true">입력</span>
                 </button>
-                {investigationClues[command] && <p className="guide-command-clue">볼 곳: {investigationClues[command]}</p>}
+                {investigationClues[command] && <p className="guide-command-clue">{investigationClues[command]}</p>}
               </div>
             ))}
             <p className="guide-command-note">누르면 실행하지 않고 입력줄에만 넣습니다. 확인한 뒤 Enter를 누르세요.</p>
@@ -79,7 +79,7 @@ const InvestigationGuide: React.FC<InvestigationGuideProps> = ({ environment, ac
           investigationStarters.map((command) => (
             <div key={command} className="guide-command-row">
               <code>{command}</code>
-              {investigationClues[command] && <p className="guide-command-clue">볼 곳: {investigationClues[command]}</p>}
+              {investigationClues[command] && <p className="guide-command-clue">{investigationClues[command]}</p>}
             </div>
           ))
         )}

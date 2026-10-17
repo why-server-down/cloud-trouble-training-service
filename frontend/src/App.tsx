@@ -180,6 +180,9 @@ function App() {
   const [environmentsError, setEnvironmentsError] = useState<string | null>(null)
   const [activeEnvironment, setActiveEnvironment] = useState<EnvironmentId | null>(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
+  /** 학습 현황 요약의 '프로필에서 자세히'로 열면 시트를 학습 현황 위치에서 연다. */
+  const [isProfileAtProgress, setIsProfileAtProgress] = useState(false)
+  const profileProgressRef = useRef<HTMLHeadingElement>(null)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   /**
    * 프로필 조회가 끝났는가(성공·실패 무관). 저장된 환경은 사용자별 키에 있어
@@ -677,7 +680,10 @@ function App() {
               className="profile-summary"
               type="button"
               title="프로필과 학습 기록 보기"
-              onClick={() => setIsProfileOpen(true)}
+              onClick={() => {
+                setIsProfileAtProgress(false)
+                setIsProfileOpen(true)
+              }}
               data-tour="profile"
             >
               <span className="profile-avatar" aria-hidden="true">
@@ -933,7 +939,10 @@ function App() {
                       <ProgressSummary
                         token={token}
                         refreshKey={dashboardRefreshKey}
-                        onOpenProfile={() => setIsProfileOpen(true)}
+                        onOpenProfile={() => {
+                          setIsProfileAtProgress(true)
+                          setIsProfileOpen(true)
+                        }}
                       />
                     ) : (
                       <section className="grafana-panel" data-tour="grafana">
@@ -1058,10 +1067,16 @@ function App() {
         </div>
       </main>
       {isProfileOpen && profile && (
-        <Sheet variant="side" labelledBy="profile-sheet-title" onClose={() => setIsProfileOpen(false)}>
+        <Sheet
+          variant="side"
+          labelledBy="profile-sheet-title"
+          onClose={() => setIsProfileOpen(false)}
+          initialFocusRef={isProfileAtProgress ? profileProgressRef : undefined}
+        >
           <ProfileDetails
             token={token}
             profile={profile}
+            progressHeadingRef={isProfileAtProgress ? profileProgressRef : undefined}
             environments={environments}
             loading={isProfileLoading}
             onClose={() => setIsProfileOpen(false)}

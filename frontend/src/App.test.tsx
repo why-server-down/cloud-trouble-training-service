@@ -516,6 +516,10 @@ describe('환경별 관측 패널 (FE-08)', () => {
     fireEvent.click(within(summary).getByRole('button', { name: '프로필에서 자세히' }))
     const sheet = await screen.findByRole('dialog', { name: '프로필' })
     expect(within(sheet).getByRole('group', { name: '환경 필터' })).toBeTruthy()
+    // 계정 정보가 아니라 학습 현황 위치에서 열린다.
+    const heading = within(sheet).getByRole('heading', { name: '학습 현황' })
+    expect(document.activeElement).toBe(heading)
+    expect(vi.mocked(heading.scrollIntoView)).toHaveBeenCalledWith({ block: 'start' })
   })
 
   it('미션 전 모바일 탭은 미션·가이드 둘이다 (FE-29)', async () => {
