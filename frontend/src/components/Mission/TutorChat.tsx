@@ -15,6 +15,11 @@ interface TutorChatProps {
    * 튜터 응답의 `environment` 와 비교해 계약 불일치를 판정하는 기준값이다.
    */
   environment: EnvironmentId
+  /**
+   * 대화를 보존할 key = 시도 id + 환경 (FE-25). 주면 화면 배치가 바뀌어 다시 마운트돼도
+   * 같은 시도의 대화를 이어서 보여준다. 없으면 보존하지 않는다.
+   */
+  conversationKey?: string
   hintsUsed: number
   disabled?: boolean
   floating?: boolean
@@ -39,6 +44,13 @@ interface ChatMessage {
    */
   mismatchedEnvironment?: EnvironmentId | null
 }
+
+/**
+ * 마지막 대화 한 벌 (FE-25). 진행 중인 시도는 사용자당 하나라 한 벌이면 된다.
+ * 화면 배치(데스크톱 보조 패널 ↔ 모바일 탭)가 바뀌어 TutorChat 이 다시 마운트돼도
+ * 질문과 답변이 사라지지 않게 컴포넌트 밖에 둔다. 새로고침까지 넘기지는 않는다.
+ */
+let savedConversation: { key: string; messages: ChatMessage[] } | null = null
 
 const initialMessages: ChatMessage[] = [
   { role: 'assistant', text: '막힌 지점을 질문해 주세요. 정답보다 다음 확인 순서를 먼저 제안합니다.' },
@@ -162,13 +174,16 @@ const TutorChat: React.FC<TutorChatProps> = ({
   token,
   missionId,
   environment,
+  conversationKey,
   hintsUsed,
   disabled,
   floating = false,
   floatingOpen = true,
   onToggleFloating,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
+  const restoreMessages = (key: string | undefined) =>
+    key && savedConversation?.key === key ? savedConversation.messages : initialMessages
+  const [messages, setMessages] = useState<ChatMessage[]>(() => restoreMessages(conversationKey))
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -209,7 +224,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
   useEffect(() => {
     requestRef.current?.abort()
     requestRef.current = null
-    setMessages(initialMessages)
+    setMessages(restoreMessages(conversationKey))
     setInput('')
     setError(null)
     setRetryQuestion(null)
@@ -218,7 +233,11 @@ const TutorChat: React.FC<TutorChatProps> = ({
     setIsCancellable(false)
     setCooldown(0)
     setIsCooldownExact(false)
-  }, [missionId, environment])
+  }, [missionId, environment, conversationKey])
+
+  useEffect(() => {
+    if (conversationKey) savedConversation = { key: conversationKey, messages }
+  }, [conversationKey, messages])
 
   /** unmount 에서도 진행 중인 질문을 남기지 않는다. */
   useEffect(() => () => requestRef.current?.abort(), [])

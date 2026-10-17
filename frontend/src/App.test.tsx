@@ -7,11 +7,19 @@ import { EnvironmentId, EnvironmentItem, MissionStatusResponse, SessionResponse 
 
 // 터미널은 xterm + WebSocket 을 잡으므로 렌더 확인 범위에서 제외한다.
 // 다만 어떤 세션으로 열렸는지는 FE-04 의 판정 대상이라 그대로 드러낸다.
-vi.mock('./components/Terminal/Terminal', () => ({
-  default: ({ sessionId }: { sessionId?: string }) => (
-    <div data-testid="terminal-stub" data-session-id={sessionId} />
-  ),
-}))
+/** Terminal 스텁이 마운트된 횟수. 같은 세션으로 다시 마운트돼도 잡아내려고 센다 (FE-25). */
+const terminalMounts = vi.hoisted(() => ({ count: 0 }))
+
+vi.mock('./components/Terminal/Terminal', async () => {
+  const { useEffect } = await import('react')
+  const TerminalStub = ({ sessionId }: { sessionId?: string }) => {
+    useEffect(() => {
+      terminalMounts.count += 1
+    }, [])
+    return <div data-testid="terminal-stub" data-session-id={sessionId} />
+  }
+  return { default: TerminalStub }
+})
 
 vi.mock('./services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof api>()
@@ -643,5 +651,41 @@ describe('모바일 탭 전환 (FE-17)', () => {
 
     // 다시 마운트됐다면 세션을 또 만들었을 것이다.
     expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('작업 상태 보존 (FE-25)', () => {
+  it('미션 중 프로필을 열고 닫아도 Terminal 을 unmount 하지 않는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    mocked.getMissionStatus.mockResolvedValue(activeMissionStatus('kubernetes'))
+    render(<App />)
+
+    const stub = await screen.findByTestId('terminal-stub')
+    const sessionId = stub.getAttribute('data-session-id')
+    const mountsBefore = terminalMounts.count
+    const profileButton = await screen.findByRole('button', { name: /tester/ })
+
+    // 프로필은 작업 화면을 대체하지 않고 시트로 덮는다.
+    fireEvent.click(profileButton)
+    expect(await screen.findByRole('dialog', { name: '프로필' })).toBeTruthy()
+    expect(screen.getByTestId('terminal-stub').getAttribute('data-session-id')).toBe(sessionId)
+
+    fireEvent.click(screen.getByRole('button', { name: '프로필 닫기' }))
+    expect(screen.queryByRole('dialog', { name: '프로필' })).toBeNull()
+    // 같은 DOM 노드가 남아 있고 다시 마운트되지 않았다 — WebSocket·스크롤백이 유지된다.
+    expect(screen.getByTestId('terminal-stub')).toBe(stub)
+    expect(terminalMounts.count).toBe(mountsBefore)
+    expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('Esc 로 프로필 시트를 닫는다', async () => {
+    mocked.getEnvironments.mockResolvedValue([K8S])
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /tester/ }))
+    expect(await screen.findByRole('dialog', { name: '프로필' })).toBeTruthy()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '프로필' })).toBeNull()
   })
 })

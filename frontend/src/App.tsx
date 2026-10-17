@@ -4,6 +4,7 @@ import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
 import DashboardOverview from './components/Profile/DashboardOverview'
 import ProfileDetails from './components/Profile/ProfileDetails'
+import Sheet from './components/Feedback/Sheet'
 import EnvironmentRoadmap from './components/Environment/EnvironmentRoadmap'
 import EnvironmentTabs from './components/Environment/EnvironmentTabs'
 import Terminal from './components/Terminal/Terminal'
@@ -393,11 +394,12 @@ function App() {
   }, [activeTour, hasSeenIntroTour, isProfileOpen, token])
 
   useEffect(() => {
-    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour) return
+    // 프로필 시트가 열려 있으면 투어를 미룬다. 두 오버레이가 겹치면 Esc 가 아래 시트부터 닫는다.
+    if (!token || !hasActiveAttempt || hasSeenMissionTour || activeTour || isProfileOpen) return
     setActiveTab(window.innerWidth <= 768 ? 'missions' : 'terminal')
     const timer = window.setTimeout(() => setActiveTour('mission'), 650)
     return () => window.clearTimeout(timer)
-  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, token])
+  }, [activeTour, hasActiveAttempt, hasSeenMissionTour, isProfileOpen, token])
 
   useEffect(() => {
     setIsGrafanaFrameReady(false)
@@ -558,10 +560,11 @@ function App() {
         </div>
       </header>
       <main className="app-main">
-        {isProfileOpen && profile ? (
-          <ProfileDetails token={token} profile={profile} loading={isProfileLoading} onBack={() => setIsProfileOpen(false)} onRefresh={() => void loadProfile()} />
-        ) : (
-          <div className="workspace">
+        {/*
+          * 프로필은 작업 화면을 대체하지 않고 시트로 덮는다 (FE-25).
+          * 대체하면 터미널·WebSocket·튜터 대화가 언마운트돼 미션 중에 작업 기록이 사라졌다.
+          */}
+        <div className="workspace">
             {environmentsError ? (
               <section className="env-notice env-notice-error" role="alert">
                 <span className="env-notice-title">환경 목록을 불러오지 못했습니다</span>
@@ -797,9 +800,19 @@ function App() {
                 )}
               </>
             )}
-          </div>
-        )}
+        </div>
       </main>
+      {isProfileOpen && profile && (
+        <Sheet variant="side" labelledBy="profile-sheet-title" onClose={() => setIsProfileOpen(false)}>
+          <ProfileDetails
+            token={token}
+            profile={profile}
+            loading={isProfileLoading}
+            onClose={() => setIsProfileOpen(false)}
+            onRefresh={() => void loadProfile()}
+          />
+        </Sheet>
+      )}
       <OnboardingTour
         run={Boolean(activeTour)}
         steps={activeTour === 'mission' ? MISSION_TOUR_STEPS : INTRO_TOUR_STEPS}

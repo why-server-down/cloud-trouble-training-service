@@ -14,12 +14,47 @@
   animation: scrim-in var(--dur-base) var(--ease-out) both;
 }
 
-.confirm-modal {
-  width: min(440px, 100%);
-  padding: var(--space-6);
+/* 공용 시트 (Sheet.tsx). 프로그램이 주는 focus 에는 링을 그리지 않는다 — 안의 버튼이 받는다. */
+.sheet {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-3);
   animation: feedback-fade var(--dur-fast) var(--ease-out) both;
+}
+
+.sheet:focus {
+  outline: none;
+}
+
+.confirm-modal {
+  width: min(440px, 100%);
+  padding: var(--space-6);
+}
+
+/* 오른쪽 드로어. 작업 화면을 대체하지 않고 덮는다 (FE-25). */
+.modal-backdrop.sheet-backdrop-side {
+  place-items: stretch end;
+  padding: var(--space-3);
+}
+
+.sheet-side {
+  display: flex;
+  width: min(640px, 100%);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  /* 모바일에서는 위쪽만 살짝 남긴 전체 시트 */
+  .modal-backdrop.sheet-backdrop-side {
+    padding: var(--space-2) 0 0;
+  }
+
+  .sheet-side {
+    width: 100%;
+    border-bottom-right-radius: 0;
+    border-bottom-left-radius: 0;
+  }
 }
 
 .confirm-modal h3 {
@@ -132,8 +167,12 @@
 
 /* 움직임: 기본은 크로스페이드, 허용될 때만 확대·이동을 더한다. */
 @media (prefers-reduced-motion: no-preference) {
-  .confirm-modal {
+  .sheet-center {
     animation: sheet-in var(--dur-slow) var(--ease-spring) both;
+  }
+
+  .sheet-side {
+    animation: drawer-in var(--dur-slow) var(--ease-out) both;
   }
 
   .toast {
@@ -163,6 +202,13 @@
   from {
     opacity: 0;
     transform: scale(0.96);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
   }
 }
 

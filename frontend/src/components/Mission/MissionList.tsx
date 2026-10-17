@@ -123,6 +123,15 @@ const MissionList: React.FC<MissionListProps> = ({
   const hasTutor = Boolean(activeMissionId || activeScenario?.status === 'in_progress')
   const isAiUnlocked = Boolean(unlockStatus?.unlocked || demoAiUnlocked)
 
+  /** 진행 중인 시도의 id. 튜터 대화를 시도 단위로 보존하는 key 로 쓴다 (FE-25). */
+  const [activeAttemptId, setActiveAttemptId] = useState<string | null>(null)
+
+  /** App 에 활성 시도를 알리면서 id 도 기억한다. 모든 보고가 이 한 곳을 지난다. */
+  const reportActiveAttempt = useCallback((summary: ActiveAttemptSummary | null) => {
+    setActiveAttemptId(summary?.attemptId ?? null)
+    onActiveAttemptChange(summary)
+  }, [onActiveAttemptChange])
+
   const showToast = useCallback(
     (kind: ToastMessage['kind'], text: string) => setToast({ kind, text, id: Date.now() }),
     [],
@@ -217,7 +226,7 @@ const MissionList: React.FC<MissionListProps> = ({
       if (summary) rememberActiveAttempt(summary.attemptType)
       else forgetActiveAttempt()
 
-      onActiveAttemptChange(summary)
+      reportActiveAttempt(summary)
 
       // AI 잠금 해제 상태
       try {
@@ -235,7 +244,7 @@ const MissionList: React.FC<MissionListProps> = ({
       // 계약이 어긋난 경우(다른 환경 미션 혼입 등)는 원인을 그대로 보여준다.
       setError(err instanceof ApiError ? err.message : '미션 목록을 불러오지 못했습니다.')
     }
-  }, [environment, forgetActiveAttempt, onActiveAttemptChange, rememberActiveAttempt, storageScope, token])
+  }, [environment, forgetActiveAttempt, reportActiveAttempt, rememberActiveAttempt, storageScope, token])
 
   useEffect(() => {
     setDemoAiUnlocked(localStorage.getItem(scopedStorageKey(DEMO_AI_UNLOCK_STORAGE_KEY, storageScope)) === 'true')
@@ -246,8 +255,8 @@ const MissionList: React.FC<MissionListProps> = ({
     setActiveScenario(null)
     setHintsUsed(0)
     setScenarioHintsUsed(0)
-    onActiveAttemptChange(null)
-  }, [environment, onActiveAttemptChange, storageScope])
+    reportActiveAttempt(null)
+  }, [environment, reportActiveAttempt, storageScope])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -278,7 +287,7 @@ const MissionList: React.FC<MissionListProps> = ({
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
-        onActiveAttemptChange(null)
+        reportActiveAttempt(null)
         await fetchMissions()
         return 'stop' as const
       }
@@ -289,14 +298,14 @@ const MissionList: React.FC<MissionListProps> = ({
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
-        onActiveAttemptChange(null)
+        reportActiveAttempt(null)
         return 'stop' as const
       }
       // 그 밖의 실패는 진행 중인 시나리오를 지우지 않는다 — 일시적 네트워크
       // 장애로 화면을 비우면 사용자는 훈련이 사라진 줄 안다. backoff 로 재시도한다.
       throw err
     }
-  }, [fetchMissions, forgetActiveAttempt, onActiveAttemptChange, token])
+  }, [fetchMissions, forgetActiveAttempt, reportActiveAttempt, token])
 
   usePolling(pollScenario, {
     intervalMs: MISSION_POLL_INTERVAL_MS,
@@ -336,7 +345,7 @@ const MissionList: React.FC<MissionListProps> = ({
           rememberActiveAttempt('static_mission')
           setActiveMissionId(missionId)
           setHintsUsed(0)
-          onActiveAttemptChange({
+          reportActiveAttempt({
             attemptId: attempt.id,
             attemptType: 'static_mission',
             environment: attempt.environment,
@@ -379,7 +388,7 @@ const MissionList: React.FC<MissionListProps> = ({
         setActiveMissionId(null)
         setActiveMissionEnvironment(null)
         setHintsUsed(0)
-        onActiveAttemptChange(null)
+        reportActiveAttempt(null)
         // 점수·MTTR 을 프론트에서 더하지 않고 서버 값을 다시 읽게 한다 (FE-15).
         onAttemptCompleted?.(result.attempt.id)
         await fetchMissions()
@@ -410,7 +419,7 @@ const MissionList: React.FC<MissionListProps> = ({
           forgetActiveAttempt()
           setActiveMissionId(null)
           setHintsUsed(0)
-          onActiveAttemptChange(null)
+          reportActiveAttempt(null)
           await fetchMissions()
           showToast('info', '미션을 포기했습니다.')
         } catch (err) {
@@ -451,9 +460,9 @@ const MissionList: React.FC<MissionListProps> = ({
     forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
-    onActiveAttemptChange(null)
+    reportActiveAttempt(null)
     void fetchMissions()
-  }, [fetchMissions, forgetActiveAttempt, onActiveAttemptChange])
+  }, [fetchMissions, forgetActiveAttempt, reportActiveAttempt])
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
@@ -470,7 +479,7 @@ const MissionList: React.FC<MissionListProps> = ({
           const started = await getScenarioStatus(token)
           setActiveScenario(started)
           setScenarioHintsUsed(started.hints_used)
-          onActiveAttemptChange({
+          reportActiveAttempt({
             attemptId: started.attempt_id,
             attemptType: 'ai_scenario',
             environment: started.environment,
@@ -506,7 +515,7 @@ const MissionList: React.FC<MissionListProps> = ({
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
-        onActiveAttemptChange(null)
+        reportActiveAttempt(null)
         if (completedAttemptId) onAttemptCompleted?.(completedAttemptId)
         await fetchMissions()
       }
@@ -533,7 +542,7 @@ const MissionList: React.FC<MissionListProps> = ({
           forgetActiveAttempt()
           setActiveScenario(null)
           setScenarioHintsUsed(0)
-          onActiveAttemptChange(null)
+          reportActiveAttempt(null)
           await fetchMissions()
           showToast('info', 'AI 시나리오를 포기했습니다.')
         } catch (err) {
@@ -597,6 +606,7 @@ const MissionList: React.FC<MissionListProps> = ({
       <TutorChat
         token={token}
         missionId={missionId}
+        conversationKey={activeAttemptId ? `${activeAttemptId}:${tutorEnvironment}` : undefined}
         environment={tutorEnvironment}
         hintsUsed={tutorHintsUsed}
         disabled={loading}
