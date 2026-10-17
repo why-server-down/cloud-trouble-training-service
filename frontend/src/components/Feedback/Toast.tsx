@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import './Feedback.css'
 
 export type ToastKind = 'success' | 'info' | 'error'
@@ -52,7 +53,11 @@ const Toast: React.FC<ToastProps> = ({ kind, text, onClose }) => {
    * 전부 status 로 두면 스크린리더가 오류를 "나중에 읽어도 되는 알림"으로 취급해
    * 사용자가 실패를 놓친다.
    */
-  return (
+  /*
+   * body 로 portal 한다 (FE-26). 토스트를 띄운 미션 영역이 보조 패널의 다른 탭 뒤에
+   * 숨어 있어도 결과 알림은 보여야 한다.
+   */
+  return createPortal(
     <div
       className={`toast material-popover ${kind}`}
       role={kind === 'error' ? 'alert' : 'status'}
@@ -70,7 +75,8 @@ const Toast: React.FC<ToastProps> = ({ kind, text, onClose }) => {
           <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />
         </svg>
       </button>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
@@ -50,6 +50,30 @@ import './App.css'
 type WorkspaceTab = 'missions' | 'terminal' | 'tutor' | 'observe'
 /** 데스크톱 미션 중 보조 패널의 세그먼트. */
 type AuxTab = 'briefing' | 'tutor' | 'observe'
+
+/**
+ * 탭 목록의 방향키 이동 (WAI-ARIA tabs). 포커스를 옮기면서 바로 선택한다.
+ * 환경 탭(EnvironmentTabs)과 같은 규칙이다.
+ */
+const moveTabFocus = <T extends string>(
+  event: React.KeyboardEvent<HTMLElement>,
+  ids: T[],
+  current: T,
+  select: (id: T) => void,
+) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const from = Math.max(0, ids.indexOf(current))
+  const last = ids.length - 1
+  const next =
+    event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+        : event.key === 'ArrowRight' ? (from >= last ? 0 : from + 1)
+          : (from <= 0 ? last : from - 1)
+  select(ids[next])
+  const tabs = event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')
+  tabs[next]?.focus()
+}
 
 const AREA_IDS: Record<WorkspaceTab, string> = {
   missions: 'area-mission',
@@ -543,8 +567,13 @@ function App() {
     setActiveTour(null)
   }
 
+  /** 둘러보기. 미션 중에는 지금 화면(인시던트 바·터미널·관측)을 가리키는 미션 투어를 띄운다. */
   const replayIntroTour = () => {
     setIsProfileOpen(false)
+    if (hasActiveAttempt) {
+      setActiveTour('mission')
+      return
+    }
     setActiveTab('missions')
     setActiveTour('intro')
   }
@@ -552,7 +581,10 @@ function App() {
   /* 투어가 가리키는 요소가 숨은 영역에 있으면 그 영역을 먼저 연다 (모바일 탭, 데스크톱 보조 패널). */
   const handleTourStepChange = (step: TourStep) => {
     const target = step.target
-    if (target === '[data-tour="mission-list"]') setActiveTab('missions')
+    if (target === '[data-tour="mission-list"]') {
+      setActiveTab('missions')
+      setAuxTab('briefing')
+    }
     if (target === '[data-tour="terminal"]' || target === '[data-tour="field-guide"]') setActiveTab('terminal')
     if (target === '[data-tour="grafana"]' || target === '[data-tour="learning-dashboard"]') {
       setActiveTab('observe')
@@ -711,7 +743,12 @@ function App() {
 
                   {hasActiveAttempt && (
                     <div className="aux-header">
-                      <div className="aux-tabs" role="tablist" aria-label="보조 패널">
+                      <div
+                        className="aux-tabs"
+                        role="tablist"
+                        aria-label="보조 패널"
+                        onKeyDown={(event) => moveTabFocus(event, auxTabs.map((tab) => tab.id), auxTab, setAuxTab)}
+                      >
                         {auxTabs.map((tab) => (
                           <button
                             key={tab.id}
@@ -720,6 +757,7 @@ function App() {
                             id={`aux-tab-${tab.id}`}
                             aria-selected={auxTab === tab.id}
                             aria-controls={AREA_IDS[tab.area]}
+                            tabIndex={auxTab === tab.id ? 0 : -1}
                             className={auxTab === tab.id ? 'active' : ''}
                             onClick={() => setAuxTab(tab.id)}
                           >
@@ -751,7 +789,7 @@ function App() {
                         <InvestigationGuide
                           environment={activeAttempt.environment}
                           active
-                          onInsertCommand={canUseTerminal ? insertCommand : undefined}
+                          onInsertCommand={canUseTerminal && activeSession ? insertCommand : undefined}
                         />
                       </section>
                     )}
@@ -914,7 +952,12 @@ function App() {
                   * 언마운트하지 않는다 — 터미널 연결과 튜터 대화가 탭 전환으로 사라지면 안 된다.
                   */}
                 <nav className="mobile-tabbar material-bar" aria-label="작업 화면">
-                  <div className="mobile-tabbar-list" role="tablist" aria-label="작업 화면">
+                  <div
+                    className="mobile-tabbar-list"
+                    role="tablist"
+                    aria-label="작업 화면"
+                    onKeyDown={(event) => moveTabFocus(event, mobileTabs.map((tab) => tab.id), visibleTab, setActiveTab)}
+                  >
                     {mobileTabs.map((tab) => (
                       <button
                         key={tab.id}
@@ -922,6 +965,7 @@ function App() {
                         role="tab"
                         aria-selected={visibleTab === tab.id}
                         aria-controls={AREA_IDS[tab.id]}
+                        tabIndex={visibleTab === tab.id ? 0 : -1}
                         className={visibleTab === tab.id ? 'active' : ''}
                         onClick={() => setActiveTab(tab.id)}
                       >

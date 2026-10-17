@@ -482,38 +482,47 @@
   display: none;
 }
 
-/* 미션 전: 목록 | 시작 가이드 | 학습 현황 */
-.workspace-grid[data-mode='idle'] {
-  grid-template-areas: "mission terminal observe";
-  grid-template-columns: minmax(20rem, 24rem) minmax(0, 1.1fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-}
+/* 데스크톱 배치. 모바일 규칙과 섞이지 않게 폭으로 나눈다. */
+@media (min-width: 901px) {
+  /* 미션 전: 목록 | 시작 가이드 | 학습 현황 */
+  .workspace-grid[data-mode='idle'] {
+    grid-template-areas: "mission terminal observe";
+    grid-template-columns: minmax(20rem, 24rem) minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
 
-.workspace-grid[data-mode='idle'] .area-tutor,
-.workspace-grid[data-mode='idle'] .incident-slot {
-  display: none;
-}
+  .workspace-grid[data-mode='idle'] .area-tutor,
+  .workspace-grid[data-mode='idle'] .incident-slot {
+    display: none;
+  }
 
-/* 미션 중: 인시던트 바 + 터미널(남는 폭 전부) | 보조 패널(브리핑/튜터/관측) */
-.workspace-grid[data-mode='active'] {
-  grid-template-areas:
-    "incident auxhead"
-    "terminal aux";
-  grid-template-columns: minmax(0, 1fr) var(--aux-width);
-  grid-template-rows: auto minmax(0, 1fr);
-}
+  /* 미션 중: 인시던트 바 + 터미널(남는 폭 전부) | 보조 패널(브리핑/튜터/관측) */
+  .workspace-grid[data-mode='active'] {
+    /*
+     * 보조 패널은 인시던트 바와 높이를 맞추지 않는다. 바가 두 줄로 접혀도 세그먼트 머리가
+     * 같이 늘어나지 않도록 머리는 첫 행에만, 본문은 둘째·셋째 행에 걸친다.
+     * (유연한 행을 가로지르는 항목은 auto 행 크기 계산에 끼지 않는다.)
+     */
+    grid-template-areas:
+      "incident auxhead"
+      "incident aux"
+      "terminal aux";
+    grid-template-columns: minmax(0, 1fr) var(--aux-width);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
 
-.workspace-grid[data-mode='active'] .area-mission,
-.workspace-grid[data-mode='active'] .area-tutor,
-.workspace-grid[data-mode='active'] .area-observe {
-  display: none;
-  grid-area: aux;
-}
+  .workspace-grid[data-mode='active'] .area-mission,
+  .workspace-grid[data-mode='active'] .area-tutor,
+  .workspace-grid[data-mode='active'] .area-observe {
+    display: none;
+    grid-area: aux;
+  }
 
-.workspace-grid[data-mode='active'][data-aux='briefing'] .area-mission,
-.workspace-grid[data-mode='active'][data-aux='tutor'] .area-tutor,
-.workspace-grid[data-mode='active'][data-aux='observe'] .area-observe {
-  display: flex;
+  .workspace-grid[data-mode='active'][data-aux='briefing'] .area-mission,
+  .workspace-grid[data-mode='active'][data-aux='tutor'] .area-tutor,
+  .workspace-grid[data-mode='active'][data-aux='observe'] .area-observe {
+    display: flex;
+  }
 }
 
 /* 보조 패널은 머리(세그먼트)와 본문이 한 장의 평평한 패널로 읽혀야 한다. */
@@ -528,11 +537,12 @@
   overflow-y: auto;
 }
 
-/* 보조 패널 머리는 인시던트 바와 같은 높이의 패널이고, 세그먼트는 그 안에 가운데로 놓인다. */
+/* 보조 패널 머리: 세그먼트 하나를 담은 얕은 패널 */
 .aux-header {
   display: flex;
+  align-self: start;
   align-items: center;
-  padding: var(--space-3);
+  padding: var(--space-1);
   border: 1px solid var(--separator);
   border-radius: var(--radius-lg);
   background: var(--surface-1);
