@@ -11,6 +11,7 @@
 """
 import pytest
 
+from app.services import k8s_setup
 from app.services.chaos_injector import ChaosMeshInjector
 from app.services.docker_chaos_injector import NETWORK_DISCONNECT, DockerChaosInjector
 from app.services.linux_chaos_injector import DISK_PRESSURE, LinuxChaosInjector
@@ -111,6 +112,16 @@ class TestLinuxRollback:
 
 class TestKubernetesRollback:
     """ChaosMeshInjector 는 클러스터 접속이 필요하므로 핸들러만 갈아끼워 검증한다."""
+
+    @pytest.fixture(autouse=True)
+    def _no_cluster_setup(self, monkeypatch):
+        # 주입 전 네임스페이스 준비도 클러스터에 닿는다. 가짜로 바꾸지 않으면 CI 에서는 kubeconfig 가 없어
+        # 실패하고, 로컬에서는 실제 클러스터에 테스트 네임스페이스를 만든다.
+        class _Setup:
+            async def setup_user_namespace(self, namespace):
+                pass
+
+        monkeypatch.setattr(k8s_setup, "get_k8s_setup_service", lambda: _Setup())
 
     def _injector(self):
         injector = ChaosMeshInjector.__new__(ChaosMeshInjector)
