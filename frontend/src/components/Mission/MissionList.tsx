@@ -70,10 +70,9 @@ interface MissionListProps {
   /** 힌트를 샀다. App 이 튜터를 앞으로 꺼낸다 (FE-28). */
   onHintUsed?: () => void
   /**
-   * 이 배포에서 열리지 않은 환경 이름 (FE-28). AI 잠금 조건은 모든 환경의 기본 미션을
-   * 세므로, 닫힌 환경이 있으면 지금은 조건을 채울 수 없다는 사실을 함께 말한다.
+   * 이 배포에서 열린 환경 이름. 서버는 AI 잠금 조건으로 열린 환경의 기본 미션만 센다 (BE-31).
    */
-  closedEnvironmentLabels?: string[]
+  openEnvironmentLabels?: string[]
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
   /**
@@ -140,7 +139,7 @@ const MissionList: React.FC<MissionListProps> = ({
   showFirstRunGuide = false,
   onFirstRunGuideSeen,
   onHintUsed,
-  closedEnvironmentLabels = [],
+  openEnvironmentLabels = [],
   onActiveAttemptChange,
   onAttemptCompleted,
 }) => {
@@ -1041,16 +1040,9 @@ const MissionList: React.FC<MissionListProps> = ({
                 </span>
               </summary>
               <p>
-                AI 문제 모드는 계정 단위로 열립니다. Kubernetes · Docker · Linux 를 합친
-                서로 다른 기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
-                활성화됩니다.
-                {closedEnvironmentLabels.length > 0 && (
-                  <>
-                    {' '}
-                    다만 이 서버에서는 {closedEnvironmentLabels.join(' · ')} 환경이 열려 있지 않아
-                    지금은 조건을 모두 채울 수 없습니다.
-                  </>
-                )}
+                AI 문제 모드는 계정 단위로 열립니다.
+                {openEnvironmentLabels.length > 0 ? ` 이 서버에서 열린 ${openEnvironmentLabels.join(' · ')} 환경의` : ''}
+                {' '}서로 다른 기본 미션 {unlockStatus.total_static}개를 모두 완료하면 활성화됩니다.
               </p>
             </details>
           ) : (
