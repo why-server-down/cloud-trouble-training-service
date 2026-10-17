@@ -17,6 +17,9 @@ interface MissionStatusProps {
   pendingAction: MissionAction | null
   /** 활성 미션의 힌트 감점. status 응답에는 없어서 미션 목록 값을 받는다. */
   hintPenalty?: number | null
+  /** 인시던트 바에 보일 미션 이름과 환경 (FE-26). */
+  missionTitle?: string
+  environmentLabel?: string
   onStatusChange: (status: MissionStatusResponse) => void
   onMissionEnd: () => void
   onCheck: () => void
@@ -34,7 +37,11 @@ const formatClock = (totalSeconds: number) =>
   `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, '0')}`
 
 interface MissionStatusViewProps {
+  /** 영역 이름. 스크린리더가 읽는다. */
   title: string
+  /** 인시던트 바에 크게 보일 미션 이름. 없으면 title 을 쓴다 (FE-26). */
+  missionTitle?: string
+  environmentLabel?: string
   remainingSeconds: number
   score: number
   hintsUsed: number
@@ -56,6 +63,8 @@ interface MissionStatusViewProps {
  */
 export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
   title,
+  missionTitle,
+  environmentLabel,
   remainingSeconds,
   score,
   hintsUsed,
@@ -72,8 +81,14 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
   const hintLabel = hintPenalty ? `힌트 사용 −${hintPenalty}점` : '힌트 사용'
 
   return (
-    <section className="mission-status-panel" data-tour="mission-progress">
-      <h3 className="status-header">{title}</h3>
+    <section className="mission-status-panel incident-bar" data-tour="mission-progress" aria-label={title}>
+      <div className="incident-identity">
+        <span className="incident-live">
+          <span className="ui-live-dot" aria-hidden="true" />
+          진행 중{environmentLabel ? ` · ${environmentLabel}` : ''}
+        </span>
+        <h3 className="incident-title status-header">{missionTitle ?? title}</h3>
+      </div>
       {isStale && (
         <p className="status-stale-note" role="status" aria-live="polite">
           상태 조회에 실패했습니다. 연결이 돌아오면 자동으로 다시 시도합니다.
@@ -82,7 +97,7 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
       <div className="status-metrics">
         <div className="status-timer">
           <span className="status-label">
-            남은 시간
+            <span className="status-label-text">남은 시간</span>
             {/* 색만으로 알리지 않는다. 경계를 넘을 때 글자로도 읽히게 영역을 미리 둔다. */}
             <span className={`status-time-flag ${timeState}`} role="status">
               {timeState === 'danger' ? '1분 미만' : timeState === 'warning' ? '5분 미만' : ''}
@@ -120,6 +135,8 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
   refreshKey,
   pendingAction,
   hintPenalty,
+  missionTitle,
+  environmentLabel,
   onStatusChange,
   onMissionEnd,
   onCheck,
@@ -204,7 +221,7 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
 
   if (!status) {
     return (
-      <div className="mission-status-panel" data-tour="mission-progress">
+      <div className="mission-status-panel incident-bar is-loading" data-tour="mission-progress">
         <div className="empty-state">미션 상태를 불러오는 중...</div>
       </div>
     )
@@ -213,6 +230,8 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
   return (
     <MissionStatusView
       title="미션 진행 상황"
+      missionTitle={missionTitle}
+      environmentLabel={environmentLabel}
       remainingSeconds={remaining ?? status.remaining_seconds}
       score={status.current_score}
       hintsUsed={status.attempt.hints_used}

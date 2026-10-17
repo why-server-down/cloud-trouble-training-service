@@ -1,6 +1,7 @@
 import React from 'react'
 import { getEnvironmentMeta } from '../../config/environments'
 import { MissionResponse } from '../../types/training'
+import { getMissionCopy } from './missionCopy'
 import { LockIcon } from './Icons'
 
 interface MissionCardProps {
@@ -9,27 +10,8 @@ interface MissionCardProps {
   onStart: (missionId: string) => void
 }
 
-const missionCopy: Record<string, { name: string; description: string }> = {
-  pod_failure: {
-    name: '사라진 애플리케이션',
-    description: 'Nginx Pod가 ImagePullBackOff 상태입니다. 이미지 이름을 수정하여 Pod를 정상 상태로 복구하세요.',
-  },
-  memory_stress: {
-    name: '메모리 부족',
-    description: '애플리케이션 Pod가 메모리 부족으로 종료됩니다. 리소스 제한을 확인하고 조정하세요.',
-  },
-  service_misconfig: {
-    name: '끊어진 연결',
-    description: 'Service 설정 오류로 트래픽이 Pod에 전달되지 않습니다. selector 설정을 확인하세요.',
-  },
-  network_latency: {
-    name: '응답 없는 서버',
-    description: 'Pod에 지속적인 장애가 발생합니다. 상태 확인 설정을 점검하고 자동 복구되도록 구성하세요.',
-  },
-}
-
 const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart }) => {
-  const copy = missionCopy[mission.chaos_type] || { name: mission.name, description: mission.description }
+  const copy = getMissionCopy(mission)
   const isLocked = !mission.is_unlocked
   /*
    * 잠긴 카드와 진행 중 카드는 disabled 대신 aria-disabled 로 둔다 (설계 문서 8).
