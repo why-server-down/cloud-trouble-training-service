@@ -5,10 +5,13 @@
 - memory_stress·network_latency 검증: Pod phase·엔드포인트만 봐서 CrashLoopBackOff 나 주입 직후
   상태도 통과했다. 롤아웃이 끝나 모든 replica 가 Ready 여야 통과한다.
 - service_misconfig 검증: selector 에 키를 더 붙여 Endpoints 가 비어도 통과했다.
+- cpu_throttle(AI 모드): httpGet / 검사는 CPU 1m 으로도 바로 통과해 주입 직후 Ready 가 됐다.
 """
 from types import SimpleNamespace as NS
 
-from app.services.chaos_injector import MEMORY_DEMAND_COMMAND, ChaosMeshInjector
+from app.services.chaos_injector import (
+    CPU_DEMAND_PROBE_COMMAND, MEMORY_DEMAND_COMMAND, ChaosMeshInjector,
+)
 from app.services.validation_service import K8sValidationService
 
 
@@ -45,6 +48,18 @@ def test_memory_stress_revert_restores_command_and_limit():
     container = _container(patches[-1])
     assert container["command"] is None
     assert container["resources"]["limits"] == {"memory": "128Mi"}
+
+
+def test_cpu_throttle_probe_spends_cpu_so_the_tiny_limit_shows():
+    injector, patches = _injector()
+    injector._apply_cpu_throttle("cpu-throttle-1", "user-1")
+
+    container = _container(patches[-1])
+    assert container["resources"]["limits"] == {"cpu": "1m"}
+    probe = container["readinessProbe"]
+    assert probe["exec"]["command"] == CPU_DEMAND_PROBE_COMMAND
+    assert "httpGet" not in probe
+    assert probe["timeoutSeconds"] == 1
 
 
 def _deployment(*, limit="128Mi", updated=1, ready=1, available=1, unavailable=None):
