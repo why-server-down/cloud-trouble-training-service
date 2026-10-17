@@ -21,6 +21,11 @@ interface TutorChatProps {
    */
   conversationKey?: string
   hintsUsed: number
+  /**
+   * 힌트를 샀다는 신호 (FE-28). 값이 바뀌면 올라간 단계의 힌트를 튜터에게 바로 묻는다 —
+   * 점수를 내고도 아무것도 받지 못하는 일이 없게 한다.
+   */
+  autoHintKey?: number
   disabled?: boolean
   floating?: boolean
   floatingOpen?: boolean
@@ -176,6 +181,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
   environment,
   conversationKey,
   hintsUsed,
+  autoHintKey = 0,
   disabled,
   floating = false,
   floatingOpen = true,
@@ -200,7 +206,10 @@ const TutorChat: React.FC<TutorChatProps> = ({
    */
   const [cooldown, setCooldown] = useState(0)
   const [isCooldownExact, setIsCooldownExact] = useState(false)
+  /** 제한이 걸린 순간 한 번 읽어 줄 문구. 카운트다운이 줄어도 바뀌지 않는다. */
+  const [cooldownAnnouncement, setCooldownAnnouncement] = useState('')
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
   /** 진행 중인 질문의 controller. unmount·attempt 종료·환경 변경에서 취소한다 (FE-11). */
   const requestRef = useRef<AbortController | null>(null)
   const [isFloatingViewport, setIsFloatingViewport] = useState(() =>
@@ -348,6 +357,12 @@ const TutorChat: React.FC<TutorChatProps> = ({
         const exact = err.retryAfterSeconds !== null && err.retryAfterSeconds > 0
         setCooldown(exact ? (err.retryAfterSeconds as number) : RATE_LIMIT_FALLBACK_COOLDOWN_SEC)
         setIsCooldownExact(exact)
+        // 보이는 카운트다운과 문장을 달리 둔다 — 같은 문장이 두 번 있으면 찾기·낭독이 겹친다.
+        setCooldownAnnouncement(
+          exact
+            ? `질문 횟수 제한에 걸려 ${err.retryAfterSeconds}초 동안 질문을 보낼 수 없습니다.`
+            : '질문 횟수 제한에 걸려 잠시 질문을 보낼 수 없습니다.',
+        )
         /*
          * 백엔드 detail 에도 "N초 후" 가 들어 있는데 그것은 응답 시점의 고정값이다.
          * 아래 카운트다운과 함께 띄우면 서로 다른 두 숫자가 동시에 보인다.
@@ -367,6 +382,18 @@ const TutorChat: React.FC<TutorChatProps> = ({
       }
     }
   }, [cooldown, disabled, environment, hintLevel, missionId, token])
+
+  /*
+   * 힌트를 사면 그 단계의 힌트를 바로 묻는다. 처음 마운트될 때의 값은 이미 처리한 것으로 본다 —
+   * 화면 배치가 바뀌어 다시 마운트돼도 같은 힌트를 또 묻지 않는다.
+   */
+  const handledAutoHintRef = useRef(autoHintKey)
+  useEffect(() => {
+    if (!autoHintKey || autoHintKey === handledAutoHintRef.current) return
+    handledAutoHintRef.current = autoHintKey
+    messagesRef.current?.focus()
+    void ask(`힌트 ${hintLevel}단계를 주세요.`)
+  }, [ask, autoHintKey, hintLevel])
 
   const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()
@@ -411,7 +438,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
             </button>
           )}
         </div>
-        <div className="chat-messages" aria-live="polite">
+        <div className="chat-messages" aria-live="polite" ref={messagesRef} tabIndex={-1} aria-label="튜터 대화">
           {messages.map((message, index) => (
             <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
               <span className="chat-message-role">{message.role === 'user' ? '나' : '튜터'}</span>
@@ -466,11 +493,18 @@ const TutorChat: React.FC<TutorChatProps> = ({
           </div>
         )}
         {isRateLimited && (
-          <div className="chat-rate-limit-note" role="status" aria-live="polite">
-            <span>
+          <div className="chat-rate-limit-note">
+            {/*
+              * 보이는 카운트다운은 live region 이 아니다 — 매초 바뀌는 숫자를 스크린리더가
+              * 매번 읽으면 다른 안내가 묻힌다. 제한이 걸린 순간 한 번만 알린다.
+              */}
+            <span aria-hidden="true">
               {isCooldownExact
                 ? `질문 횟수 제한에 걸렸습니다. ${cooldown}초 후 다시 질문할 수 있습니다.`
                 : '질문 횟수 제한에 걸렸습니다. 잠시 후 다시 질문할 수 있습니다.'}
+            </span>
+            <span className="sr-only" role="status">
+              {cooldownAnnouncement}
             </span>
           </div>
         )}
@@ -516,7 +550,7 @@ const TutorChat: React.FC<TutorChatProps> = ({
           <button className="ui-button primary small" type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
         </form>
         {/* 튜터 질문과 힌트 감점을 혼동하지 않게 관계를 밝힌다. 감점은 힌트 버튼에서만 생긴다. */}
-        <p className="tutor-note">질문은 감점 없음 · 점수는 힌트를 사용할 때만 깎입니다</p>
+        <p className="tutor-note">질문은 감점 없음 · 점수는 시간이 지나거나 힌트를 쓸 때 깎입니다</p>
       </section>
     </>
   )

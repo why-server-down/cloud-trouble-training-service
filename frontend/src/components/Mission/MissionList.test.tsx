@@ -545,3 +545,20 @@ describe('시연 모드 (FE-28)', () => {
     expect(await screen.findByRole('button', { name: '시연용 잠금 해제' })).toBeTruthy()
   })
 })
+
+describe('힌트 확인 문구 (FE-28)', () => {
+  it('누르기 전에 깎이는 점수와 받는 것을 말한다', async () => {
+    mocked.getMissionStatus.mockResolvedValue({
+      attempt,
+      elapsed_seconds: 60,
+      remaining_seconds: 1140,
+      current_score: 98,
+    })
+    renderList()
+
+    fireEvent.click(await screen.findByRole('button', { name: /^힌트 사용/ }))
+    const dialog = await screen.findByRole('dialog', { name: '힌트 사용' })
+    expect(dialog.textContent).toContain('5점이 깎입니다')
+    expect(dialog.textContent).toContain('튜터가 한 단계 더 구체적인 힌트를 바로 보여 줍니다')
+  })
+})
