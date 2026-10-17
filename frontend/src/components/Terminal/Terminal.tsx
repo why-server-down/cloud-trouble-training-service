@@ -61,7 +61,7 @@ const TERMINAL_THEME = {
 /*
  * 터미널 글꼴 (FE-28). xterm 은 한글을 두 칸에 그리는데, 한글 글리프가 영문 두 칸보다 좁은 글꼴이면
  * "명 령 을"처럼 벌어져 보인다. 한글 = 영문 × 2 로 설계된 D2Coding 의 부분 글꼴을 이름을 바꿔 쓴다
- * (Terminal.css @font-face, assets/fonts/OFL-AfterFail-Terminal-Mono.txt).
+ * (Terminal.css @font-face). 라이선스 전문은 배포물에 함께 나가는 public/licenses/OFL-AfterFail-Terminal-Mono.txt.
  */
 const TERMINAL_FONT_FAMILY = 'AfterFail Terminal Mono'
 const TERMINAL_FONT = `"${TERMINAL_FONT_FAMILY}", "SF Mono", Menlo, Consolas, monospace`
@@ -241,6 +241,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
       search.shown = next
     }
     const startSearch = () => {
+      // 명령이 실행 중이면 곧 출력과 새 프롬프트가 끼어들어 검색줄 위치가 무너진다. 끝난 뒤에 연다.
+      if (isExecutingRef.current || commandQueueRef.current.length > 0) return
       search.active = true
       search.query = ''
       search.original = currentLineRef.current
@@ -350,6 +352,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
     const handleInsert = (event: Event) => {
       const command = (event as CustomEvent<unknown>).detail
       if (typeof command !== 'string' || !command) return
+      // 검색 중이면 먼저 검색 전 입력으로 되돌린 뒤 넣는다. 안 그러면 화면과 실제 입력이 어긋난다.
+      if (search.active) endSearch(search.original)
       commit(moveEnd(lineState()))
       const text = currentLineRef.current && !currentLineRef.current.endsWith(' ') ? ` ${command}` : command
       commit(insertText(lineState(), text))
@@ -363,6 +367,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
        * 그대로 입력하고 실행하지만, 두 줄 이상이면 무엇이 실행될지 보여 주고 확인을 받는다.
        */
       if (data.length > 1 && /[\r\n]/.test(data)) {
+        // 검색 중에 붙여넣으면 검색을 먼저 끝낸다. 남겨 두면 다음 Enter 가 검색 결과까지 실행한다.
+        if (search.active) endSearch(search.original)
         const lines = data.replace(/\r\n?/g, '\n').split('\n').map((line) => line.trim()).filter(Boolean)
         if (lines.length === 1) {
           commit(insertText(lineState(), lines[0]))

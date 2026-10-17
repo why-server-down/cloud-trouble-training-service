@@ -1,4 +1,7 @@
-/* 터미널 전용 글꼴. D2Coding 1.3.2 부분 글꼴(이름 변경, OFL) — 한글이 정확히 영문 두 칸이다. */
+/*
+ * 터미널 전용 글꼴. D2Coding 1.3.2 부분 글꼴(이름 변경, OFL) — 한글이 정확히 영문 두 칸이다.
+ * 라이선스: public/licenses/OFL-AfterFail-Terminal-Mono.txt
+ */
 @font-face {
   font-family: "AfterFail Terminal Mono";
   font-style: normal;

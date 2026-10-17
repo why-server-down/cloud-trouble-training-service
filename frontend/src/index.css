@@ -4,7 +4,10 @@
  * 컴포넌트 CSS 에는 hex 색이나 px 글자 크기를 직접 쓰지 않고 여기 토큰을 쓴다.
  */
 
-/* IBM Plex Mono 는 의존성을 늘리지 않으려고 woff2 를 직접 둔다 (OFL, OFL-IBM-Plex-Mono.txt). */
+/*
+ * IBM Plex Mono 는 의존성을 늘리지 않으려고 woff2 를 직접 둔다. 라이선스(OFL) 전문은 배포물에
+ * 함께 나가도록 public/licenses/OFL-IBM-Plex-Mono.txt 에 둔다 (/licenses/ 경로로 제공).
+ */
 @font-face {
   font-family: "IBM Plex Mono";
   font-style: normal;
