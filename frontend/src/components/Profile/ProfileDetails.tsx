@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { UserProfileResponse } from '../../services/api'
 import { average } from '../../utils/dashboard'
 import DashboardOverview from './DashboardOverview'
@@ -14,6 +14,8 @@ interface ProfileDetailsProps {
   environments?: EnvironmentItem[] | null
   onClose: () => void
   onRefresh: () => void
+  /** 주면 시트를 학습 현황 제목 위치로 스크롤해서 연다. 시트가 이 제목에 focus 를 준다. */
+  progressHeadingRef?: React.RefObject<HTMLHeadingElement>
 }
 
 const formatDate = (date: string) =>
@@ -23,9 +25,22 @@ const formatDate = (date: string) =>
     day: 'numeric',
   }).format(new Date(date))
 
-const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading, environments, onClose, onRefresh }) => {
+const ProfileDetails: React.FC<ProfileDetailsProps> = ({
+  token,
+  profile,
+  loading,
+  environments,
+  onClose,
+  onRefresh,
+  progressHeadingRef,
+}) => {
   // 완료 0건의 평균은 0점이 아니라 '없음'이다 (설계 문서 5.5).
   const averageScore = average(profile.total_score, profile.missions_completed)
+
+  // 위의 계정 정보는 profile 값으로 바로 그려져 높이가 정해져 있으니 열자마자 한 번 맞추면 된다.
+  useEffect(() => {
+    progressHeadingRef?.current?.scrollIntoView({ block: 'start' })
+  }, [progressHeadingRef])
 
   return (
     <div className="profile-sheet">
@@ -98,7 +113,9 @@ const ProfileDetails: React.FC<ProfileDetailsProps> = ({ token, profile, loading
           </dl>
         </div>
 
-        <h3 className="profile-section-title">학습 현황</h3>
+        <h3 ref={progressHeadingRef} tabIndex={progressHeadingRef ? -1 : undefined} className="profile-section-title">
+          학습 현황
+        </h3>
         <DashboardOverview token={token} />
 
         {environments && environments.length > 0 && (
