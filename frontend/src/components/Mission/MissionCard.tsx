@@ -10,6 +10,10 @@ interface MissionCardProps {
   onStart: (missionId: string) => void
 }
 
+/**
+ * 미션 큐의 한 줄 (FE-29). 레벨 번호 | 제목·설명·조건 | 상태.
+ * 카드 안의 카드와 줄마다 반복되던 환경 칩을 걷어냈다 — 환경은 위의 환경 탭이 말한다.
+ */
 const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart }) => {
   const copy = getMissionCopy(mission)
   const isLocked = !mission.is_unlocked
@@ -29,39 +33,38 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
       }}
       aria-disabled={isInert || undefined}
     >
-      {isActive && (
-        <span className="mission-active-label">
-          <span className="ui-live-dot" aria-hidden="true" />
-          진행 중
-        </span>
-      )}
-      <span className="mission-card-header">
-        <span className="mission-title">{copy.name}</span>
-        <span className="ui-chip mission-level">레벨 {mission.level}</span>
+      <span className="mission-index" aria-hidden="true">
+        {String(mission.level).padStart(2, '0')}
+      </span>
+      <span className="mission-title">
+        {/* 줄에서 뺀 레벨과 환경은 스크린리더에는 그대로 읽힌다. */}
+        <span className="sr-only">레벨 {mission.level} · {getEnvironmentMeta(mission.environment).label} · </span>
+        {copy.name}
       </span>
       <span className="mission-description">{copy.description}</span>
       <span className="mission-info">
-        {/* 색이 아니라 글자로 환경을 밝힌다 — 색만으로 구분하면 읽지 못하는 사용자가 생긴다. */}
-        <span className="ui-chip mission-environment-badge">{getEnvironmentMeta(mission.environment).label}</span>
         <span>제한 시간 {Math.floor(mission.time_limit / 60)}분</span>
         <span>기본 {mission.base_score}점</span>
         <span>힌트 −{mission.hint_penalty}점</span>
       </span>
-      {/* 마지막 줄은 카드의 상태다: 잠김이면 열리는 조건, 열려 있으면 시작 안내. */}
-      {isLocked ? (
-        <span className="mission-card-status">
+      {/* 오른쪽 끝은 줄의 상태다: 진행 중, 잠김과 열리는 조건, 또는 시작 안내. */}
+      {isActive ? (
+        <span className="mission-state mission-active-label">
+          <span className="ui-live-dot" aria-hidden="true" />
+          진행 중
+        </span>
+      ) : isLocked ? (
+        <span className="mission-state mission-lock-state">
           <span className="ui-chip">
             <LockIcon />
             잠김
           </span>
-          이전 레벨을 완료하면 열립니다
+          <span className="mission-lock-reason">이전 레벨을 완료하면 열립니다</span>
         </span>
       ) : (
-        !isActive && (
-          <span className="mission-card-status mission-start-cue" aria-hidden="true">
-            시작 →
-          </span>
-        )
+        <span className="mission-state mission-start-cue">
+          시작<span aria-hidden="true">→</span>
+        </span>
       )}
     </button>
   )

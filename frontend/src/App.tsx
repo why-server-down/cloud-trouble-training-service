@@ -2,7 +2,7 @@ import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'reac
 import Login from './components/Login/Login'
 import MissionList from './components/Mission/MissionList'
 import OnboardingTour, { TourStep } from './components/Onboarding/OnboardingTour'
-import DashboardOverview from './components/Profile/DashboardOverview'
+import ProgressSummary from './components/Profile/ProgressSummary'
 import ProfileDetails from './components/Profile/ProfileDetails'
 import Sheet from './components/Feedback/Sheet'
 import ConfirmModal from './components/Feedback/ConfirmModal'
@@ -117,14 +117,14 @@ const INTRO_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="field-guide"]',
     eyebrow: '시작 가이드',
     title: '시작 전 가이드',
-    body: '조사 순서와 자주 쓰는 명령을 미리 볼 수 있습니다. 미션을 시작하면 이 자리에 터미널이 열립니다.',
+    body: '조사 순서와 자주 쓰는 명령을 미리 볼 수 있습니다. 미션을 시작하면 터미널이 열리고, 이 안내는 브리핑에 그대로 남습니다.',
     placement: 'left',
   },
   {
-    target: '[data-tour="learning-dashboard"]',
+    target: '[data-tour="progress-summary"]',
     eyebrow: '학습 현황',
-    title: '학습 대시보드',
-    body: '진행률과 기록을 볼 수 있습니다. 미션 중에는 이 자리가 관측 대시보드로 바뀝니다.',
+    title: '티어와 진행률',
+    body: '현재 티어와 다음 티어까지의 진행률입니다. 학습 곡선·리더보드·업적은 프로필에서 자세히 볼 수 있어요.',
     placement: 'left',
   },
 ]
@@ -247,7 +247,10 @@ function App() {
    * 보이는 탭. 미션이 끝나 튜터가 없어졌는데 튜터 탭에 머물러 있으면 빈 화면이 된다.
    * 그때는 미션 목록으로 돌린다.
    */
-  const visibleTab: WorkspaceTab = activeTab === 'tutor' && !canUseTutor ? 'missions' : activeTab
+  const visibleTab: WorkspaceTab =
+    activeTab === 'tutor' && !canUseTutor ? 'missions'
+      : activeTab === 'observe' && !hasActiveAttempt ? 'terminal'
+        : activeTab
 
   const auxTabs: Array<{ id: AuxTab; label: string; area: WorkspaceTab }> = [
     { id: 'briefing', label: '브리핑', area: 'missions' },
@@ -255,7 +258,11 @@ function App() {
     { id: 'observe', label: '관측', area: 'observe' },
   ]
 
-  /* 미션 전에는 목록·가이드·기록 셋, 미션 중에는 미션·터미널·튜터·관측. */
+  /*
+   * 미션 전에는 목록·가이드 둘, 미션 중에는 미션·터미널·튜터·관측 (FE-29).
+   * 미션 전 '기록' 탭은 뺐다. 숫자 세 개에 탭 하나를 쓰기 아까웠고, 요약은 데스크톱의 오른쪽 열처럼
+   * 가이드 탭 위에 함께 놓인다. 자세한 기록은 헤더의 프로필 버튼이 늘 연다.
+   */
   const mobileTabs: Array<{ id: WorkspaceTab; label: string; icon: ReactNode }> = hasActiveAttempt
     ? [
         { id: 'missions', label: '미션', icon: <ListIcon /> },
@@ -266,7 +273,6 @@ function App() {
     : [
         { id: 'missions', label: '미션', icon: <ListIcon /> },
         { id: 'terminal', label: '가이드', icon: <GuideIcon /> },
-        { id: 'observe', label: '기록', icon: <ChartIcon /> },
       ]
 
   /**
@@ -605,8 +611,13 @@ function App() {
       setActiveTab('missions')
       setAuxTab('briefing')
     }
-    if (target === '[data-tour="terminal"]' || target === '[data-tour="field-guide"]') setActiveTab('terminal')
-    if (target === '[data-tour="grafana"]' || target === '[data-tour="learning-dashboard"]') {
+    /* 미션 전 학습 현황 요약은 모바일에서 가이드 탭 위에 함께 놓인다. */
+    if (
+      target === '[data-tour="terminal"]'
+      || target === '[data-tour="field-guide"]'
+      || target === '[data-tour="progress-summary"]'
+    ) setActiveTab('terminal')
+    if (target === '[data-tour="grafana"]') {
       setActiveTab('observe')
       setAuxTab('observe')
     }
@@ -832,7 +843,7 @@ function App() {
                           <div className="tutorial-intro">
                             <h2>장애를 직접 관찰하고 복구해 보세요.</h2>
                             <p>
-                              미션을 시작하면 이 자리에 터미널이 열립니다.
+                              미션을 시작하면 터미널이 열립니다.
                               {fieldGuideLabel
                                 ? ` ${fieldGuideLabel} 명령으로 상태를 조사해 원인을 찾아보세요.`
                                 : ' 터미널 명령으로 상태를 조사해 원인을 찾아보세요.'}
@@ -914,89 +925,95 @@ function App() {
                     id={AREA_IDS.observe}
                     aria-label={hasActiveAttempt ? '관측' : '학습 현황'}
                   >
-                    <section className="grafana-panel" data-tour={hasActiveAttempt ? 'grafana' : 'learning-dashboard'}>
-                      <div className="grafana-panel-header">
-                        <span className="panel-label">
-                          {hasActiveAttempt ? `관측 · ${observabilityLabel}` : '학습 현황'}
-                        </span>
-                        {hasActiveAttempt && grafanaUrl && (
-                          <a className="panel-link" href={grafanaUrl} target="_blank" rel="noreferrer">
-                            새 창
-                            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                              <path
-                                d="M6.5 3.5H4a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V9.5M9.5 3H13v3.5M13 3 7.5 8.5"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </a>
-                        )}
-                      </div>
-                      {!hasActiveAttempt ? (
-                        <div className="workspace-dashboard">
-                          <DashboardOverview token={token} refreshKey={dashboardRefreshKey} />
-                        </div>
-                      ) : hasObservability && grafanaUrl ? (
-                        <div className="grafana-frame-wrap">
-                          <iframe
-                            key={observabilityRetry}
-                            className="grafana-frame"
-                            src={grafanaUrl}
-                            title={`${observabilityLabel} Grafana dashboard`}
-                            onLoad={() => setIsGrafanaFrameReady(true)}
-                          />
-                          {isGrafanaLoading && (
-                            <div className="grafana-loading-overlay" role="status" aria-live="polite">
-                              <span>Grafana 대시보드를 불러오는 중입니다</span>
-                            </div>
+                    {/*
+                      * 미션 전에는 학습 현황 요약만 둔다 (FE-29). 전체 대시보드는 프로필 시트에 있다 —
+                      * 미션 전 화면의 초점은 미션 목록이다. 미션 중에는 같은 영역이 관측(Grafana)이다.
+                      */}
+                    {!hasActiveAttempt ? (
+                      <ProgressSummary
+                        token={token}
+                        refreshKey={dashboardRefreshKey}
+                        onOpenProfile={() => setIsProfileOpen(true)}
+                      />
+                    ) : (
+                      <section className="grafana-panel" data-tour="grafana">
+                        <div className="grafana-panel-header">
+                          <span className="panel-label">관측 · {observabilityLabel}</span>
+                          {grafanaUrl && (
+                            <a className="panel-link" href={grafanaUrl} target="_blank" rel="noreferrer">
+                              새 창
+                              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                                <path
+                                  d="M6.5 3.5H4a1 1 0 0 0-1 1V12a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V9.5M9.5 3H13v3.5M13 3 7.5 8.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </a>
                           )}
-                          {!isGrafanaLoading && isObservabilityDegraded && (
-                            /*
-                             * iframe 의 load 는 오류 페이지에서도 온다. 그래서 "열려 있다"고 단정하지 않고,
-                             * 확인하지 못했다는 사실과 할 수 있는 일을 말한다 (FE-28).
-                             */
-                            <div className="grafana-degraded-note" role="status" aria-live="polite">
-                              <p>
-                                관측 데이터를 확인하지 못했습니다. 대시보드가 비어 있거나 열리지 않았을 수
-                                있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
-                              </p>
-                              <div className="grafana-degraded-actions">
-                                <button className="ui-button small" type="button" onClick={retryObservability}>
-                                  다시 확인
-                                </button>
-                                {grafanaUrl && (
-                                  <a className="ui-button plain small" href={grafanaUrl} target="_blank" rel="noreferrer">
-                                    새 창에서 열기
-                                  </a>
-                                )}
+                        </div>
+                        {hasObservability && grafanaUrl ? (
+                          <div className="grafana-frame-wrap">
+                            <iframe
+                              key={observabilityRetry}
+                              className="grafana-frame"
+                              src={grafanaUrl}
+                              title={`${observabilityLabel} Grafana dashboard`}
+                              onLoad={() => setIsGrafanaFrameReady(true)}
+                            />
+                            {isGrafanaLoading && (
+                              <div className="grafana-loading-overlay" role="status" aria-live="polite">
+                                <span>Grafana 대시보드를 불러오는 중입니다</span>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        /*
-                         * 관측 화면을 열 수 없다. 다른 환경 대시보드로 대체하지 않는다 (FE-08).
-                         * 이유가 두 가지라 문구를 나눈다 (FE-22) — "대시보드가 없다"와
-                         * "서버가 관측을 제공하지 않는다"는 사용자가 할 일이 다르다.
-                         */
-                        <div className="grafana-frame-wrap grafana-frame-empty">
-                          <section className="env-notice" role="status">
-                            <span className="env-notice-title">
-                              {advertisesObservability
-                                ? `${observabilityLabel} 환경은 관측 대시보드가 아직 없습니다`
-                                : `${observabilityLabel} 환경은 관측 데이터를 제공하지 않습니다`}
-                            </span>
-                            <p>
-                              터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는
-                              영향이 없습니다.
-                            </p>
-                          </section>
-                        </div>
-                      )}
-                    </section>
+                            )}
+                            {!isGrafanaLoading && isObservabilityDegraded && (
+                              /*
+                               * iframe 의 load 는 오류 페이지에서도 온다. 그래서 "열려 있다"고 단정하지 않고,
+                               * 확인하지 못했다는 사실과 할 수 있는 일을 말한다 (FE-28).
+                               */
+                              <div className="grafana-degraded-note" role="status" aria-live="polite">
+                                <p>
+                                  관측 데이터를 확인하지 못했습니다. 대시보드가 비어 있거나 열리지 않았을 수
+                                  있습니다. 터미널 조사와 미션 검증에는 영향이 없습니다.
+                                </p>
+                                <div className="grafana-degraded-actions">
+                                  <button className="ui-button small" type="button" onClick={retryObservability}>
+                                    다시 확인
+                                  </button>
+                                  {grafanaUrl && (
+                                    <a className="ui-button plain small" href={grafanaUrl} target="_blank" rel="noreferrer">
+                                      새 창에서 열기
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          /*
+                           * 관측 화면을 열 수 없다. 다른 환경 대시보드로 대체하지 않는다 (FE-08).
+                           * 이유가 두 가지라 문구를 나눈다 (FE-22) — "대시보드가 없다"와
+                           * "서버가 관측을 제공하지 않는다"는 사용자가 할 일이 다르다.
+                           */
+                          <div className="grafana-frame-wrap grafana-frame-empty">
+                            <section className="env-notice" role="status">
+                              <span className="env-notice-title">
+                                {advertisesObservability
+                                  ? `${observabilityLabel} 환경은 관측 대시보드가 아직 없습니다`
+                                  : `${observabilityLabel} 환경은 관측 데이터를 제공하지 않습니다`}
+                              </span>
+                              <p>
+                                터미널 명령으로 상태를 조사하세요. 미션 진행·자동 검증·점수에는
+                                영향이 없습니다.
+                              </p>
+                            </section>
+                          </div>
+                        )}
+                      </section>
+                    )}
                   </section>
                 </div>
 
@@ -1017,7 +1034,12 @@ function App() {
                         type="button"
                         role="tab"
                         aria-selected={visibleTab === tab.id}
-                        aria-controls={AREA_IDS[tab.id]}
+                        aria-controls={
+                          /* 미션 전 가이드 탭은 학습 현황 요약도 함께 보여 준다 (FE-29). */
+                          !hasActiveAttempt && tab.id === 'terminal'
+                            ? `${AREA_IDS.observe} ${AREA_IDS.terminal}`
+                            : AREA_IDS[tab.id]
+                        }
                         tabIndex={visibleTab === tab.id ? 0 : -1}
                         className={visibleTab === tab.id ? 'active' : ''}
                         onClick={() => setActiveTab(tab.id)}

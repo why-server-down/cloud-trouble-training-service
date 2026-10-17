@@ -228,11 +228,14 @@ describe('환경별 미션 (FE-06)', () => {
     )
   })
 
-  it('카드에 환경을 글자로 표시한다', async () => {
+  it('줄마다 반복하던 환경 칩은 뺐지만 스크린리더에는 환경을 글자로 읽힌다 (FE-29)', async () => {
     mocked.listMissions.mockResolvedValue([dockerMission])
     renderList('docker')
 
-    expect(await screen.findByText('Docker')).toBeTruthy()
+    // 보이는 환경 이름은 위의 환경 탭이 말한다. 줄의 접근 가능한 이름에는 그대로 남긴다.
+    const row = await screen.findByRole('button', { name: /컨테이너가 계속 죽습니다/ })
+    expect(row.textContent).toContain('레벨 1 · Docker')
+    expect(row.querySelector('.ui-chip')).toBeNull()
   })
 
   it('늦게 도착한 이전 환경 응답이 현재 환경 화면을 덮지 않는다', async () => {
@@ -296,6 +299,16 @@ describe('환경별 미션 (FE-06)', () => {
     renderList('kubernetes')
 
     expect(await screen.findByText(/계정 단위로 열립니다/)).toBeTruthy()
+  })
+
+  it('AI 잠금은 진행 수 한 줄로 접고 긴 설명은 펼쳐야 보인다 (FE-29)', async () => {
+    renderList('kubernetes')
+
+    const explanation = await screen.findByText(/계정 단위로 열립니다/)
+    const disclosure = explanation.closest('details') as HTMLDetailsElement
+    expect(disclosure).toBeTruthy()
+    expect(disclosure.open).toBe(false)
+    expect(disclosure.querySelector('summary')?.textContent).toContain('기본 미션 0/4 완료')
   })
 })
 

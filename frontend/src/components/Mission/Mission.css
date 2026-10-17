@@ -20,24 +20,30 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-4) var(--space-4) var(--space-2);
+  /* 줄의 글자(목록 여백 + 줄 여백)와 왼쪽 끝을 맞춘다. */
+  padding: var(--space-4) var(--space-5) var(--space-2);
 }
 
-.mission-header h2,
-.ai-section-header h3 {
+.mission-header h2 {
   color: var(--text);
   font-size: var(--text-lg);
   font-weight: 600;
   line-height: var(--leading-lg);
 }
 
+/* AI 문제는 목록 아래의 보조 구획이다. 잠긴 한 줄 요약(.ai-lock-title)과 같은 크기다. */
+.ai-section-header h3 {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-md);
+}
+
 .mission-list {
   display: grid;
-  flex: 1;
   align-content: start;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) var(--space-4);
-  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-2);
+  container: mission-queue / inline-size;
 }
 
 .mission-panel.mission-active {
@@ -46,9 +52,7 @@
 }
 
 .mission-panel.mission-active .mission-list {
-  flex: 0 0 auto;
   padding-bottom: var(--space-3);
-  overflow: visible;
 }
 
 .mission-panel.mission-active .mission-header,
@@ -60,49 +64,86 @@
   flex-shrink: 0;
 }
 
-/* ── 미션 카드 ───────────────────────────────────────────── */
+/* ── 미션 큐 (FE-29) ─────────────────────────────────────────
+ * 카드가 아니라 조용한 줄이다: 레벨 번호 | 제목·설명·조건 | 상태.
+ * 면은 hover·focus 때만 깔고, 줄 사이는 1px 구분선으로 나눈다. 고정 패널 안이라 그림자를 주지 않는다.
+ */
 .mission-card {
-  display: flex;
+  position: relative;
+  display: grid;
   width: 100%;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--separator);
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "index title state"
+    "index desc desc"
+    "index meta meta";
+  align-items: start;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
   text-align: left;
-  transition:
-    background var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
-/* 누를 수 있는 카드만 떠오른다. 배경이 --surface-3 이 되면 3단계 글자는 대비가 모자라 한 단계 올린다. */
-.mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover {
-  border-color: var(--separator-strong);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-1);
+/* 줄 사이 구분선. hover 한 줄과 그 아래 줄의 선은 감춰 면이 끊기지 않게 한다. */
+.mission-card + .mission-card::before {
+  position: absolute;
+  top: -1px;
+  right: var(--space-3);
+  left: var(--space-3);
+  height: 1px;
+  background: var(--separator);
+  content: "";
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 
-.mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover .mission-info {
-  color: var(--text-secondary);
-}
-
-@media (prefers-reduced-motion: no-preference) {
+/* 터치 기기에서는 hover 가 눌린 뒤에도 남는다. 실제로 hover 할 수 있는 기기에서만 면을 깐다. */
+@media (hover: hover) {
   .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover {
-    transform: translateY(-1px);
+    background: var(--surface-2);
   }
 
-  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):active {
-    transform: translateY(0) scale(0.995);
+  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover::before,
+  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover + .mission-card::before {
+    opacity: 0;
+  }
+
+  .mission-card:not([aria-disabled='true']):not(.ai-mission-card):hover .mission-info {
+    color: var(--text-secondary);
+  }
+
+  .mission-card:hover .mission-start-cue {
+    color: var(--accent);
   }
 }
 
-/* 잠긴 카드는 투명도로 흐리지 않는다 — 글자는 읽혀야 한다. 대신 면을 낮춰 눌리지 않는다는 것을 보인다. */
+/* 키보드 포커스도 hover 와 같은 면을 깐다. 넓은 줄에서 링만으로는 현재 위치를 찾기 어렵다. */
+.mission-card:not([aria-disabled='true']):focus-visible {
+  background: var(--surface-2);
+}
+
+.mission-card:focus-visible::before,
+.mission-card:focus-visible + .mission-card::before {
+  opacity: 0;
+}
+
+.mission-card.active::before,
+.mission-card.active + .mission-card::before {
+  opacity: 0;
+}
+
+/*
+ * 잠긴 줄은 투명도로 흐리지 않는다 — 글자는 읽혀야 한다. 제목만 한 단계 낮춘다.
+ * 조건이 두 줄이라 상태 칸이 설명 옆까지 내려온다.
+ */
 .mission-card.locked {
-  background: transparent;
+  grid-template-areas:
+    "index title state"
+    "index desc state"
+    "index meta state";
   cursor: not-allowed;
 }
 
@@ -110,39 +151,60 @@
   color: var(--text-secondary);
 }
 
+/* 진행 중인 줄(브리핑)만 테두리를 가진다. 진행 중 표시라 강조색이다. */
 .mission-card.active {
   border-color: var(--accent-line);
+  background: var(--surface-2);
   cursor: default;
 }
 
-.mission-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
+.mission-index {
+  grid-area: index;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-md);
+}
+
+/* AI 문제의 'AI' 는 번호가 아니라 라벨이다. 모노는 번호에만 쓴다. */
+.ai-mission-card .mission-index {
+  font-family: var(--font-sans);
+  font-weight: 500;
 }
 
 .mission-title {
+  grid-area: title;
   min-width: 0;
+  word-break: keep-all;
   color: var(--text);
   font-size: var(--text-md);
   font-weight: 600;
   line-height: var(--leading-md);
 }
 
-.mission-level {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-
 .mission-description {
+  display: -webkit-box;
+  grid-area: desc;
+  overflow: hidden;
   color: var(--text-secondary);
   font-size: var(--text-md);
   line-height: var(--leading-md);
+  word-break: keep-all;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 진행 중 줄의 설명은 브리핑 본문(읽는 글)이다. 자르지 않고 --text-lg 로 쓴다 (설계 문서 3.2). */
+.mission-card.active .mission-description {
+  display: block;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
 }
 
 .mission-info {
   display: flex;
+  grid-area: meta;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-3);
@@ -152,41 +214,77 @@
   font-variant-numeric: tabular-nums;
 }
 
-.mission-card-status {
+/* 오른쪽 끝의 상태. 제목 줄 높이에 맞춘다. */
+.mission-state {
   display: flex;
-  flex-wrap: wrap;
+  grid-area: state;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--separator);
+  min-height: var(--leading-md);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  white-space: nowrap;
 }
 
+/* 시작 안내는 보조 글자다. 누를 수 있다는 신호는 hover·focus 때만 강조색으로 준다 (FE-29). */
 .mission-start-cue {
-  justify-content: flex-end;
-  color: var(--accent);
-  font-size: var(--text-sm);
+  gap: var(--space-1);
   font-weight: 500;
-  line-height: var(--leading-sm);
   transition: color var(--dur-fast) var(--ease-out);
 }
 
-.mission-card:hover .mission-start-cue,
 .mission-card:focus-visible .mission-start-cue {
-  color: var(--accent-hover);
+  color: var(--accent);
 }
 
-/* 진행 중 표시: 강조색 점 + 글자. 상태를 담는 줄이라 설계 문서 5.4 의 예외다. */
+.mission-lock-state {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.mission-lock-reason {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+}
+
+/* 진행 중 표시: 강조색 점 + 글자 (설계 문서 3.1). */
 .mission-active-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
   color: var(--accent);
   font-size: var(--text-xs);
   font-weight: 500;
   line-height: var(--leading-xs);
+}
+
+/*
+ * 좁은 칸(모바일, 보조 패널)에서는 잠긴 줄의 조건을 오른쪽이 아니라 맨 아래 줄에 두고,
+ * 설명은 자르지 않는다 — 좁은 폭에서 두 줄로 자르면 장애 설명의 절반이 사라진다.
+ */
+@container mission-queue (max-width: 30rem) {
+  .mission-description {
+    display: block;
+  }
+
+  .mission-card.locked {
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+    grid-template-areas:
+      "index title"
+      "index desc"
+      "index meta"
+      "index state";
+  }
+
+  .mission-lock-state {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: var(--space-1);
+    white-space: normal;
+  }
 }
 
 /* ── 진행 상황 ──────────────────────────────────────────── */
@@ -745,7 +843,9 @@
 /* ── AI 문제 더 풀기 ─────────────────────────────────────── */
 .ai-scenario-section {
   flex-shrink: 0;
-  padding: var(--space-4);
+  /* 구분선과 글자를 미션 줄(목록 여백 + 줄 여백)에 맞춘다. */
+  margin: 0 var(--space-5);
+  padding: var(--space-4) 0;
   border-top: 1px solid var(--separator);
 }
 
@@ -758,22 +858,101 @@
 }
 
 .demo-unlock-btn {
-  margin-right: calc(var(--space-2) * -1);
+  margin-top: var(--space-2);
 }
 
-.ai-lock-notice {
+/*
+ * 잠긴 AI 문제 (FE-29): 한 줄 요약 + 진행 막대. 긴 설명은 펼쳐야 보인다.
+ * 줄 전체가 펼치기 버튼이다. 막대는 장식이고 숫자는 글자로 읽힌다.
+ */
+.ai-lock summary {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-height: var(--control-height-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  list-style: none;
+}
+
+.ai-lock summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-lock summary .mission-icon {
+  color: var(--text-tertiary);
+}
+
+.ai-lock-title {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-md);
+}
+
+.ai-lock-number {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-lock-bar {
+  height: 4px;
+  min-width: 4rem;
+  max-width: 12rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--fill-3);
+}
+
+.ai-lock-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-secondary);
+}
+
+/* 펼침 표시: 다른 접기 영역(튜터 근거)과 같은 꺾쇠 */
+.ai-lock summary::after {
+  width: 6px;
+  height: 6px;
+  margin: 0 var(--space-1) 0 auto;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  content: '';
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.ai-lock[open] summary::after {
+  transform: rotate(-135deg) translateY(-2px);
+}
+
+/* 좁은 폭에서는 막대를 다음 줄 전체로 내린다. 펼침 표시는 첫 줄 끝에 남는다. */
+@media (max-width: 480px) {
+  .ai-lock-bar {
+    max-width: none;
+    flex-basis: 100%;
+    order: 1;
+  }
+}
+
+.ai-lock summary:hover {
+  color: var(--text);
+}
+
+.ai-lock > p {
   margin-top: var(--space-2);
+  padding-left: calc(14px + var(--space-3));
   color: var(--text-secondary);
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
-}
-
-.ai-lock-notice .mission-icon {
-  margin-top: 3px;
-  color: var(--text-tertiary);
+  word-break: keep-all;
 }
 
 .ai-difficulty-selector {

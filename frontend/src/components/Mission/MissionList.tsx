@@ -923,15 +923,16 @@ const MissionList: React.FC<MissionListProps> = ({
         )}
         {isActiveScenario && activeScenario && (
           <div className="mission-card active ai-mission-card">
-            <span className="mission-active-label">
-              <span className="ui-live-dot" aria-hidden="true" />
-              진행 중 · AI 문제
-            </span>
-            <span className="mission-card-header">
-              <span className="mission-title">{activeScenario.title}</span>
-              <span className="ui-chip mission-level">{DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</span>
-            </span>
+            <span className="mission-index" aria-hidden="true">AI</span>
+            <span className="mission-title">{activeScenario.title}</span>
             <span className="mission-description">{activeScenario.student_brief}</span>
+            <span className="mission-info">
+              <span>AI 문제 · 난이도 {DIFFICULTY_LABELS[activeScenario.difficulty as Difficulty] ?? activeScenario.difficulty}</span>
+            </span>
+            <span className="mission-state mission-active-label">
+              <span className="ui-live-dot" aria-hidden="true" />
+              진행 중
+            </span>
           </div>
         )}
         {/*
@@ -1017,27 +1018,32 @@ const MissionList: React.FC<MissionListProps> = ({
       {/* AI 문제 더 풀기 섹션. 서버가 ai_scenario 를 광고하지 않으면 그리지 않는다 (FE-22) */}
       {canUseAiScenario && !activeMissionId && !isActiveScenario && (
         <section className="ai-scenario-section" aria-labelledby="ai-scenario-title">
-          <div className="ai-section-header">
-            <h3 id="ai-scenario-title">AI 문제 더 풀기</h3>
-            {!isAiUnlocked && isDemoMode() && (
-              <button
-                type="button"
-                className="ui-button plain small demo-unlock-btn"
-                onClick={unlockAiScenariosForDemo}
-              >
-                시연용 잠금 해제
-              </button>
-            )}
-          </div>
-
-          {/* 잠금 상태 표시 */}
-          {unlockStatus && !isAiUnlocked && (
-            <div className="ai-lock-notice">
-              <LockIcon />
+          {unlockStatus && !isAiUnlocked ? (
+            /*
+             * 잠긴 동안은 한 줄 요약 + 진행 막대만 보이고 긴 설명은 접어 둔다 (FE-29).
+             * 펼친 설명이 1366×768 에서 미션 목록 자리를 절반 가까이 차지했다.
+             */
+            <details className="ai-lock">
+              <summary>
+                <LockIcon />
+                {/* 자물쇠는 장식이라 잠김은 글자로 읽힌다. 펼침 상태는 details 가 알린다. */}
+                <span className="sr-only">잠김 · </span>
+                <span className="ai-lock-title" id="ai-scenario-title">AI 문제 더 풀기</span>
+                <span className="ai-lock-count">
+                  기본 미션 <span className="ai-lock-number">{unlockStatus.completed_static}/{unlockStatus.total_static}</span> 완료
+                </span>
+                <span className="ai-lock-bar" aria-hidden="true">
+                  <i
+                    style={{
+                      width: `${unlockStatus.total_static ? Math.min(100, (unlockStatus.completed_static / unlockStatus.total_static) * 100) : 0}%`,
+                    }}
+                  />
+                </span>
+              </summary>
               <p>
                 AI 문제 모드는 계정 단위로 열립니다. Kubernetes · Docker · Linux 를 합친
                 서로 다른 기본 미션 {unlockStatus.total_static}개를 모두 완료하면 모든 환경에서
-                활성화됩니다 ({unlockStatus.completed_static}/{unlockStatus.total_static} 완료)
+                활성화됩니다.
                 {closedEnvironmentLabels.length > 0 && (
                   <>
                     {' '}
@@ -1046,7 +1052,21 @@ const MissionList: React.FC<MissionListProps> = ({
                   </>
                 )}
               </p>
+            </details>
+          ) : (
+            <div className="ai-section-header">
+              <h3 id="ai-scenario-title">AI 문제 더 풀기</h3>
             </div>
+          )}
+
+          {!isAiUnlocked && isDemoMode() && (
+            <button
+              type="button"
+              className="ui-button plain small demo-unlock-btn"
+              onClick={unlockAiScenariosForDemo}
+            >
+              시연용 잠금 해제
+            </button>
           )}
 
           {/* 잠금 해제 + AI 시나리오 없을 때: 난이도 선택 */}
