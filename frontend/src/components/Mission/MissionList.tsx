@@ -1026,6 +1026,8 @@ const MissionList: React.FC<MissionListProps> = ({
             <details className="ai-lock">
               <summary>
                 <LockIcon />
+                {/* 자물쇠는 장식이라 잠김은 글자로 읽힌다. 펼침 상태는 details 가 알린다. */}
+                <span className="sr-only">잠김 · </span>
                 <span className="ai-lock-title" id="ai-scenario-title">AI 문제 더 풀기</span>
                 <span className="ai-lock-count">
                   기본 미션 <span className="ai-lock-number">{unlockStatus.completed_static}/{unlockStatus.total_static}</span> 완료

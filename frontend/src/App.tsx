@@ -1034,7 +1034,12 @@ function App() {
                         type="button"
                         role="tab"
                         aria-selected={visibleTab === tab.id}
-                        aria-controls={AREA_IDS[tab.id]}
+                        aria-controls={
+                          /* 미션 전 가이드 탭은 학습 현황 요약도 함께 보여 준다 (FE-29). */
+                          !hasActiveAttempt && tab.id === 'terminal'
+                            ? `${AREA_IDS.observe} ${AREA_IDS.terminal}`
+                            : AREA_IDS[tab.id]
+                        }
                         tabIndex={visibleTab === tab.id ? 0 : -1}
                         className={visibleTab === tab.id ? 'active' : ''}
                         onClick={() => setActiveTab(tab.id)}

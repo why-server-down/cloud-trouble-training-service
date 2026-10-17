@@ -62,8 +62,8 @@ const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart })
           <span className="mission-lock-reason">이전 레벨을 완료하면 열립니다</span>
         </span>
       ) : (
-        <span className="mission-state mission-start-cue" aria-hidden="true">
-          시작 →
+        <span className="mission-state mission-start-cue">
+          시작<span aria-hidden="true"> →</span>
         </span>
       )}
     </button>
