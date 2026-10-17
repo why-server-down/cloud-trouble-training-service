@@ -21,7 +21,13 @@ interface MissionStatusProps {
   missionTitle?: string
   environmentLabel?: string
   onStatusChange: (status: MissionStatusResponse) => void
-  onMissionEnd: () => void
+  /**
+   * 시도가 끝났다. 서버가 끝난 상태(완료·시간 초과·포기)를 알려 주면 그 값을 넘긴다 —
+   * 디브리프가 결과와 점수를 그리는 근거다. 시도가 사라져 404 면 null 이다.
+   */
+  onMissionEnd: (status: MissionStatusResponse | null) => void
+  /** 완료 확인이 실패한 이유 (FE-27). 인시던트 바 안에 남긴다. */
+  feedback?: string | null
   onCheck: () => void
   onAbandon: () => void
   onHint: () => void
@@ -52,6 +58,11 @@ interface MissionStatusViewProps {
   abandonLabel: string
   /** 마지막 조회가 실패해 값이 낡았는가. */
   isStale?: boolean
+  /**
+   * 완료 확인이 아직 통과하지 못한 이유 (FE-27). 3.5초 토스트로 사라지면 무엇이 남았는지
+   * 다시 확인할 수 없어 바 안에 둔다. 다음 확인이나 미션 종료 때 지워진다.
+   */
+  feedback?: string | null
   onCheck: () => void
   onHint: () => void
   onAbandon: () => void
@@ -73,6 +84,7 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
   busy,
   abandonLabel,
   isStale = false,
+  feedback = null,
   onCheck,
   onHint,
   onAbandon,
@@ -126,6 +138,11 @@ export const MissionStatusView: React.FC<MissionStatusViewProps> = ({
           {pendingAction === 'abandon' ? ACTION_LABELS.abandon : abandonLabel}
         </button>
       </div>
+      {feedback && (
+        <p className="status-feedback" role="status" aria-live="polite">
+          <strong>아직 해결되지 않았습니다.</strong> {feedback}
+        </p>
+      )}
     </section>
   )
 }
@@ -139,6 +156,7 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
   environmentLabel,
   onStatusChange,
   onMissionEnd,
+  feedback,
   onCheck,
   onAbandon,
   onHint,
@@ -170,14 +188,14 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
 
       // 완료·실패·포기에서 즉시 멈춘다. 끝난 미션을 계속 물을 이유가 없다.
       if (data.attempt.status !== 'in_progress') {
-        onMissionEndRef.current()
+        onMissionEndRef.current(data)
         return 'stop' as const
       }
       return 'continue' as const
     } catch (error) {
       // 404 는 활성 attempt 가 사라진 것이다. 오류가 아니라 종료 신호다.
       if (error instanceof ApiError && error.status === 404) {
-        onMissionEndRef.current()
+        onMissionEndRef.current(null)
         return 'stop' as const
       }
 
@@ -240,6 +258,7 @@ const MissionStatus: React.FC<MissionStatusProps> = ({
       busy={pendingAction !== null}
       abandonLabel="미션 포기"
       isStale={isStale}
+      feedback={feedback}
       onCheck={onCheck}
       onHint={onHint}
       onAbandon={onAbandon}

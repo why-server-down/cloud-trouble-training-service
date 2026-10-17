@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import ConfirmModal from '../Feedback/ConfirmModal'
 import Toast, { ToastMessage } from '../Feedback/Toast'
@@ -12,6 +12,7 @@ import {
   getScenarioStatus,
   getUnlockStatus,
   listMissions,
+  MissionAttemptResponse,
   MissionResponse,
   MissionStatusResponse,
   requestHint,
@@ -36,7 +37,10 @@ import {
   EnvironmentId,
 } from '../../types/training'
 import MissionCard from './MissionCard'
-import { getMissionCopy } from './missionCopy'
+import { getMissionCause, getMissionCopy } from './missionCopy'
+import StartSheet from './StartSheet'
+import DebriefSheet, { Debrief, DebriefOutcome } from './DebriefSheet'
+import { TERMINAL_COMMAND_EVENT } from '../../utils/terminal'
 import MissionStatus, { MissionAction, MissionStatusView } from './MissionStatus'
 import { CheckIcon, LockIcon } from './Icons'
 import TutorChat from './TutorChat'
@@ -59,6 +63,9 @@ interface MissionListProps {
    */
   incidentSlot?: HTMLElement | null
   tutorSlot?: HTMLElement | null
+  /** 첫 미션이면 시작 시트에 작업 화면 안내를 넣는다 (FE-27, 타이머가 도는 투어 대신). */
+  showFirstRunGuide?: boolean
+  onFirstRunGuideSeen?: () => void
   /** 서버 status 로 만든 활성 시도 요약. 없으면 null. App 이 이걸로 환경 탭을 잠근다. */
   onActiveAttemptChange: (summary: ActiveAttemptSummary | null) => void
   /**
@@ -80,6 +87,19 @@ interface Confirmation {
 
 type Difficulty = 'beginner' | 'intermediate' | 'advanced' | 'expert'
 
+/** 시작 시트가 열린 이유 (FE-27). */
+type StartRequest = { kind: 'mission'; missionId: string } | { kind: 'scenario' }
+
+/** 서버 시작·종료 시각으로 잰 걸린 시간. 모르면 null. */
+const attemptDuration = (attempt: Pick<MissionAttemptResponse, 'start_time' | 'end_time'>) => {
+  if (!attempt.end_time) return null
+  const seconds = Math.round((Date.parse(attempt.end_time) - Date.parse(attempt.start_time)) / 1000)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
+}
+
+const outcomeOf = (status: string): DebriefOutcome =>
+  status === 'completed' ? 'completed' : status === 'abandoned' ? 'abandoned' : 'failed'
+
 const DIFFICULTY_LABELS: Record<Difficulty, string> = {
   beginner: '입문',
   intermediate: '중급',
@@ -98,6 +118,8 @@ const MissionList: React.FC<MissionListProps> = ({
   capabilities,
   incidentSlot,
   tutorSlot,
+  showFirstRunGuide = false,
+  onFirstRunGuideSeen,
   onActiveAttemptChange,
   onAttemptCompleted,
 }) => {
@@ -136,11 +158,43 @@ const MissionList: React.FC<MissionListProps> = ({
   /** 진행 중인 시도의 id. 튜터 대화를 시도 단위로 보존하는 key 로 쓴다 (FE-25). */
   const [activeAttemptId, setActiveAttemptId] = useState<string | null>(null)
 
+  const activeMission = missions.find((mission) => mission.id === activeMissionId) ?? null
+
+  /** 시작 시트 (FE-27). 열린 동안 시작 요청의 진행과 실패를 시트가 직접 말한다. */
+  const [startRequest, setStartRequest] = useState<StartRequest | null>(null)
+  const [isStarting, setIsStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  /** 미션이 끝난 뒤의 결과 시트와, "다시 도전"이 다시 열 시작 요청. */
+  const [debrief, setDebrief] = useState<{ data: Debrief; again: StartRequest } | null>(null)
+  /** 완료 확인이 통과하지 못한 이유. 토스트 대신 인시던트 바 안에 남긴다. */
+  const [checkFeedback, setCheckFeedback] = useState<string | null>(null)
+  /** 이번 시도에서 터미널에 보낸 명령. 디브리프에만 쓰므로 렌더를 일으키지 않게 ref 로 둔다. */
+  const commandLogRef = useRef<string[]>([])
+  const loggedAttemptRef = useRef<string | null>(null)
+
   /** App 에 활성 시도를 알리면서 id 도 기억한다. 모든 보고가 이 한 곳을 지난다. */
   const reportActiveAttempt = useCallback((summary: ActiveAttemptSummary | null) => {
     setActiveAttemptId(summary?.attemptId ?? null)
     onActiveAttemptChange(summary)
   }, [onActiveAttemptChange])
+
+  // 새 시도가 시작되면 명령 기록을 비운다. 끝날 때는 비우지 않는다 — 디브리프가 읽어야 한다.
+  useEffect(() => {
+    if (activeAttemptId && activeAttemptId !== loggedAttemptRef.current) {
+      loggedAttemptRef.current = activeAttemptId
+      commandLogRef.current = []
+    }
+    if (!activeAttemptId) setCheckFeedback(null)
+  }, [activeAttemptId])
+
+  useEffect(() => {
+    const handleCommand = (event: Event) => {
+      const command = (event as CustomEvent<unknown>).detail
+      if (typeof command === 'string' && loggedAttemptRef.current) commandLogRef.current.push(command)
+    }
+    window.addEventListener(TERMINAL_COMMAND_EVENT, handleCommand)
+    return () => window.removeEventListener(TERMINAL_COMMAND_EVENT, handleCommand)
+  }, [])
 
   const showToast = useCallback(
     (kind: ToastMessage['kind'], text: string) => setToast({ kind, text, id: Date.now() }),
@@ -294,6 +348,10 @@ const MissionList: React.FC<MissionListProps> = ({
       setScenarioHintsUsed(status.hints_used)
 
       if (status.status !== 'in_progress') {
+        setDebrief({
+          data: debriefForScenario(outcomeOf(status.status), status, null),
+          again: { kind: 'scenario' },
+        })
         forgetActiveAttempt()
         setActiveScenario(null)
         setScenarioHintsUsed(0)
@@ -345,33 +403,74 @@ const MissionList: React.FC<MissionListProps> = ({
   // ── 정적 미션 핸들러 ──────────────────────────────────────
 
   const handleStartMission = (missionId: string) => {
-    setConfirmation({
-      title: '미션 시작',
-      message: '선택한 미션을 시작하시겠습니까?',
-      confirmLabel: '시작',
-      action: async () => {
-        try {
-          const attempt = await startMission(token, missionId)
-          rememberActiveAttempt('static_mission')
-          setActiveMissionId(missionId)
-          setHintsUsed(0)
-          reportActiveAttempt({
-            attemptId: attempt.id,
-            attemptType: 'static_mission',
-            environment: attempt.environment,
-            status: attempt.status,
-          })
-          setStatusRefreshKey((k) => k + 1)
-          await fetchMissions()
-          showToast('success', '미션을 시작했습니다. 터미널에서 문제를 해결해 보세요.')
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : '미션 시작에 실패했습니다.'
-          setError(msg)
-          showToast('error', msg)
-        }
-      },
-    })
+    setStartError(null)
+    setStartRequest({ kind: 'mission', missionId })
   }
+
+  /**
+   * 시작 시트의 확정 (FE-27). 성공할 때까지 시트를 닫지 않고, 실패하면 이유를 시트 안에
+   * 남긴다 — 장애 주입은 몇 초 걸릴 수 있고 그동안 무슨 일이 일어나는지 보여야 한다.
+   */
+  const confirmStart = async () => {
+    if (!startRequest || isStarting) return
+    setIsStarting(true)
+    setStartError(null)
+    try {
+      if (startRequest.kind === 'mission') {
+        const attempt = await startMission(token, startRequest.missionId)
+        rememberActiveAttempt('static_mission')
+        setActiveMissionId(startRequest.missionId)
+        setActiveMissionEnvironment(attempt.environment)
+        setHintsUsed(0)
+        reportActiveAttempt({
+          attemptId: attempt.id,
+          attemptType: 'static_mission',
+          environment: attempt.environment,
+          status: attempt.status,
+        })
+        setStatusRefreshKey((k) => k + 1)
+      } else {
+        await startRandomScenario(token, selectedDifficulty, environment, demoAiUnlocked)
+        rememberActiveAttempt('ai_scenario')
+        // ScenarioResponse 에는 attempt id 가 없다. 요약은 서버 status 로 만든다.
+        const started = await getScenarioStatus(token)
+        setActiveScenario(started)
+        setScenarioHintsUsed(started.hints_used)
+        reportActiveAttempt({
+          attemptId: started.attempt_id,
+          attemptType: 'ai_scenario',
+          environment: started.environment,
+          status: started.status,
+        })
+      }
+      if (showFirstRunGuide) onFirstRunGuideSeen?.()
+      setStartRequest(null)
+      await fetchMissions()
+    } catch (err) {
+      setStartError(
+        err instanceof Error
+          ? err.message
+          : startRequest.kind === 'mission'
+            ? '미션 시작에 실패했습니다.'
+            : 'AI 시나리오 시작에 실패했습니다.',
+      )
+    } finally {
+      setIsStarting(false)
+    }
+  }
+
+  /** 정적 미션이 끝났을 때의 결과. 점수·시간은 서버 attempt 값만 쓴다. */
+  const debriefForMission = (attempt: MissionAttemptResponse, mission: MissionResponse | null): Debrief => ({
+    outcome: outcomeOf(attempt.status),
+    missionTitle: mission ? getMissionCopy(mission).name : '미션',
+    environmentLabel: getEnvironmentMeta(attempt.environment).label,
+    finalScore: attempt.final_score,
+    baseScore: mission?.base_score ?? null,
+    durationSeconds: attemptDuration(attempt),
+    hintsUsed: attempt.hints_used,
+    cause: mission ? getMissionCause(mission.chaos_type) : null,
+    commands: [...commandLogRef.current],
+  })
 
   const handleCheckMission = async () => {
     if (loading) return
@@ -385,15 +484,16 @@ const MissionList: React.FC<MissionListProps> = ({
     setPendingAction('check')
     setError(null)
     try {
+      setCheckFeedback(null)
       const result = await checkMission(token)
       measureSince(PERF.MISSION_CHECK_API)
-      showToast(
-        result.attempt.status === 'completed' ? 'success' : 'info',
-        result.attempt.status === 'completed'
-          ? `미션을 완료했습니다. 최종 점수: ${result.attempt.final_score}점`
-          : '아직 해결되지 않았습니다. 리소스 상태를 다시 확인해 주세요.',
-      )
-      if (result.attempt.status === 'completed') {
+      if (result.attempt.status !== 'completed') {
+        setCheckFeedback(result.message || '리소스 상태를 다시 확인해 주세요.')
+      } else {
+        setDebrief({
+          data: debriefForMission(result.attempt, activeMission),
+          again: { kind: 'mission', missionId: activeMissionId as string },
+        })
         forgetActiveAttempt()
         setActiveMissionId(null)
         setActiveMissionEnvironment(null)
@@ -425,13 +525,16 @@ const MissionList: React.FC<MissionListProps> = ({
       kind: 'abandon',
       action: async () => {
         try {
-          await abandonMission(token)
+          const attempt = await abandonMission(token)
+          setDebrief({
+            data: debriefForMission(attempt, activeMission),
+            again: { kind: 'mission', missionId: activeMissionId as string },
+          })
           forgetActiveAttempt()
           setActiveMissionId(null)
           setHintsUsed(0)
           reportActiveAttempt(null)
           await fetchMissions()
-          showToast('info', '미션을 포기했습니다.')
         } catch (err) {
           const msg = err instanceof Error ? err.message : '미션 포기에 실패했습니다.'
           setError(msg)
@@ -466,45 +569,44 @@ const MissionList: React.FC<MissionListProps> = ({
     (status: MissionStatusResponse) => setHintsUsed(status.attempt.hints_used),
     [],
   )
-  const handleMissionEnd = useCallback(() => {
+  /**
+   * 폴링이 시도의 끝을 알렸다 (FE-27). 예전에는 시간 초과가 아무 말 없이 끝났다.
+   * 서버가 끝난 상태를 알려 준 경우에만 결과 시트를 띄운다 — 404 로 시도가 사라졌으면
+   * 무엇으로 끝났는지 모르므로 지어내지 않는다.
+   */
+  const handleMissionEnd = useCallback((status: MissionStatusResponse | null) => {
+    if (status && activeMissionId) {
+      setDebrief({
+        data: debriefForMission(status.attempt, activeMission),
+        again: { kind: 'mission', missionId: activeMissionId },
+      })
+    }
     forgetActiveAttempt()
     setActiveMissionId(null)
     setHintsUsed(0)
     reportActiveAttempt(null)
     void fetchMissions()
-  }, [fetchMissions, forgetActiveAttempt, reportActiveAttempt])
+  }, [activeMission, activeMissionId, fetchMissions, forgetActiveAttempt, reportActiveAttempt])
 
   // ── AI 시나리오 핸들러 ─────────────────────────────────────
 
   const handleStartScenario = () => {
-    setConfirmation({
-      title: 'AI 시나리오 시작',
-      message: `${DIFFICULTY_LABELS[selectedDifficulty]} 난이도로 AI 장애를 생성하시겠습니까?`,
-      confirmLabel: '시작',
-      action: async () => {
-        try {
-          const scenario = await startRandomScenario(token, selectedDifficulty, environment, demoAiUnlocked)
-          rememberActiveAttempt('ai_scenario')
-          // ScenarioResponse 에는 attempt id 가 없다. 요약은 서버 status 로 만든다.
-          const started = await getScenarioStatus(token)
-          setActiveScenario(started)
-          setScenarioHintsUsed(started.hints_used)
-          reportActiveAttempt({
-            attemptId: started.attempt_id,
-            attemptType: 'ai_scenario',
-            environment: started.environment,
-            status: started.status,
-          })
-          await fetchMissions()
-          showToast('success', `"${scenario.title}" 시나리오가 시작됐습니다. 터미널에서 문제를 해결해 보세요.`)
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'AI 시나리오 시작에 실패했습니다.'
-          setError(msg)
-          showToast('error', msg)
-        }
-      },
-    })
+    setStartError(null)
+    setStartRequest({ kind: 'scenario' })
   }
+
+  /** AI 시나리오가 끝났을 때의 결과. status 응답에는 시작·종료 시각이 없어 마지막 경과 시간을 쓴다. */
+  const debriefForScenario = (outcome: DebriefOutcome, scenario: ScenarioStatusResponse, finalScore: number | null): Debrief => ({
+    outcome,
+    missionTitle: scenario.title,
+    environmentLabel: getEnvironmentMeta(scenario.environment).label,
+    finalScore,
+    baseScore: null,
+    durationSeconds: scenario.elapsed_seconds,
+    hintsUsed: scenario.hints_used,
+    cause: null,
+    commands: [...commandLogRef.current],
+  })
 
   const handleCheckScenario = async () => {
     if (loading) return
@@ -512,13 +614,13 @@ const MissionList: React.FC<MissionListProps> = ({
     setPendingAction('check')
     setError(null)
     try {
+      setCheckFeedback(null)
       const result = await checkScenario(token)
-      showToast(
-        result.resolved ? 'success' : 'info',
-        result.resolved
-          ? `시나리오를 완료했습니다! 최종 점수: ${result.score}점`
-          : '아직 정상화 조건을 만족하지 못했습니다. 상태를 다시 확인해 주세요.',
-      )
+      if (!result.resolved) {
+        setCheckFeedback(result.message || '정상화 조건을 아직 만족하지 못했습니다. 상태를 다시 확인해 주세요.')
+      } else if (activeScenario) {
+        setDebrief({ data: debriefForScenario('completed', activeScenario, result.score), again: { kind: 'scenario' } })
+      }
       if (result.resolved) {
         // 상태를 비우기 전에 attemptId 를 잡아둔다 — 완료 이벤트 중복 판정에 쓰인다.
         const completedAttemptId = activeScenario?.attempt_id ?? null
@@ -549,12 +651,14 @@ const MissionList: React.FC<MissionListProps> = ({
       action: async () => {
         try {
           await abandonScenario(token)
+          if (activeScenario) {
+            setDebrief({ data: debriefForScenario('abandoned', activeScenario, null), again: { kind: 'scenario' } })
+          }
           forgetActiveAttempt()
           setActiveScenario(null)
           setScenarioHintsUsed(0)
           reportActiveAttempt(null)
           await fetchMissions()
-          showToast('info', 'AI 시나리오를 포기했습니다.')
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'AI 시나리오 포기에 실패했습니다.'
           setError(msg)
@@ -585,7 +689,6 @@ const MissionList: React.FC<MissionListProps> = ({
   }
 
   const isActiveScenario = activeScenario?.status === 'in_progress'
-  const activeMission = missions.find((mission) => mission.id === activeMissionId) ?? null
   const displayedMissions = activeMissionId
     ? missions.filter((mission) => mission.id === activeMissionId)
     : isActiveScenario
@@ -649,7 +752,8 @@ const MissionList: React.FC<MissionListProps> = ({
   return (
     <div className={`mission-panel${activeMissionId || isActiveScenario ? ' mission-active' : ''}`}>
       <div className="mission-header">
-        <h2>미션 목록</h2>
+        {/* 결과 시트가 닫힐 때 완료 확인 버튼은 사라지고 없다. focus 는 여기로 돌아온다. */}
+        <h2 id="mission-list-heading" tabIndex={-1}>미션 목록</h2>
       </div>
 
       {/* 정적 미션 목록 */}
@@ -722,6 +826,7 @@ const MissionList: React.FC<MissionListProps> = ({
               hintPenalty={activeMission?.hint_penalty}
               missionTitle={activeMission ? getMissionCopy(activeMission).name : undefined}
               environmentLabel={getEnvironmentMeta(activeMissionEnvironment ?? environment).label}
+              feedback={checkFeedback}
               onStatusChange={handleStatusChange}
               onMissionEnd={handleMissionEnd}
               onCheck={handleCheckMission}
@@ -747,6 +852,7 @@ const MissionList: React.FC<MissionListProps> = ({
               pendingAction={pendingAction}
               busy={loading}
               abandonLabel="포기"
+              feedback={checkFeedback}
               onCheck={handleCheckScenario}
               onHint={handleUseScenarioHint}
               onAbandon={handleAbandonScenario}
@@ -822,6 +928,54 @@ const MissionList: React.FC<MissionListProps> = ({
         </section>
       )}
 
+      {startRequest && (() => {
+        const mission = startRequest.kind === 'mission'
+          ? missions.find((item) => item.id === startRequest.missionId) ?? null
+          : null
+        const copy = mission ? getMissionCopy(mission) : null
+        return (
+          <StartSheet
+            kind={startRequest.kind}
+            title={copy?.name ?? 'AI 장애 생성'}
+            description={
+              copy?.description
+              ?? '선택한 난이도에 맞춰 AI가 새 장애 상황을 만듭니다. 어떤 장애인지는 시작한 뒤 브리핑에서 확인할 수 있습니다.'
+            }
+            environmentLabel={getEnvironmentMeta(mission?.environment ?? environment).label}
+            tierLabel={mission ? `레벨 ${mission.level}` : `난이도 ${DIFFICULTY_LABELS[selectedDifficulty]}`}
+            timeLimitSeconds={mission?.time_limit}
+            baseScore={mission?.base_score}
+            hintPenalty={mission?.hint_penalty}
+            showFirstRunGuide={showFirstRunGuide}
+            busy={isStarting}
+            error={startError}
+            onConfirm={() => void confirmStart()}
+            onCancel={() => setStartRequest(null)}
+          />
+        )
+      })()}
+      {debrief && (
+        <DebriefSheet
+          debrief={debrief.data}
+          primaryLabel={
+            debrief.data.outcome === 'completed'
+              ? debrief.again.kind === 'scenario' ? 'AI 문제 하나 더' : '다음 미션 고르기'
+              : '다시 도전'
+          }
+          onPrimary={() => {
+            const again = debrief.again
+            const completedStatic = debrief.data.outcome === 'completed' && again.kind === 'mission'
+            setDebrief(null)
+            // 완료한 정적 미션은 다음 미션을 고르게 목록으로 돌려보낸다. 나머지는 같은 시작 시트를 다시 연다.
+            if (!completedStatic) {
+              setStartError(null)
+              setStartRequest(again)
+            }
+          }}
+          onClose={() => setDebrief(null)}
+          returnFocus={() => document.getElementById('mission-list-heading')}
+        />
+      )}
       {confirmation && (
         <ConfirmModal
           title={confirmation.title}
