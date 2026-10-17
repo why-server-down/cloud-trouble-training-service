@@ -5,7 +5,12 @@ import ConfirmModal from '../Feedback/ConfirmModal'
 import { useTerminalWebSocket } from '../../hooks/useTerminalWebSocket'
 import { getEnvironmentTerminal } from '../../config/environments'
 import { EnvironmentId } from '../../types/training'
-import { getOfflineCommandNotice, getTerminalPrompt, TERMINAL_INSERT_EVENT } from '../../utils/terminal'
+import {
+  getOfflineCommandNotice,
+  getTerminalPrompt,
+  TERMINAL_COMMAND_EVENT,
+  TERMINAL_INSERT_EVENT,
+} from '../../utils/terminal'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
@@ -185,6 +190,8 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
         historyIndexRef.current = commandHistoryRef.current.length
         if (isConnectedRef.current && sessionId && token) {
           sendCommand(command)
+          // 결과 시트의 "내가 실행한 명령"용. 연결이 없어 보내지 못한 명령은 알리지 않는다.
+          window.dispatchEvent(new CustomEvent<string>(TERMINAL_COMMAND_EVENT, { detail: command }))
         } else {
           terminal.writeln(getOfflineCommandNotice(environment, command))
           terminal.write(getPrompt())

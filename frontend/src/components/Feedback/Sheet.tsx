@@ -11,6 +11,11 @@ interface SheetProps {
   className?: string
   /** 처음 focus 를 받을 요소. 없으면 시트 자체가 받는다. */
   initialFocusRef?: React.RefObject<HTMLElement>
+  /**
+   * 연 요소가 사라졌을 때 focus 를 줄 곳 (FE-27). 예: 완료 확인 버튼은 미션이 끝나면
+   * 인시던트 바와 함께 사라진다. 없으면 focus 가 문서 처음으로 떨어진다.
+   */
+  returnFocus?: () => HTMLElement | null
   onClose: () => void
   children: React.ReactNode
 }
@@ -55,6 +60,7 @@ const Sheet: React.FC<SheetProps> = ({
   variant = 'center',
   className = '',
   initialFocusRef,
+  returnFocus,
   onClose,
   children,
 }) => {
@@ -77,8 +83,14 @@ const Sheet: React.FC<SheetProps> = ({
       if (index >= 0) openSheets.splice(index, 1)
       syncBackgroundInert()
 
+      /*
+       * 연 요소로 돌려준다. 그 버튼이 시트와 같은 순간 사라졌으면 opener 가 body 로 잡힌다
+       * (완료 확인 → 인시던트 바가 사라짐). 그때는 정해 둔 자리로 보낸다.
+       */
       const opener = openerRef.current
-      if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
+      const canReturn = opener instanceof HTMLElement && opener !== document.body && opener.isConnected
+      if (canReturn) opener.focus()
+      if (!canReturn || document.activeElement !== opener) returnFocus?.()?.focus()
     }
     // 처음 열릴 때 한 번만 정한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -20,6 +20,8 @@ vi.mock('../../services/api', async (importOriginal) => {
     getScenarioStatus: vi.fn(),
     getUnlockStatus: vi.fn(),
     abandonMission: vi.fn(),
+    startMission: vi.fn(),
+    checkMission: vi.fn(),
   }
 })
 
@@ -324,7 +326,10 @@ describe('미션 카드 접근성 (FE-24)', () => {
     const card = await screen.findByRole('button', { name: /사라진 애플리케이션/ })
     expect(card.getAttribute('aria-disabled')).toBeNull()
     fireEvent.click(card)
-    expect(await screen.findByText('선택한 미션을 시작하시겠습니까?')).toBeTruthy()
+    // 시작 시트는 누르기 전에 걸린 것(시간·점수 규칙·장애 주입)을 보여준다 (FE-27).
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    expect(sheet.textContent).toContain('장애가 주입되고 타이머가 바로 시작됩니다')
+    expect(screen.getByRole('button', { name: '장애 주입하고 시작' })).toBeTruthy()
   })
 
   it('AI 난이도는 한국어 라벨의 단일 선택이고 확인 문구에도 같은 라벨을 쓴다', async () => {
@@ -340,7 +345,8 @@ describe('미션 카드 접근성 (FE-24)', () => {
     expect((screen.getByRole('radio', { name: '입문' }) as HTMLInputElement).checked).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: 'AI 장애 생성 시작' }))
-    expect(await screen.findByText('고급 난이도로 AI 장애를 생성하시겠습니까?')).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'AI 장애 생성' })).toBeTruthy()
+    expect(screen.getByText('난이도 고급')).toBeTruthy()
   })
 })
 
@@ -413,4 +419,113 @@ describe('capabilities 기반 기능 게이팅 (FE-22)', () => {
     // 활성 미션이 있으면 AI 섹션은 원래 나오지 않는다 — 튜터만 본다.
     expect((await screen.findAllByText('AI 튜터')).length).toBeGreaterThan(0)
   })
+})
+
+describe('미션 생명주기 (FE-27)', () => {
+  const activeStatus = (overrides: Partial<MissionAttemptResponse> = {}) => ({
+    attempt: { ...attempt, ...overrides },
+    elapsed_seconds: 60,
+    remaining_seconds: 1140,
+    current_score: 98,
+  })
+
+  it('시작 시트에서 확정하면 미션을 시작하고 시트를 닫는다', async () => {
+    mocked.startMission.mockResolvedValue(attempt)
+    const { onActiveAttemptChange } = renderList()
+
+    fireEvent.click(await screen.findByRole('button', { name: /사라진 애플리케이션/ }))
+    // 점수 규칙은 누르기 전에 보인다.
+    expect(await screen.findByText('20분')).toBeTruthy()
+    expect(screen.getByText('−5점')).toBeTruthy()
+
+    mocked.getMissionStatus.mockResolvedValue(activeStatus())
+    fireEvent.click(screen.getByRole('button', { name: '장애 주입하고 시작' }))
+
+    await waitFor(() => expect(mocked.startMission).toHaveBeenCalledWith('test-token', 'mission-1'))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '사라진 애플리케이션' })).toBeNull())
+    expect(onActiveAttemptChange).toHaveBeenCalledWith(expect.objectContaining({ attemptId: 'attempt-1' }))
+  })
+
+  it('시작이 실패하면 시트를 닫지 않고 이유를 시트 안에 보여준다', async () => {
+    mocked.startMission.mockRejectedValue(new Error('이미 진행 중인 미션이 있습니다'))
+    renderList()
+
+    fireEvent.click(await screen.findByRole('button', { name: /사라진 애플리케이션/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '장애 주입하고 시작' }))
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    expect(await screen.findByText('이미 진행 중인 미션이 있습니다')).toBeTruthy()
+    expect(sheet).toBeTruthy()
+  })
+
+  it('완료 확인이 통과하지 못하면 이유를 인시던트 바 안에 남긴다', async () => {
+    mocked.getMissionStatus.mockResolvedValue(activeStatus())
+    mocked.checkMission.mockResolvedValue({ attempt, message: 'Pod가 아직 Running 상태가 아닙니다' })
+    renderList()
+
+    fireEvent.click(await screen.findByRole('button', { name: '완료 확인' }))
+
+    expect(await screen.findByText('아직 해결되지 않았습니다.')).toBeTruthy()
+    expect(screen.getByText(/Pod가 아직 Running 상태가 아닙니다/)).toBeTruthy()
+  })
+
+  it('완료하면 서버 점수·걸린 시간·원인을 결과 시트로 보여준다', async () => {
+    mocked.getMissionStatus.mockResolvedValue(activeStatus())
+    mocked.checkMission.mockResolvedValue({
+      attempt: {
+        ...attempt,
+        status: 'completed',
+        end_time: '2026-08-28T00:04:12Z',
+        final_score: 91,
+      },
+      message: '미션 완료! 점수: 91점',
+    })
+    renderList()
+
+    fireEvent.click(await screen.findByRole('button', { name: '완료 확인' }))
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' })
+    expect(sheet.textContent).toContain('복구 완료')
+    expect(sheet.textContent).toContain('91')
+    expect(sheet.textContent).toContain('4분 12초')
+    expect(sheet.textContent).toContain('무엇이 문제였나')
+  })
+
+  it('서버가 시간 초과를 404 로 정리해도 남은 시간이 거의 0 이었으면 시간 초과 결과를 보여준다', async () => {
+    // 실제 백엔드는 만료된 시도를 실패로 바꾼 뒤 "진행 중인 미션 없음" 404 를 돌려준다.
+    mocked.getMissionStatus
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockResolvedValueOnce({ ...activeStatus(), remaining_seconds: 3 })
+      .mockImplementation(notFound)
+    renderList()
+
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    expect(sheet.textContent).toContain('시간 초과')
+    // 서버가 확정한 점수를 받지 못했으므로 점수는 비워 둔다.
+    expect(sheet.textContent).toContain('최종 점수—')
+  }, 10000)
+
+  it('시간이 많이 남았는데 시도가 사라지면 결과를 지어내지 않는다', async () => {
+    mocked.getMissionStatus
+      .mockResolvedValueOnce(activeStatus())
+      .mockResolvedValueOnce(activeStatus())
+      .mockImplementation(notFound)
+    renderList()
+
+    await screen.findByRole('button', { name: '완료 확인' })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '완료 확인' })).toBeNull(), { timeout: 8000 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  }, 10000)
+
+  it('시간이 다 되면 아무 말 없이 끝내지 않고 시간 초과 결과를 보여준다', async () => {
+    mocked.getMissionStatus
+      .mockResolvedValueOnce(activeStatus())
+      .mockResolvedValue(activeStatus({ status: 'failed', end_time: '2026-08-28T00:20:00Z', final_score: 20 }))
+    renderList()
+
+    // 첫 응답으로 진행 중 시도가 복원되고, 이어진 상태 폴링이 끝난 시도를 받는다.
+    const sheet = await screen.findByRole('dialog', { name: '사라진 애플리케이션' }, { timeout: 8000 })
+    expect(sheet.textContent).toContain('시간 초과')
+    expect(sheet.textContent).toContain('20분 0초')
+  }, 10000)
 })
