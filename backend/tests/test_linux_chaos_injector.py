@@ -32,10 +32,12 @@ USER_RECOVERY = {
 
 
 class _FakeSandboxService:
-    def __init__(self, output=""):
+    def __init__(self, output="", done_ready=True):
         self.calls = []
         self.output = output
         self.fail_on = None
+        # supervisor 가 .done 을 남겼는지. False 면 적용이 끝나지 않은 상태를 흉내낸다.
+        self.done_ready = done_ready
 
     async def ensure(self, *, user_id, namespace, environment):
         # 주입은 샌드박스를 먼저 준비한다(처음 미션을 하는 계정은 아직 없다).
@@ -52,6 +54,9 @@ class _FakeSandboxService:
         self.calls.append(argv)
         if self.fail_on and argv[: len(self.fail_on)] == self.fail_on:
             raise RuntimeError("boom")
+        # supervisor 가 신호를 처리해 .done 을 남긴 것을 흉내낸다(주입 후 적용 대기).
+        if argv[:2] == ["sh", "-c"] and "test -f" in argv[-1] and ".done" in argv[-1]:
+            return "yes" if self.done_ready else "no"
         return self.output
 
 
@@ -213,3 +218,22 @@ class TestSupervisorScript:
     def test_workloads_have_a_duration(self):
         """모든 워크로드에 종료 시점이 있어야 한다."""
         assert "86400" in self._script()
+
+
+class TestInjectWaitsForFaultToApply:
+    """supervisor 가 .done 을 남기기 전에는 success 를 돌려주지 않는다.
+
+    기다리지 않으면 주입 직후 아직 장애가 없는 상태에서 검증이 통과한다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_inject_fails_if_supervisor_never_applies(self):
+        fake = _FakeSandboxService(done_ready=False)
+        injector = LinuxChaosInjector(sandbox_service=fake)
+        injector.APPLY_TIMEOUT_SECONDS = 0.2
+        injector.APPLY_POLL_SECONDS = 0.01
+
+        result = await injector.inject(PROCESS_FLOOD, NS)
+
+        assert not result.success
+        assert ".done" in _flat(fake.calls)  # 적용 대기를 실제로 폴링했다

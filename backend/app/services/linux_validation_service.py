@@ -99,16 +99,20 @@ class LinuxValidationService(BaseValidationService):
         return f"[{name[0]}]{name[1:]}"
 
     def _count_workload(self, namespace: str, name: str) -> int:
-        """이름이 붙은 워크로드 수. 명령줄을 직접 센다."""
+        """이름이 붙은 워크로드 수. 명령줄을 직접 센다.
+
+        파싱 실패 시 -1 을 돌려준다. 0 으로 처리하면 "프로세스 없음 = 해결" 로 읽혀
+        조회가 깨진 순간 고치지도 않았는데 완료 처리된다. 호출부는 <0 을 재시도로 본다.
+        """
         pattern = self._self_excluding_pattern(name)
         output = self._run(
             namespace,
             ["sh", "-c", f"ps -eo args | grep -c '{pattern}' || true"],
         )
         try:
-            return int(output or 0)
+            return int((output or "").strip())
         except ValueError:
-            return 0
+            return -1
 
     # --- 검증 ------------------------------------------------------------
 
@@ -127,13 +131,14 @@ class LinuxValidationService(BaseValidationService):
 
     def _check_cpu_saturation(self, namespace: str) -> ValidationResult:
         remaining = self._count_workload(namespace, "afterfail-cpuburn")
-        if remaining > 0:
+        # <0 은 조회 실패. 해결로 보지 않고 재시도한다.
+        if remaining < 0 or remaining > 0:
             return self._retry()
         return self._resolved({"cpuburn_processes": remaining})
 
     def _check_process_flood(self, namespace: str) -> ValidationResult:
         remaining = self._count_workload(namespace, "afterfail-worker")
-        if remaining > _PROCESS_RECOVERY_MAX:
+        if remaining < 0 or remaining > _PROCESS_RECOVERY_MAX:
             return self._retry()
         return self._resolved({"worker_processes": remaining})
 
