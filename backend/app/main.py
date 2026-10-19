@@ -39,6 +39,9 @@ if sys.platform == 'win32':
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 기본값·약한 SECRET_KEY 로 production 기동하는 것을 막는다(JWT 위조 방지).
+    settings.assert_secrets_ready()
+
     # 스키마 관리는 Alembic 이 담당한다(`alembic upgrade head`).
     # AUTO_CREATE_SCHEMA 는 로컬 개발/테스트에서 빈 DB 를 바로 쓰기 위한 편의 장치이며,
     # 배포 환경에서는 꺼두고 마이그레이션을 배포 단계에서 실행한다.
@@ -109,7 +112,12 @@ app.add_middleware(
 async def record_http_metrics(request, call_next):
     started_at = time.perf_counter()
     response = await call_next(request)
-    path = request.url.path
+    # 실제 경로(request.url.path)가 아니라 매칭된 라우트 템플릿을 label 로 쓴다.
+    # 실제 경로를 쓰면 /api/attempts/{uuid} 의 uuid 마다 시계열이 새로 생겨
+    # 인증 없는 404 폭주로 메모리가 소진되고, 공개 /metrics 에 다른 사용자의
+    # attempt·session id 가 그대로 노출된다.
+    route = request.scope.get("route")
+    path = getattr(route, "path", None) or "unmatched"
     HTTP_REQUESTS.labels(request.method, path, response.status_code).inc()
     HTTP_DURATION.labels(request.method, path).observe(time.perf_counter() - started_at)
     return response

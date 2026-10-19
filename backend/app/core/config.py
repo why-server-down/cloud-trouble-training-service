@@ -104,9 +104,32 @@ class Settings(BaseSettings):
     # chat 은 LLM 호출 비용과 직결된다. 사용자당 분당 허용 횟수.
     CHAT_RATE_LIMIT_PER_MINUTE: int = 12
 
+    # 배포 단계 표시. production 에서는 기동 시 비밀값이 안전한지 검사한다.
+    ENV: str = "development"  # "development" | "production"
+
+    _DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    def assert_secrets_ready(self) -> None:
+        """production 기동 시 기본값·약한 SECRET_KEY 를 거절한다.
+
+        공개 저장소에 있는 기본 키로 기동하면 누구나 임의 사용자 JWT 를 위조할 수
+        있다. 개발 환경(ENV=development)에서는 편의를 위해 통과시킨다.
+        """
+        if self.ENV != "production":
+            if self.SECRET_KEY == self._DEFAULT_SECRET_KEY:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "SECRET_KEY 가 기본값입니다. 배포 전에 반드시 교체하세요."
+                )
+            return
+        if self.SECRET_KEY == self._DEFAULT_SECRET_KEY or len(self.SECRET_KEY) < 32:
+            raise RuntimeError(
+                "production 기동 거부: SECRET_KEY 를 32자 이상의 고유한 값으로 설정하세요."
+            )
 
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"

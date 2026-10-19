@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core import environments
+from app.core.config import settings
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -43,7 +44,9 @@ async def start_random_scenario(
             current_user,
             body.difficulty,
             environment=body.environment,
-            allow_demo_unlock=body.demo_unlock,
+            # 클라이언트가 보낸 demo_unlock 만으로 잠금을 풀 수 없게 한다. 서버 설정이
+            # 켜져 있을 때만 시연용 해제를 허용한다(그 경우 어차피 전부 unlocked 다).
+            allow_demo_unlock=body.demo_unlock and settings.DEMO_UNLOCK_AI_SCENARIOS,
             randomize=body.randomize,
         )
     except ValueError as e:
@@ -152,6 +155,10 @@ async def debug_resolve(
     db: AsyncSession = Depends(get_db),
 ):
     """Mock 전용: AI 시나리오 수동 해결 트리거."""
+    # 고정 미션의 /debug/resolve 와 같은 가드. mock 백엔드가 아니면 운영에서
+    # 장애를 고치지 않고 완료 처리할 수 있으므로 404 로 숨긴다.
+    if settings.VALIDATION_BACKEND != "mock":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     service = get_scenario_service()
     try:
         return await service.debug_resolve(db, current_user.id)
