@@ -27,7 +27,12 @@ _PROVIDER_TOKEN = re.compile(
 )
 _LITERAL_FLAG = re.compile(r"(?i)(--from-literal=\S+?=)\S+")
 _ENV_ASSIGNMENT = re.compile(r"(?m)\b[A-Z][A-Z0-9_]{2,}\s*=\s*[^\s]+")
-_LONG_BASE64 = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b")
+# base64 blob 백스톱. `/` 를 넣으면 JSON patch 경로
+# (/spec/template/spec/containers/0/readinessProbe)를 한 토큰으로 보고 통째로
+# 가려 3단계 복구 명령이 깨진다. `/` 를 빼면 경로는 짧은 조각으로 나뉘어 걸리지 않고,
+# JWT·API 키 같은 실제 토큰(연속 영숫자)은 그대로 걸린다. `/` 를 쓰는 비밀값은
+# key=value·secret 필드 규칙이 따로 잡는다.
+_LONG_BASE64 = re.compile(r"\b[A-Za-z0-9+]{40,}={0,2}\b")
 _SENSITIVE_FIELDS = {
     "token", "secret", "password", "passwd", "pwd", "api_key", "apikey",
     "authorization", "credential", "private_key", "access_key", "client_secret",

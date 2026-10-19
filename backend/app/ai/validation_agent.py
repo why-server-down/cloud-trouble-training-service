@@ -8,6 +8,7 @@ ValidationAgent - RuntimeContext 기반 AI 시나리오 advisory 판정.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -130,24 +131,29 @@ class LLMValidationAgent:
         started = time.perf_counter()
         try:
             import openai
-            client_kwargs: dict = {"api_key": self._api_key}
+            client_kwargs: dict = {"api_key": self._api_key, "max_retries": 0}
             if self._base_url:
                 client_kwargs["base_url"] = self._base_url
             client = openai.OpenAI(**client_kwargs)
 
-            response = client.chat.completions.create(
-                model=self._model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": _VALIDATION_SYSTEM_PROMPT},
-                    {"role": "user", "content": self._build_prompt(
-                        scenario_context, runtime_context, environment
-                    )},
-                ],
-                max_tokens=300,
-                temperature=0.1,
-                timeout=15.0,
-            )
+            prompt = self._build_prompt(scenario_context, runtime_context, environment)
+
+            # 동기 호출을 스레드로 빼 이벤트 루프(터미널 WS·폴링·다른 사용자 요청)를
+            # 막지 않는다. SDK 자체 재시도도 꺼 블로킹이 배로 늘어나지 않게 한다.
+            def _call():
+                return client.chat.completions.create(
+                    model=self._model,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": _VALIDATION_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=300,
+                    temperature=0.1,
+                    timeout=15.0,
+                )
+
+            response = await asyncio.to_thread(_call)
 
             data = json.loads(response.choices[0].message.content)
             if not isinstance(data, dict) or not isinstance(data.get("resolved"), bool):
