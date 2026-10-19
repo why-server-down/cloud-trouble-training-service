@@ -26,6 +26,14 @@ async def chat_with_tutor(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """AI 튜터에게 질문 (소크라테스식 힌트).
+
+    정적 미션과 AI 시나리오 attempt 모두 지원.
+    - hint_level 0: 방향만 제시
+    - hint_level 1: 확인할 리소스 지목
+    - hint_level 2: 정확한 kubectl 명령어 제공
+    - hint_level 3: 전체 해결 방법 제공
+    """
     retry_after = _rate_limiter.check(str(current_user.id))
     if retry_after is not None:
         # 언제 다시 시도할 수 있는지 함께 알린다. 프론트가 화면에 표시할 수 있어야 한다.
@@ -34,14 +42,6 @@ async def chat_with_tutor(
             detail=f"요청이 너무 잦습니다. {retry_after}초 후 다시 시도해 주세요.",
             headers={"Retry-After": str(int(retry_after) + 1)},
         )
-    """
-    AI 튜터에게 질문 (소크라테스식 힌트).
-    정적 미션과 AI 시나리오 attempt 모두 지원.
-    - hint_level 0: 방향만 제시
-    - hint_level 1: 확인할 리소스 지목
-    - hint_level 2: 정확한 kubectl 명령어 제공
-    - hint_level 3: 전체 해결 방법 제공
-    """
     mission_service = get_mission_service()
     attempt = await mission_service.get_active_attempt(db, current_user.id)
 
@@ -61,10 +61,13 @@ async def chat_with_tutor(
         mission_name, mission_level, chaos_type = await _get_mission_info(db, attempt)
 
     scenario_id = attempt.scenario_id if attempt.attempt_type == "ai_scenario" else None
+    # 힌트 단계는 서버가 강제한다. 프론트가 /hint 로 올린 attempt.hints_used 를 넘는
+    # 단계를 요청해도(DevTools 로 hint_level=3) 감점 없이 정답을 받지 못하게 한다.
+    hint_level = min(body.hint_level, attempt.hints_used)
     tutor_result = await tutor.get_hint(
         user_question=body.message,
         attempt_id=attempt.id,
-        hint_level=body.hint_level,
+        hint_level=hint_level,
         mission_name=mission_name,
         mission_level=mission_level,
         chaos_type=chaos_type,
@@ -77,13 +80,13 @@ async def chat_with_tutor(
     if isinstance(tutor_result, str):
         tutor_result = TutorResult(
             message=tutor_result,
-            hint_level=body.hint_level,
+            hint_level=hint_level,
             environment=attempt.environment,
         )
 
     return ChatResponse(
         response=tutor_result.message,
-        hint_level=body.hint_level,
+        hint_level=hint_level,
         # 튜터가 실제로 어느 환경을 보고 답했는지 그대로 전달한다.
         environment=tutor_result.environment,
         mission_name=mission_name,

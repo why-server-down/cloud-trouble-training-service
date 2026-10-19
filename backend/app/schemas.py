@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.environments import DEFAULT_ENVIRONMENT, EnvironmentId
 
@@ -133,8 +133,10 @@ class MissionCompleteResponse(BaseModel):
 
 # AI Chat
 class ChatRequest(BaseModel):
-    message: str
-    hint_level: int = 0  # 0~3 (소크라테스식 힌트 레벨)
+    # 프롬프트에는 2000자만 들어가지만 저장은 원문 전체였다. 입력 단계에서 막는다.
+    message: str = Field(min_length=1, max_length=2000)
+    # 서버는 attempt.hints_used 로 한 번 더 제한한다(아래 chat 라우터).
+    hint_level: int = Field(default=0, ge=0, le=3)  # 0~3 (소크라테스식 힌트 레벨)
 
 
 class ChatResponse(BaseModel):
