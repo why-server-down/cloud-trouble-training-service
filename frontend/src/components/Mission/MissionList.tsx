@@ -271,9 +271,12 @@ const MissionList: React.FC<MissionListProps> = ({
         : ['static_mission', 'ai_scenario']
 
       let summary: ActiveAttemptSummary | null = null
+      // 404 가 아닌 오류(502·네트워크 등)로 상태 조회가 실패하면, 활성 attempt 를
+      // 지우지 않고 그대로 둔다. 다음 폴링에서 복구된다.
+      let probeFailed = false
 
       for (const kind of probeOrder) {
-        if (summary) break
+        if (summary || probeFailed) break
 
         if (kind === 'static_mission') {
           try {
@@ -289,8 +292,9 @@ const MissionList: React.FC<MissionListProps> = ({
               setActiveMissionEnvironment(missionStatus.attempt.environment)
               setHintsUsed(missionStatus.attempt.hints_used)
             }
-          } catch {
-            // 활성 정적 미션이 없으면 404 다. 다음 종류를 확인한다.
+          } catch (err) {
+            // 활성 정적 미션이 없으면 404 다. 그 외 오류는 활성 상태를 지키려고 중단한다.
+            if (!(err instanceof ApiError && err.status === 404)) probeFailed = true
           }
         } else {
           try {
@@ -305,10 +309,17 @@ const MissionList: React.FC<MissionListProps> = ({
               setActiveScenario(scenarioStatus)
               setScenarioHintsUsed(scenarioStatus.hints_used)
             }
-          } catch {
-            // 활성 AI 시나리오가 없으면 404 다.
+          } catch (err) {
+            // 활성 AI 시나리오가 없으면 404 다. 그 외 오류는 활성 상태를 지키려고 중단한다.
+            if (!(err instanceof ApiError && err.status === 404)) probeFailed = true
           }
         }
+      }
+
+      if (probeFailed) {
+        // 일시적 오류에는 활성 attempt·화면 상태를 건드리지 않고 다음 폴링을 기다린다.
+        setError('상태를 확인하지 못했습니다. 잠시 후 다시 시도합니다.')
+        return
       }
 
       if (summary?.attemptType !== 'static_mission') {
