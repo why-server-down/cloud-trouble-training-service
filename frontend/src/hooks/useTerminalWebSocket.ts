@@ -27,6 +27,16 @@ export type TerminalConnectionStatus = 'connecting' | 'connected' | 'disconnecte
 const MAX_RECONNECT_ATTEMPTS = 3
 const RECONNECT_DELAY_MS = 2000
 
+// 서버가 의도적으로 닫는 close code. 재연결 대상이 아니다.
+// 4000 다른 탭이 세션 인수 · 4003 소유자 불일치 · 4004 세션 없음 · 4010 환경 불가
+const NO_RETRY_CLOSE_CODES = new Set([4000, 4003, 4004, 4010])
+
+const closeCodeMessage = (code: number): string => {
+  if (code === 4000) return '다른 탭에서 터미널에 연결되어 이 연결이 종료되었습니다. 이 탭을 새로고침하면 다시 연결됩니다.'
+  if (code === 4010) return '이 환경의 터미널을 사용할 수 없습니다.'
+  return '터미널 세션을 찾을 수 없습니다. 세션을 다시 열어 주세요.'
+}
+
 const getDefaultWsBaseUrl = () => `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 const normalizeWsBaseUrl = (configuredUrl?: string) => {
@@ -96,9 +106,13 @@ export const useTerminalWebSocket = ({ environment, sessionId, token, terminal, 
     ws.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data)
-        if (message.type === 'output' && message.data) {
-          terminal.write(message.data)
-          if (message.data.includes('Connected to namespace:')) {
+        if (message.type === 'output') {
+          // 출력이 없는 성공 명령(예: truncate)도 서버는 data:'' 로 보낸다.
+          // data 가 falsy 라고 건너뛰면 완료 콜백이 안 불려 터미널이 멈춘다.
+          if (message.data) {
+            terminal.write(message.data)
+          }
+          if (message.data && message.data.includes('Connected to namespace:')) {
             if (!initialMessageReceivedRef.current) {
               initialMessageReceivedRef.current = true
               terminal.write(getPrompt())
@@ -122,9 +136,17 @@ export const useTerminalWebSocket = ({ environment, sessionId, token, terminal, 
     ws.onclose = (event) => {
       setConnectionStatus('disconnected')
       if (intentionallyClosed) return
+      // 명령 실행 중 예기치 않게 끊겨도 실행 상태를 풀어 큐가 멈추지 않게 한다.
+      completeHandlerRef.current?.()
       if (event.code === 4001) {
         setError('인증이 만료되었습니다. 다시 로그인해 주세요.')
         window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+        return
+      }
+      // 서버가 의도적으로 닫은 코드는 재연결하지 않는다. 특히 4000(다른 탭이 세션을
+      // 가져감)에 재연결하면 두 탭이 서로를 끝없이 끊는 핑퐁이 된다.
+      if (NO_RETRY_CLOSE_CODES.has(event.code)) {
+        setError(closeCodeMessage(event.code))
         return
       }
       if (reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS) {

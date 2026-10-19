@@ -496,6 +496,9 @@ const Terminal: React.FC<TerminalProps> = ({ environment, sessionId, token, name
   const handleCancelCommand = () => {
     xtermRef.current?.write(`\r\n명령 실행을 취소했습니다.\r\n${getPrompt()}`)
     setConfirmCommand(null)
+    // 확인 요청 시점에 isExecutingRef 가 true 로 걸려 있다. 풀지 않으면 이후 명령이
+    // 큐에만 쌓이고 실행되지 않아 터미널이 멈춘다. 플래그를 풀고 큐를 이어서 처리한다.
+    onCommandCompleteRef.current?.()
   }
 
   return (
