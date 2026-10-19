@@ -37,7 +37,17 @@ class K8sSetupService:
             if e.status == 404:
                 self._core_api.create_namespace(
                     body=client.V1Namespace(
-                        metadata=client.V1ObjectMeta(name=namespace)
+                        metadata=client.V1ObjectMeta(
+                            name=namespace,
+                            # patch/set 으로 nginx 를 privileged·hostPath Pod 로 바꿔
+                            # 노드를 침해하는 경로를 막는다. baseline 은 일반 nginx·toolbox 는
+                            # 허용하고 privileged/hostPID/hostPath 만 거절한다.
+                            # (Docker DinD 는 sandbox_service 가 해당 네임스페이스만 완화한다)
+                            labels={
+                                "pod-security.kubernetes.io/enforce": "baseline",
+                                "pod-security.kubernetes.io/enforce-version": "latest",
+                            },
+                        )
                     )
                 )
                 logger.info(f"[K8s] 네임스페이스 생성: {namespace}")

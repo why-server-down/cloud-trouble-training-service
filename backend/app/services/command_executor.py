@@ -147,17 +147,31 @@ class SandboxCommandExecutor(BaseCommandExecutor):
         )
 
         chunks: list[str] = []
+        total = 0
+        # 수신 중에 누적 바이트를 제한한다. 끝에서만 자르면 `kubectl logs` 나
+        # CPU 를 쓰는 루프의 대량 출력이 제한시간 안에도 백엔드 메모리를 고갈시킨다.
+        # _truncate 가 어차피 한 번 더 자르므로 여유분만 둔다.
+        hard_limit = settings.COMMAND_OUTPUT_LIMIT_BYTES * 2
         deadline = time.monotonic() + seconds
+        capped = False
         try:
             while response.is_open():
                 if time.monotonic() > deadline:
                     raise TimeoutError
                 response.update(timeout=1)
                 if response.peek_stdout():
-                    chunks.append(response.read_stdout())
+                    chunk = response.read_stdout()
+                    chunks.append(chunk)
+                    total += len(chunk)
                 if response.peek_stderr():
-                    chunks.append(response.read_stderr())
-            exit_code = self._exit_code(response)
+                    chunk = response.read_stderr()
+                    chunks.append(chunk)
+                    total += len(chunk)
+                if total >= hard_limit:
+                    capped = True
+                    break
+            # 상한에 걸려 중단했으면 종료 코드를 읽을 수 없다. 비정상 종료로 본다.
+            exit_code = 1 if capped else self._exit_code(response)
         finally:
             response.close()
 
