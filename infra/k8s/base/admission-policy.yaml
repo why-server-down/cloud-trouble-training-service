@@ -23,13 +23,20 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources:
           - pods
-          - pods/exec
           - services
           - configmaps
           - serviceaccounts
           - persistentvolumeclaims
           - resourcequotas
           - limitranges
+      # exec 은 CONNECT 작업이라 CREATE/UPDATE/DELETE 규칙에 걸리지 않았다. 별도로 건다.
+      # exec 은 항상 사용자 네임스페이스(user-*)의 샌드박스 Pod 를 향하므로 아래
+      # 네임스페이스 검증을 그대로 통과하고, 그 밖의 네임스페이스 exec 은 거절된다.
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CONNECT", "CREATE"]
+        resources:
+          - pods/exec
       - apiGroups: ["apps"]
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE", "DELETE"]

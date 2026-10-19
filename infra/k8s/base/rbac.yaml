@@ -39,9 +39,11 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
   # 사용자 명령 실행 경로. 이 권한이 곧 샌드박스 exec 이다.
+  # kubernetes python 클라이언트의 connect_get_namespaced_pod_exec 는 GET 으로 연결하므로
+  # create 와 get 을 함께 준다(get 이 없으면 배포 환경에서 exec 이 403 으로 실패).
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["create", "get"]
 
   - apiGroups: ["apps"]
     resources: ["deployments"]

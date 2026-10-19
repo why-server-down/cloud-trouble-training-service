@@ -182,3 +182,20 @@ class TestEnvironmentActivation:
                 continue
             assert mission["chaos_type"] in supported
             assert mission["chaos_type"] in LinuxValidationService._CHECKS
+
+
+def test_count_workload_parse_failure_is_not_resolved():
+    """ps/grep 출력이 숫자가 아니면 0(=해결)이 아니라 -1(=재시도)로 본다."""
+    from app.services.linux_validation_service import LinuxValidationService
+
+    class _FakeSandboxes:
+        def reference_for(self, **kwargs):
+            class _Ref: ...
+            return _Ref()
+
+    svc = LinuxValidationService(sandbox_service=_FakeSandboxes())
+    svc._run = lambda namespace, argv: "garbage-not-a-number"
+    assert svc._count_workload("user-x", "afterfail-worker") == -1
+    # 조회 실패를 해결로 판정하지 않는다
+    assert svc._check_process_flood("user-x").is_resolved is False
+    assert svc._check_cpu_saturation("user-x").is_resolved is False

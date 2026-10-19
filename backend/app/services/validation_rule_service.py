@@ -152,6 +152,13 @@ class ValidationRuleService:
                     dep = apps_api.read_namespaced_deployment(name=name, namespace=namespace)
                     if check_type == "running":
                         desired = dep.spec.replicas or 1
+                        observed = dep.status.observed_generation or 0
+                        generation = dep.metadata.generation or 0
+                        # 컨트롤러가 최신 generation 을 반영하기 전의 낡은 status 로 통과하면,
+                        # 주입·patch 직후 아직 깨진 Pod 가 안 뜬 상태에서 완료 처리된다
+                        # (고정 미션 경로의 _rollout_complete 와 동일한 방어).
+                        if observed < generation:
+                            return False, 0.0
                         updated = dep.status.updated_replicas or 0
                         available = dep.status.available_replicas or 0
                         unavailable = dep.status.unavailable_replicas or 0

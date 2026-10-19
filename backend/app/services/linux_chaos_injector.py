@@ -22,6 +22,7 @@
 """
 import asyncio
 import logging
+import time
 import uuid
 
 from app.core import environments
@@ -53,6 +54,11 @@ class LinuxChaosInjector(BaseChaosInjector):
     # CPU 를 태우는 워커 수. 컨테이너 CPU 상한 안에서만 돌아 노드에 영향이 없다.
     CPU_BURN_WORKERS = 2
 
+    # supervisor 가 신호를 처리해 .done 을 남길 때까지 기다리는 상한.
+    # 기다리지 않으면 주입 직후 아직 장애가 없는 상태에서 검증이 통과한다.
+    APPLY_TIMEOUT_SECONDS = 15.0
+    APPLY_POLL_SECONDS = 0.5
+
     def __init__(self, sandbox_service=None):
         self._sandboxes = sandbox_service or get_sandbox_service()
 
@@ -78,6 +84,12 @@ class LinuxChaosInjector(BaseChaosInjector):
             await loop.run_in_executor(
                 None, lambda: self._raise_signal(sandbox, signal, chaos_type)
             )
+            # supervisor 가 .done 을 남길 때까지(= 장애가 실제로 적용될 때까지) 기다린다.
+            applied = await loop.run_in_executor(
+                None, lambda: self._wait_until_applied(sandbox, signal)
+            )
+            if not applied:
+                raise RuntimeError(f"{chaos_type} 신호를 supervisor 가 제때 처리하지 못했습니다")
         except Exception as exc:
             logger.exception("linux chaos inject failed", extra={"namespace": namespace})
             try:
@@ -177,6 +189,20 @@ class LinuxChaosInjector(BaseChaosInjector):
         self._run(sandbox, ["rm", "-f", f"{path}.done"])
         # printf 로 값을 쓴다. 사용자 입력이 섞이지 않는 고정 인자다.
         self._run(sandbox, ["sh", "-c", f"printf '%s' '{argument}' > '{path}'"])
+
+    def _wait_until_applied(self, sandbox: SandboxRef, signal: str) -> bool:
+        """supervisor 가 신호를 처리해 `{signal}.done` 을 남길 때까지 기다린다."""
+        done_path = f"{self._signal_path(signal)}.done"
+        deadline = time.monotonic() + self.APPLY_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            out = self._run(
+                sandbox,
+                ["sh", "-c", f"test -f '{done_path}' && echo yes || echo no"],
+            )
+            if out.strip() == "yes":
+                return True
+            time.sleep(self.APPLY_POLL_SECONDS)
+        return False
 
     def _clear_signal(self, sandbox: SandboxRef, signal: str) -> None:
         path = self._signal_path(signal)
