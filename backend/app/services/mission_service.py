@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -36,6 +37,9 @@ class MissionService:
         self._injector_for = injector_for
         self._validation_for = validation_for
         self._scoring = scoring_service
+        # 사용자별 시작 직렬화(더블클릭·탭 2개). 진 쪽 revert 가 이긴 쪽 장애를
+        # 지우는 것을 막는다. ponytail: per-process 락, 멀티워커면 DB advisory lock.
+        self._start_locks: dict[uuid.UUID, asyncio.Lock] = {}
 
     async def list_missions(
         self,
@@ -132,8 +136,10 @@ class MissionService:
             scenario.status = "failed"
             if scenario.chaos_id:
                 injector = self._injector_for(scenario.environment)
-                await injector.revert(scenario.chaos_id, namespace_for(attempt.user_id))
-                scenario.chaos_id = None
+                # revert 성공 시에만 비운다(실패 시 장애가 남아 reconciliation 이 재시도).
+                if await injector.revert(scenario.chaos_id, namespace_for(attempt.user_id)):
+                    scenario.chaos_id = None
+                    attempt.chaos_id = None
         else:
             await self._cleanup_chaos(attempt)
 
@@ -142,6 +148,13 @@ class MissionService:
         return True
 
     async def start_mission(
+        self, db: AsyncSession, user: User, mission_id: uuid.UUID
+    ) -> MissionAttempt:
+        lock = self._start_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:
+            return await self._start_mission_locked(db, user, mission_id)
+
+    async def _start_mission_locked(
         self, db: AsyncSession, user: User, mission_id: uuid.UUID
     ) -> MissionAttempt:
         # 이미 진행 중인 미션 체크
@@ -317,5 +330,7 @@ class MissionService:
         if not attempt.chaos_id:
             return
         injector = self._injector_for(attempt.environment)
-        await injector.revert(attempt.chaos_id, namespace_for(attempt.user_id))
-        attempt.chaos_id = None
+        # revert 성공 시에만 chaos_id 를 비운다. 실패했는데 비우면 장애가 영구히 남고
+        # reconciliation 도 재시도하지 못한다.
+        if await injector.revert(attempt.chaos_id, namespace_for(attempt.user_id)):
+            attempt.chaos_id = None

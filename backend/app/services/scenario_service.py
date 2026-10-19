@@ -2,11 +2,14 @@
 ScenarioService - AI 시나리오 생성/시작/완료 오케스트레이터.
 기존 MissionService와 분리: /api/scenarios/* 전용.
 """
+import asyncio
 import logging
 import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +53,10 @@ class ScenarioService:
         self._scoring = scoring_service
         self._vrs = validation_rule_service
         self._compiler = ChaosPlanCompiler()
+        # 사용자별 시작 직렬화. 동시 요청(더블클릭·탭 2개)이 모두 활성 검사를
+        # 통과한 뒤 같은 nginx 에 장애를 주입하고, 진 쪽의 revert 가 이긴 쪽 장애까지
+        # 지우는 것을 막는다. ponytail: per-process 락. 멀티워커면 DB advisory lock 필요.
+        self._start_locks: dict[uuid.UUID, asyncio.Lock] = {}
 
     async def check_unlock_status(self, db: AsyncSession, user_id: uuid.UUID) -> dict:
         """AI 모드 잠금 해제 상태 반환.
@@ -147,8 +154,15 @@ class ScenarioService:
             scenario.status = "failed"
             if scenario.chaos_id:
                 injector = self._injector_for(scenario.environment)
-                await injector.revert(scenario.chaos_id, f"user-{attempt.user_id}")
-                scenario.chaos_id = None
+                # revert 가 실패(False)했는데 chaos_id 를 지우면 장애가 영구히 남고
+                # reconciliation 도 추적하지 못한다. 성공했을 때만 비운다.
+                if await injector.revert(scenario.chaos_id, f"user-{attempt.user_id}"):
+                    scenario.chaos_id = None
+                    attempt.chaos_id = None
+        else:
+            # 고정 미션도 주입된 장애를 되돌린다(이전에는 ai_scenario 만 정리해,
+            # 시간 초과된 고정 미션의 장애가 다음 미션까지 남았다).
+            await self._cleanup_chaos(attempt)
 
         await db.commit()
         await db.refresh(attempt)
@@ -183,6 +197,21 @@ class ScenarioService:
         randomize: bool = True,
     ) -> dict:
         """난이도 선택 → AI 시나리오 생성 + 장애 주입 + attempt 생성 원스텝."""
+        lock = self._start_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:
+            return await self._start_random_locked(
+                db, user, difficulty, environment, allow_demo_unlock, randomize
+            )
+
+    async def _start_random_locked(
+        self,
+        db: AsyncSession,
+        user: User,
+        difficulty: str,
+        environment: str,
+        allow_demo_unlock: bool,
+        randomize: bool,
+    ) -> dict:
         await self._assert_unlocked(db, user.id, allow_demo_unlock=allow_demo_unlock)
 
         active = await self._get_active_attempt(db, user.id)
@@ -203,9 +232,10 @@ class ScenarioService:
             randomize=randomize,
         )
 
-        # AI 시나리오 생성
+        # AI 시나리오 생성. 동기 LLM 호출이라 스레드로 빼 이벤트 루프(터미널 WS·폴링)를
+        # 막지 않는다.
         agent = get_scenario_agent()
-        candidates = agent.generate(gen_input)
+        candidates = await asyncio.to_thread(agent.generate, gen_input)
         valid = [c for c in candidates if not c.rejected]
         if not valid:
             raise RuntimeError("시나리오 생성에 실패했습니다. 잠시 후 다시 시도해 주세요")
@@ -501,5 +531,7 @@ class ScenarioService:
         if not attempt.chaos_id:
             return
         injector = self._injector_for(attempt.environment)
-        await injector.revert(attempt.chaos_id, f"user-{attempt.user_id}")
-        attempt.chaos_id = None
+        # revert 성공 시에만 chaos_id 를 비운다. 실패했는데 비우면 장애가 영구히 남고
+        # reconciliation 도 재시도하지 못한다.
+        if await injector.revert(attempt.chaos_id, f"user-{attempt.user_id}"):
+            attempt.chaos_id = None

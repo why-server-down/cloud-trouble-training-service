@@ -48,7 +48,16 @@ class _FakeDB:
         self.commits = 0
 
     async def execute(self, statement):
-        rows = self.attempts
+        # 재조정은 두 번 조회한다: 진행 중 attempt, 그리고 이미 종료됐지만 chaos_id 가
+        # 남은 attempt. 실제 DB 는 WHERE 로 거르므로 fake 도 질의 의도대로 거른다.
+        rendered = str(statement)
+        if "IS NOT NULL" in rendered:
+            rows = [
+                a for a in self.attempts
+                if getattr(a, "status", None) != "in_progress" and getattr(a, "chaos_id", None)
+            ]
+        else:
+            rows = [a for a in self.attempts if getattr(a, "status", None) == "in_progress"]
 
         class _R:
             def scalars(self_inner):
@@ -178,7 +187,7 @@ class TestFailuresDoNotStopStartup:
     @pytest.mark.asyncio
     async def test_no_attempts_is_a_noop(self):
         summary = await reconcile_active_attempts(_FakeDB([]), injector_for=lambda e: None)
-        assert summary == {"checked": 0, "expired": 0, "cleaned": 0, "failed": 0}
+        assert summary == {"checked": 0, "expired": 0, "cleaned": 0, "failed": 0, "stuck": 0}
 
 
 class TestConcurrentStartIsRejectedGracefully:
@@ -186,17 +195,17 @@ class TestConcurrentStartIsRejectedGracefully:
     그 충돌은 서버 오류가 아니라 설명 가능한 사용자 상황이다."""
 
     def test_mission_start_converts_integrity_error(self):
-        source = inspect.getsource(mission_module.MissionService.start_mission)
+        source = inspect.getsource(mission_module.MissionService._start_mission_locked)
         assert "IntegrityError" in source
         assert "이미 진행 중인 미션이 있습니다" in source
 
     def test_scenario_start_converts_integrity_error(self):
-        source = inspect.getsource(scenario_module.ScenarioService.start_random)
+        source = inspect.getsource(scenario_module.ScenarioService._start_random_locked)
         assert "IntegrityError" in source
 
     def test_injected_chaos_is_reverted_on_conflict(self):
         """충돌로 기록이 실패했는데 장애가 남으면 고아가 된다."""
-        source = inspect.getsource(mission_module.MissionService.start_mission)
+        source = inspect.getsource(mission_module.MissionService._start_mission_locked)
         conflict_block = source.split("except IntegrityError:")[1]
         assert "revert" in conflict_block
 
@@ -215,3 +224,45 @@ class TestStartupWiring:
         source = inspect.getsource(main_module.lifespan)
         block = source.split("reconcile_active_attempts")[0]
         assert "try:" in block
+
+
+class TestStuckChaosIsRetried:
+    """revert 가 실패해 종료됐지만 chaos_id 가 남은 attempt 를 다음 재조정에서 되돌린다."""
+
+    @pytest.mark.asyncio
+    async def test_terminal_attempt_with_leftover_chaos_is_reverted(self):
+        stuck = _Attempt(started_seconds_ago=5000, time_limit=600)
+        stuck.status = "failed"  # 이미 종료됨
+        injector = _RecordingInjector()
+
+        summary = await reconcile_active_attempts(
+            _FakeDB([stuck]), injector_for=lambda env: injector
+        )
+
+        assert summary["stuck"] == 1
+        assert summary["cleaned"] == 1
+        assert stuck.chaos_id is None
+        assert injector.reverted  # 실제로 revert 를 시도했다
+
+    @pytest.mark.asyncio
+    async def test_terminal_attempt_without_chaos_is_ignored(self):
+        done = _Attempt(started_seconds_ago=5000, time_limit=600, chaos_id=None)
+        done.status = "completed"
+        injector = _RecordingInjector()
+
+        summary = await reconcile_active_attempts(
+            _FakeDB([done]), injector_for=lambda env: injector
+        )
+
+        assert summary["stuck"] == 0
+        assert injector.reverted == []
+
+
+def test_scenario_service_has_integrity_error_imported():
+    """start_random 의 except IntegrityError 가 NameError 로 깨지지 않도록 import 를 지킨다.
+
+    소스 문자열 검사만으로는 import 누락을 잡지 못한다(이 버그가 그렇게 빠져나갔다).
+    """
+    from sqlalchemy.exc import IntegrityError as _IE
+
+    assert scenario_module.IntegrityError is _IE
