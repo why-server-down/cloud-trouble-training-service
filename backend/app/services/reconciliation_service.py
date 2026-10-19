@@ -42,8 +42,6 @@ async def reconcile_active_attempts(db: AsyncSession, injector_for=None) -> dict
     attempts = list(result.scalars().all())
 
     summary = {"checked": len(attempts), "expired": 0, "cleaned": 0, "failed": 0}
-    if not attempts:
-        return summary
 
     now = datetime.now(timezone.utc)
     for attempt in attempts:
@@ -62,6 +60,26 @@ async def reconcile_active_attempts(db: AsyncSession, injector_for=None) -> dict
             summary["failed"] += 1
             logger.exception(
                 "attempt reconciliation failed", extra={"attempt_id": str(attempt.id)}
+            )
+
+    # 이미 종료됐지만 revert 가 실패해 chaos_id 가 남은 attempt 를 재시도한다.
+    # (이전에는 in_progress 만 봐서, 한 번 정리에 실패한 장애는 영구히 남았다)
+    stuck_result = await db.execute(
+        select(MissionAttempt).where(
+            MissionAttempt.status != "in_progress",
+            MissionAttempt.chaos_id.is_not(None),
+        )
+    )
+    stuck = list(stuck_result.scalars().all())
+    summary["stuck"] = len(stuck)
+    for attempt in stuck:
+        try:
+            if await _cleanup_chaos(attempt, injector_for):
+                summary["cleaned"] += 1
+        except Exception:
+            summary["failed"] += 1
+            logger.exception(
+                "stuck chaos cleanup failed", extra={"attempt_id": str(attempt.id)}
             )
 
     await db.commit()

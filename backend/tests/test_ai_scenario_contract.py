@@ -131,7 +131,7 @@ class TestValidationResultRecord:
 class TestEnvironmentMismatchIsRejected:
     def test_start_random_checks_generated_environment(self):
         """미구현 환경 요청을 다른 환경 시나리오로 대체하지 않는다."""
-        source = inspect.getsource(scenario_module.ScenarioService.start_random)
+        source = inspect.getsource(scenario_module.ScenarioService._start_random_locked)
         assert "generated_environment" in source
         assert "일치하지 않습니다" in source
 
