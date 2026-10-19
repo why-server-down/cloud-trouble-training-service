@@ -104,8 +104,13 @@ class WebSocketHandler:
 
         try:
             while True:
-                data = await websocket.receive_json()
-                if data.get("type") != "command":
+                try:
+                    data = await websocket.receive_json()
+                except ValueError:
+                    # 잘못된 JSON(배열·문자열·깨진 본문)으로 연결을 끊지 않는다.
+                    await self._send_error(websocket, "잘못된 메시지 형식입니다.")
+                    continue
+                if not isinstance(data, dict) or data.get("type") != "command":
                     continue
                 await self._handle_command(
                     websocket=websocket,
@@ -143,8 +148,13 @@ class WebSocketHandler:
             return
 
         async with lock:
-            argv = command.split()
-            if len(argv) >= 2 and argv[1] == "delete" and confirmed:
+            # 확인이 필요한 하위 명령(delete/rm/kill/truncate …)은 환경마다 위치가 달라서
+            # 정책에 물어본다. kubectl delete 만 분기하면 Linux rm·kill 이 확인 후에도
+            # 다시 확인 요청으로 돌아가 복구가 막힌다.
+            needs_confirm = (
+                self.command_validator.confirmation_target(command, session.environment) is not None
+            )
+            if confirmed and needs_confirm:
                 validation = self.command_validator.validate_delete(
                     command, session.namespace, confirmed=True, environment=session.environment
                 )

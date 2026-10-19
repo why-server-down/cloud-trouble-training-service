@@ -172,6 +172,7 @@ class SandboxService:
             _SANDBOX_LABEL: sandbox_id,
             _ENVIRONMENT_LABEL: environment,
         }
+        self._ensure_pod_security(namespace, environment)
         self._ensure_resource_quota(namespace)
         self._ensure_limit_range(namespace)
         self._ensure_default_deny_network_policy(namespace)
@@ -495,6 +496,27 @@ class SandboxService:
                     ),
                 ),
             )
+
+    def _ensure_pod_security(self, namespace: str, environment: EnvironmentId) -> None:
+        """네임스페이스 Pod Security 수준을 환경에 맞게 강제한다.
+
+        k8s/linux 는 baseline 으로 privileged·hostPath·hostPID Pod 를 막아,
+        사용자가 nginx 를 그런 Pod 로 patch 해 노드를 침해하는 것을 차단한다.
+        docker 는 privileged DinD 가 필요하므로 그 네임스페이스만 완화한다.
+        로그인 때 만든 기존 네임스페이스에도 적용되도록 매번 patch 한다.
+        """
+        level = "privileged" if environment == DOCKER else "baseline"
+        try:
+            self._core_api.patch_namespace(
+                namespace,
+                {"metadata": {"labels": {
+                    "pod-security.kubernetes.io/enforce": level,
+                    "pod-security.kubernetes.io/enforce-version": "latest",
+                }}},
+            )
+        except ApiException as exc:
+            if not self._is_not_found(exc):
+                raise
 
     def _ensure_default_deny_network_policy(self, namespace: str) -> None:
         name = "afterfail-default-deny-ingress"

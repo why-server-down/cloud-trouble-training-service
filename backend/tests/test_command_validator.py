@@ -24,13 +24,33 @@ class TestAllowedCommands:
         result = validator.validate_command("kubectl logs my-pod", NAMESPACE)
         assert result.is_valid
 
-    def test_apply(self, validator):
+    def test_apply_blocked(self, validator):
+        # apply 는 임의 매니페스트를 올릴 수 있어 허용 목록에서 뺐다.
         result = validator.validate_command("kubectl apply -f deployment.yaml", NAMESPACE)
-        assert result.is_valid
+        assert not result.is_valid
+        assert "not allowed" in result.error
 
-    def test_top(self, validator):
+    def test_top_blocked(self, validator):
+        # top 은 어떤 미션에도 쓰지 않고 metrics-server 에 의존한다.
         result = validator.validate_command("kubectl top pods", NAMESPACE)
-        assert result.is_valid
+        assert not result.is_valid
+
+    def test_run_overrides_blocked(self, validator):
+        # --overrides 로 특권 Pod 를 만들던 경로를 막는다.
+        result = validator.validate_command(
+            "kubectl run pwn --image=alpine --overrides={}", NAMESPACE
+        )
+        assert not result.is_valid
+
+    def test_server_flag_blocked(self, validator):
+        # 다른 apiserver 지정·신원 변경 전역 옵션은 거절한다.
+        for cmd in (
+            "kubectl get pods --server=https://evil",
+            "kubectl get pods --as=system:admin",
+            "kubectl get pods --kubeconfig=/tmp/x",
+        ):
+            result = validator.validate_command(cmd, NAMESPACE)
+            assert not result.is_valid, cmd
 
     def test_explain(self, validator):
         result = validator.validate_command("kubectl explain pod", NAMESPACE)

@@ -55,10 +55,22 @@ class KubectlPolicy(_PolicyBase):
     binary = "kubectl"
     EXAMPLE = "kubectl get pods"
 
-    FORBIDDEN_COMMANDS = [
-        "cluster-info", "cordon", "uncordon", "drain", "proxy",
-        "auth", "certificate", "alpha", "cp", "plugin", "attach"
-    ]
+    # 허용 목록 방식. 금지 목록은 kubectl 하위 명령이 늘어날 때마다 구멍이 생긴다.
+    # (`run`·`apply`·`replace`·`debug`·`expose` 로 --overrides 특권 Pod 를 만들 수 있었다)
+    # 미션 조사·복구에 실제로 필요한 명령만 연다.
+    READ_SUBCOMMANDS = ("get", "describe", "logs", "events", "explain", "version", "api-resources")
+    # 네임스페이스 안 리소스만 바꾼다(아래 _finalize 가 네임스페이스를 강제한다).
+    WRITE_SUBCOMMANDS = ("patch", "set", "rollout", "scale", "create", "delete")
+    ALLOWED_SUBCOMMANDS = READ_SUBCOMMANDS + WRITE_SUBCOMMANDS
+
+    # 다른 apiserver 를 가리키거나 신원을 바꾸는 전역 옵션. 어떤 하위 명령에서도 거절한다.
+    # (네임스페이스 강제는 -n 만 막아도 --server/--as 로 우회된다)
+    BLOCKED_GLOBAL_FLAGS = (
+        "-s", "--server", "--kubeconfig", "--token", "--as", "--as-group", "--as-uid",
+        "--username", "--password", "--client-certificate", "--client-key",
+        "--certificate-authority", "--insecure-skip-tls-verify", "--context",
+        "--cluster", "--user",
+    )
 
     # kubectl create 는 훈련 시나리오 복구에 실제로 필요한 리소스만 허용한다.
     # (secret_ref_missing 미션의 정답 경로에 Secret 생성이 포함된다)
@@ -69,8 +81,11 @@ class KubectlPolicy(_PolicyBase):
 
     def validate(self, argv: list[str], namespace: str, allowed_targets) -> ValidationResult:
         subcommand = argv[1]
-        if subcommand in self.FORBIDDEN_COMMANDS:
-            return _invalid(f"Command '{subcommand}' is restricted for safety reasons")
+        if subcommand not in self.ALLOWED_SUBCOMMANDS:
+            allowed = ", ".join(self.ALLOWED_SUBCOMMANDS)
+            return _invalid(
+                f"'kubectl {subcommand}' is not allowed. Available: {allowed}"
+            )
 
         if subcommand == "create":
             create_error = self._validate_create(argv)
@@ -78,6 +93,15 @@ class KubectlPolicy(_PolicyBase):
                 return create_error
 
         return self._finalize(argv, namespace)
+
+    def _check_global_flags(self, argv: list[str]) -> ValidationResult | None:
+        for token in argv[1:]:
+            base = token.split("=", 1)[0]
+            if base in self.BLOCKED_GLOBAL_FLAGS:
+                return _invalid(
+                    f"'{base}' is not allowed. You can only act on namespace via the sandbox."
+                )
+        return None
 
     def _validate_create(self, argv: list[str]) -> ValidationResult | None:
         resource = argv[2] if len(argv) > 2 else ""
@@ -112,6 +136,10 @@ class KubectlPolicy(_PolicyBase):
         return None
 
     def _finalize(self, argv: list[str], namespace: str) -> ValidationResult:
+        # delete 는 확인 경로로 바로 _finalize 에 오므로 전역 플래그 검사도 여기서 한다.
+        flag_error = self._check_global_flags(argv)
+        if flag_error is not None:
+            return flag_error
         if self._namespace_index(argv) is None:
             argv = [*argv[:2], "-n", namespace, *argv[2:]]
         if not self._verify_namespace(argv, namespace):
@@ -323,8 +351,17 @@ class LinuxPolicy(_PolicyBase):
         "ps", "free", "df", "du", "top", "uptime", "iostat",
         "ss", "netstat", "lsof", "pstree", "id", "whoami", "env",
     }
+    # 뒤에 명령을 붙여 임의 실행이 되는 조회 명령. 인자 없이 환경만 출력할 때만 허용한다.
+    # (`env sh -c id` 로 정책 전체를 우회할 수 있었다)
+    NO_ARG_COMMANDS = {"env"}
     # 파일을 읽는 명령. 경로 제한을 받는다.
     FILE_READ_COMMANDS = {"cat", "head", "tail", "wc", "ls", "stat", "find"}
+    # find 의 실행·삭제·쓰기 action. 경로 검사를 우회하므로 거절한다.
+    # (`find . -delete`, `find . -exec sh -c ... \;` 가 통과했다)
+    FIND_FORBIDDEN_ACTIONS = {
+        "-exec", "-execdir", "-ok", "-okdir", "-delete",
+        "-fprint", "-fprintf", "-fls",
+    }
     # 복구 명령. 확인 계약을 따르고 대상이 제한된다.
     RECOVERY_COMMANDS = {"kill", "pkill", "rm", "truncate"}
 
@@ -358,10 +395,19 @@ class LinuxPolicy(_PolicyBase):
     def validate(self, argv: list[str], namespace: str, allowed_targets) -> ValidationResult:
         command = argv[0]
 
+        if command in self.NO_ARG_COMMANDS and len(argv) > 1:
+            return _invalid(f"'{command}' cannot be given arguments")
+
         if command in self.READ_COMMANDS:
             return ValidationResult(is_valid=True, argv=argv)
 
         if command in self.FILE_READ_COMMANDS:
+            if command == "find":
+                forbidden = self.FIND_FORBIDDEN_ACTIONS.intersection(argv)
+                if forbidden:
+                    return _invalid(
+                        f"find action '{next(iter(forbidden))}' is not allowed"
+                    )
             return self._check_paths(argv, self.READABLE_PREFIXES, "read")
 
         if command in self.RECOVERY_COMMANDS:
@@ -497,6 +543,18 @@ class CommandValidator:
             )
 
         return policy.validate(argv, namespace, targets)
+
+    def confirmation_target(self, command: str, environment: EnvironmentId = DEFAULT_ENVIRONMENT) -> str | None:
+        """이 명령이 확인을 요구하는 하위 명령인지(delete/rm/kill 등) 돌려준다.
+
+        확인 경로 분기는 환경마다 다른 하위 명령 위치를 정책이 알고 있으므로,
+        핸들러가 `argv[1]=="delete"` 같은 kubectl 전제로 분기하지 않게 한다.
+        """
+        parsed = self._parse(command, environment)
+        if isinstance(parsed, ValidationResult):
+            return None
+        policy, argv = parsed
+        return policy.confirmation_target(argv)
 
     def validate_delete(
         self,

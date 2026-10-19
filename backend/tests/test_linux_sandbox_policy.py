@@ -330,3 +330,32 @@ class TestTerminalBanner:
         ).read_text()
         assert "usage_hint" in source
         assert "Type 'kubectl'" not in source
+
+
+class TestExecBypassClosed:
+    """조회 명령 뒤에 명령을 붙여 정책 전체를 우회하던 경로를 막는다."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "env sh -c id",
+            "env /bin/sh",
+            "env BAR=1 id",
+            "find . -delete",
+            "find /tmp/afterfail -exec sh -c id ;",
+            "find /proc -execdir rm {} ;",
+            "find . -fprint /tmp/x",
+        ],
+    )
+    def test_exec_bypass_rejected(self, validator, command):
+        result = _check(validator, command)
+        if result.requires_confirmation:
+            result = _confirmed(validator, command)
+        assert not result.is_valid, command
+
+    @pytest.mark.parametrize(
+        "command",
+        ["env", "find /proc -name status", "find /tmp/afterfail -type f"],
+    )
+    def test_benign_read_still_allowed(self, validator, command):
+        assert _check(validator, command).is_valid
