@@ -1608,7 +1608,7 @@ docker run -d -p 6333:6333 -p 6334:6334 \
 
 # 3. 환경 변수 설정 (.env)
 AI_BACKEND=gemini
-GEMINI_API_KEY=AIzaSyB8RN6K4NG4rdhkAu-7idUzIoOufkcgj0hGVHWepXjEYrY3QEA
+GEMINI_API_KEY=your-gemini-api-key-here
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 QDRANT_URL=http://localhost:6333
 KNOWLEDGE_BASE_DIR=./knowledge-base

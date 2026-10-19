@@ -35,10 +35,12 @@ jobs:
 
       - name: 담당 소유 경로 밖 변경 검사
         if: steps.override.outputs.on == 'false'
+        # 브랜치명을 셸에 직접 끼워 넣지 않는다(명령 주입 방지). env 로 넘긴다.
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          bash .github/scripts/check-path-ownership.sh \
-            "${{ github.head_ref }}" \
-            "${{ github.event.pull_request.base.sha }}"
+          bash .github/scripts/check-path-ownership.sh "$HEAD_REF" "$BASE_SHA"
 
   backend:
     name: 백엔드 테스트
@@ -121,3 +123,35 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         working-directory: frontend
         run: npm run lint
+
+      - name: 테스트(vitest)
+        if: steps.changed.outputs.run == 'true'
+        working-directory: frontend
+        run: npx vitest run
+
+  infra:
+    name: 인프라 설정 검사
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 인프라 변경 여부 확인
+        id: changed
+        run: |
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
+             | grep -qE '^(docker-compose\.yml|infra/|\.github/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "인프라 변경 없음 — 건너뛴다."
+          fi
+
+      - name: docker compose 설정 검증
+        if: steps.changed.outputs.run == 'true'
+        run: docker compose config -q
+
+      - name: kustomize 빌드 검증
+        if: steps.changed.outputs.run == 'true'
+        run: kubectl kustomize infra/k8s/base > /dev/null
