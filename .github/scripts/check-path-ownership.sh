@@ -59,8 +59,15 @@ echo "브랜치: $BRANCH  →  담당: $OWNER"
 is_allowed() {
   local f="$1"
 
-  # 문서(.md)는 담당과 무관하게 누구나 수정 가능 — 빌드를 깨뜨리지 않는다
-  [[ "$f" == *.md ]] && return 0
+  # 문서(.md)는 담당과 무관하게 누구나 수정 가능 — 빌드를 깨뜨리지 않는다.
+  # 단, 런타임에 읽는 LLM 프롬프트·RAG 지식베이스 문서는 동작을 바꾸므로 소유 규칙을
+  # 그대로 적용한다(아래 owner 분기로 떨어뜨린다).
+  if [[ "$f" == *.md ]]; then
+    case "$f" in
+      ai-data/prompts/*|ai-data/knowledge-base/*) ;;
+      *) return 0 ;;
+    esac
+  fi
 
   case "$OWNER" in
     be)
@@ -87,7 +94,9 @@ is_allowed() {
   return 1
 }
 
-CHANGED="$(git diff --name-only --diff-filter=d "$BASE_SHA" HEAD)"
+# 삭제(D)도 검사 대상이고, rename 은 원래 경로까지 봐야 한다. --diff-filter=d 는
+# 삭제를, rename 축약은 원래 경로를 빠뜨려 소유 경로 밖 삭제·이동이 통과했다.
+CHANGED="$(git diff --name-only --no-renames "$BASE_SHA" HEAD)"
 
 if [[ -z "$CHANGED" ]]; then
   echo "변경된 파일이 없다."
