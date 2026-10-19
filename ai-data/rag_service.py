@@ -62,6 +62,15 @@ def _keyword_overlap(query: str, title: str, content: str) -> float:
     return len(query_tokens & document_tokens) / len(query_tokens)
 
 
+# 백엔드 fault_type(docker_*) → 지식베이스 태그(container_*) 별칭.
+# 양쪽 이름이 어긋나 Docker 장애에서 전용 문서가 하나도 검색되지 않았다.
+_FAULT_TYPE_ALIASES: dict[str, str] = {
+    "docker_network_disconnect": "container_network_disconnect",
+    "docker_cpu_throttle": "container_cpu_throttle",
+    "docker_container_stopped": "container_stopped",
+}
+
+
 class _OfflineEmbeddings:
     """API key와 network 없이 사용하는 결정적 sparse embedding."""
 
@@ -620,10 +629,14 @@ class RAGService:
                 )
             ]
             if fault_type:
+                # 백엔드는 docker_* 로 부르고 지식베이스는 container_* 로 태그돼 있어
+                # 일치하는 문서가 하나도 안 걸리고 general 만 돌아왔다. 별칭을 맞춰 준다.
+                aliased = _FAULT_TYPE_ALIASES.get(fault_type, fault_type)
+                wanted = {fault_type, aliased, "general"}
                 conditions.append(
                     FieldCondition(
                         key="fault_types",
-                        match=MatchAny(any=[fault_type, "general"]),
+                        match=MatchAny(any=sorted(wanted)),
                     )
                 )
             if filter_source:

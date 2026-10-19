@@ -17,7 +17,9 @@ def test_prompt_has_explicit_context_sections_and_untrusted_boundaries():
     )
     for section in ("ENVIRONMENT: docker", "MISSION", "OBSERVATIONS", "RUNTIME LOGS", "RECENT COMMANDS", "RETRIEVED DOCUMENTS"):
         assert section in prompt
-    assert prompt.count("<untrusted-data>") == 5
+    # LEARNER HISTORY 는 이전 대화의 사용자 원문이라 신뢰 구역에서 비신뢰 구역으로 옮겼다.
+    # OBSERVATIONS, RUNTIME LOGS, RECENT COMMANDS, RETRIEVED DOCUMENTS, LEARNER HISTORY, USER QUESTION = 6
+    assert prompt.count("<untrusted-data>") == 6
 
 
 def test_docker_level_two_allows_diagnostics_but_not_kubectl_recovery():
