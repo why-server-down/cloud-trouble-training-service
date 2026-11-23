@@ -355,7 +355,7 @@ describe('세션 정리 경로 (FE-04)', () => {
     mocked.getEnvironments.mockResolvedValue([K8S])
     render(<App />)
     await screen.findByRole('tablist', { name: '환경 선택' })
-    fireEvent.click(screen.getByRole('tab', { name: '가이드' }))
+    fireEvent.click(await screen.findByRole('tab', { name: '가이드' }))
     await waitFor(() => expect(mocked.createTerminalSession).toHaveBeenCalledTimes(1))
   }
 
@@ -741,6 +741,7 @@ describe('미션 중 로그아웃 확인 (FE-28)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '로그아웃' }))
     const dialog = await screen.findByRole('dialog', { name: '진행 중인 미션이 있습니다' })
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(dialog.textContent).toContain('남은 시간은 계속 줄어듭니다')
     expect(mocked.logoutUser).not.toHaveBeenCalled()
 

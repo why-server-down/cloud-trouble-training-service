@@ -1095,7 +1095,7 @@ function App() {
         />
       )}
       <OnboardingTour
-        run={Boolean(activeTour)}
+        run={Boolean(activeTour) && !isLogoutConfirmOpen}
         steps={activeTour === 'mission' ? MISSION_TOUR_STEPS : INTRO_TOUR_STEPS}
         onClose={finishActiveTour}
         onStepChange={handleTourStepChange}
