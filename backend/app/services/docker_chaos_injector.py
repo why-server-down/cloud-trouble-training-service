@@ -66,6 +66,9 @@ class DockerChaosInjector(BaseChaosInjector):
 
         try:
             sandbox = await self._ensure_sandbox(namespace)
+            await loop.run_in_executor(
+                None, self._sandboxes.ensure_training_workload, sandbox
+            )
             snapshot = await loop.run_in_executor(
                 None, lambda: self._snapshot(sandbox)
             )
