@@ -34,6 +34,10 @@ class _FakeSandboxService:
         self.calls = []
         self.responses = responses or {}
         self.fail_on = None
+        self.prepared = []
+
+    def ensure_training_workload(self, sandbox):
+        self.prepared.append(sandbox)
 
     async def ensure(self, *, user_id, namespace, environment):
         # 주입은 샌드박스를 먼저 준비한다(처음 미션을 하는 계정은 아직 없다).
@@ -95,6 +99,7 @@ class TestInject:
         injector, service = _injector()
         result = await injector.inject(NETWORK_DISCONNECT, NS)
         assert result.success
+        assert service.prepared[0].namespace == NS
         assert ["docker", "network", "disconnect", NET, APP] in service.calls
 
     @pytest.mark.asyncio

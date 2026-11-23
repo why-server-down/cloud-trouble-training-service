@@ -127,7 +127,6 @@ async def sandbox(request, service):
 class TestDockerLoop:
     @pytest.mark.parametrize("sandbox", [environments.DOCKER], indirect=True)
     async def test_inject_recover_validate(self, service, sandbox):
-        service.ensure_training_workload(sandbox)
         injector = DockerChaosInjector(sandbox_service=service)
         validation = DockerValidationService(sandbox_service=service)
 
