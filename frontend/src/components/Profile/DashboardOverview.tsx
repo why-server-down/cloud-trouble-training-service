@@ -1,48 +1,56 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AchievementsResponse,
+  DashboardEnvironmentFilter,
   DashboardStatsResponse,
   getAchievements,
   getDashboardStats,
   getLeaderboard,
   getLearningCurve,
-  getProfile,
   LeaderboardEntry,
   LearningCurveEntry,
 } from '../../services/api'
+import { ENVIRONMENT_META, ENVIRONMENT_ORDER } from '../../config/environments'
+import {
+  DASHBOARD_POLL_HIDDEN_MS,
+  DASHBOARD_POLL_INTERVAL_MS,
+  MAX_BACKOFF_MS,
+} from '../../config/polling'
+import { usePolling } from '../../hooks/usePolling'
+import { markStart, measureSince, nextFrame, PERF } from '../../utils/perf'
+import {
+  achievementText,
+  average,
+  curvePolyline,
+  formatDuration,
+  radarPolygon,
+} from '../../utils/dashboard'
 
 interface DashboardOverviewProps {
   token: string
+  /**
+   * 처음 보여줄 환경 필터 (FE-13). 이후 선택은 이 컴포넌트가 소유한다 —
+   * 대시보드 필터는 훈련 환경 탭과 독립적으로 움직여야 환경 간 비교가 된다.
+   */
+  environment?: DashboardEnvironmentFilter
+  /**
+   * 단조 증가하는 갱신 키 (FE-15). 미션 완료 직후 App 이 1 올려 한 번 갱신시킨다.
+   * 프론트가 점수·MTTR 을 미리 더하지 않고 서버 값을 다시 읽는다.
+   */
+  refreshKey?: number
 }
 
-const skillLabels = [
-  ['Troubleshooting', 'troubleshooting'],
-  ['Resources', 'resource'],
-  ['Network', 'network'],
-  ['Operations', 'ops'],
+const SKILL_AXES = [
+  ['문제 해결', 'troubleshooting'],
+  ['리소스', 'resource'],
+  ['네트워크', 'network'],
+  ['운영', 'ops'],
 ] as const
 
-const emptyStats: DashboardStatsResponse = {
-  username: '',
-  total_score: 0,
-  missions_completed: 0,
-  total_time_spent: 0,
-  hints_used: 0,
-  current_tier: {
-    name: 'Bronze',
-    min_score: 0,
-    max_score: 200,
-    color: '#cd7f32',
-    progress: 0,
-    next_tier: 'Silver',
-  },
-  skill_scores: {
-    troubleshooting: 0,
-    resource: 0,
-    network: 0,
-    ops: 0,
-  },
-}
+const FILTERS: DashboardEnvironmentFilter[] = ['all', ...ENVIRONMENT_ORDER]
+
+const filterLabel = (filter: DashboardEnvironmentFilter) =>
+  filter === 'all' ? '전체' : ENVIRONMENT_META[filter].label
 
 const emptyAchievements: AchievementsResponse = {
   unlocked: 0,
@@ -51,155 +59,448 @@ const emptyAchievements: AchievementsResponse = {
   items: [],
 }
 
-const getFallbackStats = async (token: string): Promise<DashboardStatsResponse> => {
-  try {
-    const profile = await getProfile(token)
-    return {
-      ...emptyStats,
-      username: profile.username,
-      total_score: profile.total_score,
-      missions_completed: profile.missions_completed,
-    }
-  } catch {
-    return emptyStats
-  }
-}
-
-const formatDuration = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}m ${seconds % 60}s`
-}
-
-const point = (index: number, value: number, radius = 72) => {
-  const angle = -Math.PI / 2 + index * (Math.PI / 2)
-  const distance = radius * (value / 100)
-  return `${100 + Math.cos(angle) * distance},${100 + Math.sin(angle) * distance}`
-}
-
-const DashboardOverview: React.FC<DashboardOverviewProps> = ({ token }) => {
+const DashboardOverview: React.FC<DashboardOverviewProps> = ({
+  token,
+  environment = 'all',
+  refreshKey = 0,
+}) => {
+  const [filter, setFilter] = useState<DashboardEnvironmentFilter>(environment)
   const [stats, setStats] = useState<DashboardStatsResponse | null>(null)
+  const [statsFailed, setStatsFailed] = useState(false)
   const [curve, setCurve] = useState<LearningCurveEntry[]>([])
+  const [curveFailed, setCurveFailed] = useState(false)
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [achievements, setAchievements] = useState<AchievementsResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  /**
+   * 필터 전환 시 이전 요청을 끊기 위한 controller (FE-13).
+   * 중복 호출은 usePolling 이 인스턴스 단위 in-flight 가드로 막는다 (FE-16) —
+   * StrictMode 이중 마운트까지 여기서 걸린다.
+   */
+  const controllerRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    let active = true
-    const load = async () => {
-      const [statsResult, curveResult, leaderboardResult, achievementsResult] = await Promise.allSettled([
-        getDashboardStats(token),
-        getLearningCurve(token),
-        getLeaderboard(token),
-        getAchievements(token),
-      ])
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        const [statsResult, curveResult, leaderboardResult, achievementsResult] =
+          await Promise.allSettled([
+            getDashboardStats(token, filter, signal),
+            getLearningCurve(token, filter, signal),
+            getLeaderboard(token),
+            getAchievements(token),
+          ])
 
-      if (!active) return
+        if (signal.aborted) return
 
-      setStats(statsResult.status === 'fulfilled' ? statsResult.value : await getFallbackStats(token))
-      setCurve(curveResult.status === 'fulfilled' ? curveResult.value : [])
-      setLeaderboard(leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : [])
-      setAchievements(achievementsResult.status === 'fulfilled' ? achievementsResult.value : emptyAchievements)
+        // 실패한 지표는 값을 만들어 넣지 않고 실패로 남긴다 (FE-13).
+        if (statsResult.status === 'fulfilled') {
+          setStats(statsResult.value)
+          setStatsFailed(false)
+        } else {
+          setStats(null)
+          setStatsFailed(true)
+        }
 
-      const failedLabels = [
-        statsResult.status === 'rejected' ? 'stats' : null,
-        curveResult.status === 'rejected' ? 'learning curve' : null,
-        leaderboardResult.status === 'rejected' ? 'leaderboard' : null,
-        achievementsResult.status === 'rejected' ? 'achievements' : null,
-      ].filter(Boolean)
+        if (curveResult.status === 'fulfilled') {
+          setCurve(curveResult.value)
+          setCurveFailed(false)
+        } else {
+          setCurve([])
+          setCurveFailed(true)
+        }
 
-      if (failedLabels.length) {
-        setError(`Some dashboard data is temporarily unavailable: ${failedLabels.join(', ')}.`)
-      } else {
-        setError(null)
+        if (leaderboardResult.status === 'fulfilled') setLeaderboard(leaderboardResult.value)
+        if (achievementsResult.status === 'fulfilled') setAchievements(achievementsResult.value)
+        else setAchievements((current) => current ?? emptyAchievements)
+
+        const failed = [
+          statsResult.status === 'rejected' ? '통계' : null,
+          curveResult.status === 'rejected' ? '학습 곡선' : null,
+          leaderboardResult.status === 'rejected' ? '리더보드' : null,
+          achievementsResult.status === 'rejected' ? '업적' : null,
+        ].filter(Boolean)
+
+        setError(failed.length ? `일부 데이터를 불러오지 못했습니다: ${failed.join(', ')}` : null)
+      } finally {
+        if (!signal.aborted) setIsLoading(false)
       }
-    }
-    void load()
-    const interval = window.setInterval(load, 15000)
-    return () => {
-      active = false
-      window.clearInterval(interval)
-    }
-  }, [token])
+    },
+    [filter, token],
+  )
 
-  const radarPoints = useMemo(
-    () => stats ? skillLabels.map(([, key], index) => point(index, stats.skill_scores[key])).join(' ') : '',
+  /*
+   * 필터가 바뀌면 이전 요청을 취소한다 (FE-13).
+   * 취소하지 않으면 늦게 도착한 전체 응답이 Docker 화면을 덮는다.
+   */
+  useEffect(() => {
+    setIsLoading(true)
+    void nextFrame().then(() => measureSince(PERF.DASHBOARD_FILTER_LOADING))
+    const controller = new AbortController()
+    controllerRef.current = controller
+
+    return () => {
+      controller.abort()
+      if (controllerRef.current === controller) controllerRef.current = null
+    }
+  }, [filter, refreshKey, token])
+
+  const loadRef = useRef(load)
+  loadRef.current = load
+
+  /*
+   * usePolling 은 진행 중 요청을 인스턴스끼리 공유한다. 그 요청이 이미 취소된 controller
+   * (StrictMode 이중 마운트, 요청 도중 필터 전환)의 것이면 결과가 버려지고 다음 주기(15초)까지
+   * 로딩 화면에 머문다. 끝났을 때 signal 이 취소돼 있으면 현재 controller 로 다시 읽는다.
+   */
+  const poll = useCallback(async () => {
+    for (;;) {
+      const signal = controllerRef.current?.signal
+      if (!signal || signal.aborted) return 'continue' as const
+      await loadRef.current(signal)
+      if (!signal.aborted) return 'continue' as const
+    }
+  }, [])
+
+  usePolling(poll, {
+    intervalMs: DASHBOARD_POLL_INTERVAL_MS,
+    hiddenIntervalMs: DASHBOARD_POLL_HIDDEN_MS,
+    maxBackoffMs: MAX_BACKOFF_MS,
+    restartKey: `${token}:${filter}:${refreshKey}`,
+  })
+
+  const skillValues = useMemo(
+    () => (stats ? SKILL_AXES.map(([, key]) => stats.skill_scores[key]) : []),
     [stats],
   )
-  const maxTime = Math.max(...curve.map((entry) => entry.completion_time), 1)
-  const curvePoints = curve.map((entry, index) => {
-    const x = curve.length === 1 ? 10 : 10 + (index / (curve.length - 1)) * 280
-    const y = 95 - (entry.completion_time / maxTime) * 75
-    return `${x},${y}`
-  }).join(' ')
 
-  if (!stats || !achievements) return <div className="dashboard-empty">Loading learning dashboard...</div>
+  /** 환경 역량 3축. 전체 보기에서만 쓴다 (FE-14). */
+  const environmentAxes = useMemo(() => {
+    const byEnvironment = stats?.environment_stats ?? {}
+    return ENVIRONMENT_ORDER.map((id) => ({
+      id,
+      label: ENVIRONMENT_META[id].label,
+      entry: byEnvironment[id] ?? null,
+    }))
+  }, [stats])
+
+  const isAllView = filter === 'all'
+  /*
+   * 엔트리가 있는지가 아니라 **competency 가 계산됐는지**를 본다.
+   * 백엔드는 environment=all 조회에서 완료가 0건이어도 세 환경 엔트리를 모두 채워
+   * 보내고 competency 만 null 로 둔다(analytics_service._environment_stats).
+   * 엔트리 유무로 판정하면 신규 사용자에게 중심으로 찌그러진 0축 레이더가 보인다.
+   */
+  const hasEnvironmentBreakdown =
+    isAllView && environmentAxes.some((axis) => axis.entry?.competency != null)
+  /*
+   * 값이 있는 축이 셋 미만이면 레이더 대신 막대 목록을 쓴다 (FE-29).
+   * 축 하나짜리 레이더는 중심에서 뻗은 선 한 줄이라 모양이 아무것도 말하지 않는다.
+   */
+  const showEnvironmentBars =
+    hasEnvironmentBreakdown &&
+    environmentAxes.filter((axis) => axis.entry?.competency != null).length < 3
+
+  const radarValues = isAllView
+    ? environmentAxes.map((axis) => axis.entry?.competency ?? 0)
+    : skillValues
+  const radarRings = [25, 50, 75, 100]
+  const radarAxisCount = radarValues.length
+
+  const completed = stats?.missions_completed ?? 0
+  const averageScore = stats ? average(stats.total_score, completed) : null
+  /*
+   * 평균 MTTR. 필터를 건 조회에서는 백엔드가 environment_stats 를 채우지 않으므로
+   * total_time_spent / missions_completed 로 구한다 — 백엔드 average_mttr 과
+   * 같은 정의다 (`sum(_completion_seconds) / count`).
+   */
+  const averageMttr = stats ? average(stats.total_time_spent, completed) : null
+
+  /* 0 과 구분되도록 값 자리에 — 를 두고 이유를 글자로 쓴다 (설계 문서 5.5). */
+  const noData = (label: string) => (
+    <span className="metric-empty" aria-label={`${label} 데이터 없음`}>
+      <span aria-hidden="true">—</span>
+      데이터 없음
+    </span>
+  )
+
+  const radarLabel = isAllView
+    ? `환경 역량 레이더. ${environmentAxes
+        .map((axis) => `${axis.label} ${axis.entry?.competency ?? '데이터 없음'}`)
+        .join(', ')}`
+    : `${filterLabel(filter)} 스킬 레이더. ${SKILL_AXES.map(
+        ([label, key]) => `${label} ${stats?.skill_scores[key] ?? 0}`,
+      ).join(', ')}`
+
+  if (isLoading && !stats && !statsFailed) {
+    return (
+      <div className="dashboard-skeleton" role="status" aria-live="polite">
+        <span className="sr-only">학습 대시보드를 불러오는 중...</span>
+        <div className="skeleton-block skeleton-filter" aria-hidden="true" />
+        <div className="skeleton-block skeleton-tier" aria-hidden="true" />
+        <div className="skeleton-metrics" aria-hidden="true">
+          {[0, 1, 2, 3].map((index) => (
+            <div className="skeleton-block" key={index} />
+          ))}
+        </div>
+        <div className="skeleton-block skeleton-card" aria-hidden="true" />
+      </div>
+    )
+  }
 
   return (
     <div className="learning-dashboard">
-      {error && <div className="dashboard-warning">{error}</div>}
+      {error && (
+        <div className="dashboard-warning" role="status">
+          {error}
+        </div>
+      )}
+
+      <div className="dashboard-filter" role="group" aria-label="환경 필터">
+        {FILTERS.map((option) => (
+          <button
+            key={option}
+            type="button"
+            className={option === filter ? 'active' : ''}
+            aria-pressed={option === filter}
+            onClick={() => {
+              // 프론트 자체 목표: 클릭 후 로딩 상태 표시 100ms 이내 (FE-20).
+              markStart(PERF.DASHBOARD_FILTER_LOADING)
+              setFilter(option)
+            }}
+          >
+            {filterLabel(option)}
+          </button>
+        ))}
+      </div>
+
       <section className="dashboard-tier-card">
-        <div>
-          <span className="dashboard-label">CURRENT TIER</span>
-          <h3 style={{ color: stats.current_tier.color }}>{stats.current_tier.name}</h3>
-          <p>{stats.total_score} points / {stats.missions_completed} completed missions</p>
-        </div>
-        <div className="tier-progress-wrap">
-          <span>{stats.current_tier.next_tier ? `Next: ${stats.current_tier.next_tier}` : 'Highest tier reached'}</span>
-          <div className="tier-progress"><i style={{ width: `${stats.current_tier.progress}%` }} /></div>
-        </div>
+        {statsFailed ? (
+          <div className="dashboard-empty" role="alert">
+            통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
+          </div>
+        ) : (
+          <>
+            <div>
+              <span className="dashboard-label">현재 티어 · {filterLabel(filter)}</span>
+              {/* 티어 이름은 중립 글자다. 강조색은 1차 동작과 진행 중 표시에만 쓴다 (FE-29). */}
+              <h3>{stats?.current_tier.name}</h3>
+              <p>
+                {stats?.total_score ?? 0}점 · 완료 {completed}건
+              </p>
+            </div>
+            <div className="tier-progress-wrap">
+              <span>
+                {stats?.current_tier.next_tier
+                  ? `다음 티어: ${stats.current_tier.next_tier}`
+                  : '최고 티어에 도달했습니다'}
+              </span>
+              <div
+                className="tier-progress"
+                role="progressbar"
+                aria-label="다음 티어까지 진행률"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={stats?.current_tier.progress ?? 0}
+              >
+                <i style={{ width: `${stats?.current_tier.progress ?? 0}%` }} />
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* 핵심 지표 (FE-13). 완료 0건과 조회 실패를 다르게 표시한다. */}
+      <section className="dashboard-metrics" aria-label={`${filterLabel(filter)} 핵심 지표`}>
+        <article>
+          <span>완료 미션</span>
+          {statsFailed ? noData('완료 미션') : <strong>{completed}건</strong>}
+        </article>
+        <article>
+          <span>평균 점수</span>
+          {statsFailed || averageScore === null ? (
+            noData('평균 점수')
+          ) : (
+            <strong>{averageScore}점</strong>
+          )}
+        </article>
+        <article>
+          <span>평균 복구 시간(MTTR)</span>
+          {statsFailed || averageMttr === null ? (
+            noData('평균 복구 시간(MTTR)')
+          ) : (
+            <strong>{formatDuration(averageMttr)}</strong>
+          )}
+        </article>
+        <article>
+          <span>총 힌트</span>
+          {statsFailed ? noData('총 힌트') : <strong>{stats?.hints_used ?? 0}회</strong>}
+        </article>
+        <article>
+          <span>누적 학습 시간</span>
+          {statsFailed ? (
+            noData('누적 학습 시간')
+          ) : (
+            <strong>{formatDuration(stats?.total_time_spent ?? 0)}</strong>
+          )}
+        </article>
       </section>
 
       <div className="dashboard-grid">
         <section className="dashboard-card skill-card">
-          <span className="dashboard-label">SKILL RADAR</span>
-          <svg className="skill-radar" viewBox="0 0 200 200" role="img" aria-label="Skill radar chart">
-            {[25, 50, 75, 100].map((value) => <polygon key={value} points={[0, 1, 2, 3].map((index) => point(index, value)).join(' ')} />)}
-            <polygon className="skill-radar-value" points={radarPoints} />
-          </svg>
-          <div className="skill-list">
-            {skillLabels.map(([label, key]) => <span key={key}>{label}<strong>{stats.skill_scores[key]}</strong></span>)}
-          </div>
-        </section>
-
-        <section className="dashboard-card">
-          <span className="dashboard-label">LEARNING CURVE / COMPLETION TIME</span>
-          {curve.length ? (
+          <span className="dashboard-label">
+            {isAllView ? '환경 역량' : `스킬 역량 · ${filterLabel(filter)}`}
+          </span>
+          {isAllView && !hasEnvironmentBreakdown ? (
+            <p className="dashboard-empty">
+              완료한 미션이 없어 환경 역량을 계산할 수 없습니다. 미션을 하나 완료해 보세요.
+            </p>
+          ) : showEnvironmentBars ? (
+            <ul className="competency-bars" aria-label="환경 역량">
+              {environmentAxes.map((axis) => {
+                const value = axis.entry?.competency ?? null
+                return (
+                  <li key={axis.id}>
+                    <span>{axis.label}</span>
+                    {/* 시도가 없는 환경은 0 길이 막대가 아니라 데이터 없음이다 (설계 문서 5.5). */}
+                    {value === null ? (
+                      <span className="competency-empty">
+                        <span aria-hidden="true">— </span>데이터 없음
+                      </span>
+                    ) : (
+                      <>
+                        <span className="competency-bar" aria-hidden="true">
+                          <i style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+                        </span>
+                        <strong>{value}</strong>
+                      </>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
             <>
-              <svg className="learning-curve" viewBox="0 0 300 110" preserveAspectRatio="none" role="img" aria-label="Completion time trend">
-                <polyline points={curvePoints} />
+              <svg className="skill-radar" viewBox="0 0 200 200" role="img" aria-label={radarLabel}>
+                {radarRings.map((ring) => (
+                  <polygon key={ring} points={radarPolygon(new Array(radarAxisCount).fill(ring))} />
+                ))}
+                <polygon className="skill-radar-value" points={radarPolygon(radarValues)} />
               </svg>
-              <div className="curve-history">
-                {curve.slice(-4).map((entry) => <span key={entry.attempt_id}>{entry.mission_name}<strong>{formatDuration(entry.completion_time)}</strong></span>)}
+              {/* SVG 를 못 읽는 환경에서도 수치를 읽을 수 있게 텍스트로 함께 낸다. */}
+              <div className="skill-list">
+                {isAllView
+                  ? environmentAxes.map((axis) => (
+                      <span key={axis.id}>
+                        {axis.label}
+                        <strong>{axis.entry?.competency ?? '—'}</strong>
+                      </span>
+                    ))
+                  : SKILL_AXES.map(([label, key]) => (
+                      <span key={key}>
+                        {label}
+                        <strong>{stats?.skill_scores[key] ?? 0}</strong>
+                      </span>
+                    ))}
               </div>
             </>
-          ) : <p className="dashboard-empty">Complete a mission to start your learning curve.</p>}
+          )}
         </section>
 
         <section className="dashboard-card">
-          <span className="dashboard-label">LEADERBOARD / TOP 10</span>
+          <span className="dashboard-label">학습 곡선 · {filterLabel(filter)}</span>
+          {curveFailed ? (
+            <p className="dashboard-empty" role="alert">
+              학습 곡선을 불러오지 못했습니다.
+            </p>
+          ) : curve.length ? (
+            <>
+              <svg
+                className="learning-curve"
+                viewBox="0 0 300 110"
+                preserveAspectRatio="none"
+                role="img"
+                aria-label={`완료 시간 추이 ${curve.length}건. ${curve
+                  .slice(-4)
+                  .map(
+                    (entry) =>
+                      `${entry.mission_name} ${formatDuration(entry.completion_time)} ${entry.score}점`,
+                  )
+                  .join(', ')}`}
+              >
+                <polyline points={curvePolyline(curve)} />
+              </svg>
+              <div className="curve-history">
+                {curve.slice(-4).map((entry) => (
+                  <span key={entry.attempt_id}>
+                    {entry.mission_name}
+                    <strong>
+                      {formatDuration(entry.completion_time)} · {entry.score}점
+                    </strong>
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="dashboard-empty">
+              {filterLabel(filter)} 환경에서 완료한 미션이 없습니다. 미션을 완료하면 곡선이
+              생깁니다.
+            </p>
+          )}
+        </section>
+
+        <section className="dashboard-card">
+          <span className="dashboard-label">리더보드 · 상위 10명</span>
           {leaderboard.length ? (
             <ol className="leaderboard-list">
               {leaderboard.map((entry) => (
                 <li className={entry.is_current_user ? 'current-user' : ''} key={entry.user_id}>
-                  <b>#{entry.rank}</b><span>{entry.username}</span><strong>{entry.total_score}</strong>
+                  <b>{entry.rank}</b>
+                  <span>
+                    {entry.username}
+                    {/* 색만으로 '나'를 말하지 않는다. */}
+                    {entry.is_current_user && <em className="ui-chip">나</em>}
+                  </span>
+                  <strong>{entry.total_score}</strong>
                 </li>
               ))}
             </ol>
-          ) : <p className="dashboard-empty">Leaderboard data is not available yet.</p>}
+          ) : (
+            <p className="dashboard-empty">리더보드 데이터가 아직 없습니다.</p>
+          )}
         </section>
 
         <section className="dashboard-card">
-          <span className="dashboard-label">ACHIEVEMENTS / {achievements.unlocked} OF {achievements.total}</span>
-          {achievements.items.length ? (
+          <div className="dashboard-card-header">
+            <span className="dashboard-label">업적</span>
+            <span className="ui-chip">
+              {achievements?.unlocked ?? 0} / {achievements?.total ?? 0} 달성
+            </span>
+          </div>
+          {achievements?.items.length ? (
             <div className="achievement-list">
-              {achievements.items.map((achievement) => (
-                <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
-                  <strong>{achievement.name}</strong>
-                  <span>{achievement.description}</span>
-                </article>
-              ))}
+              {achievements.items.map((achievement) => {
+                const text = achievementText(achievement)
+                return (
+                  <article className={achievement.unlocked ? 'unlocked' : ''} key={achievement.id}>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6.25" />
+                      {achievement.unlocked && <path d="m5.4 8.2 1.8 1.8 3.4-3.6" />}
+                    </svg>
+                    <div>
+                      <strong>
+                        {text.name}
+                        <span className="sr-only">{achievement.unlocked ? ' (달성)' : ' (미달성)'}</span>
+                      </strong>
+                      <span>{text.description}</span>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
-          ) : <p className="dashboard-empty">Achievement data is not available yet.</p>}
+          ) : (
+            <p className="dashboard-empty">업적 데이터가 아직 없습니다.</p>
+          )}
         </section>
       </div>
     </div>

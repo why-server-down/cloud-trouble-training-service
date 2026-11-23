@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "environment": "linux",
+  "questions": [
+    {"id":"linux-oom-01","fault_type":"linux_oom","query":"cgroup memory.events oom_kill 증가 의미","expected_source_id":"linux-oom-cgroup"},
+    {"id":"linux-oom-02","fault_type":"linux_oom","query":"memory.current memory.max 비교 방법","expected_source_id":"linux-oom-cgroup"},
+    {"id":"linux-oom-03","fault_type":"linux_oom","query":"호스트 메모리는 남았는데 프로세스 OOM 종료","expected_source_id":"linux-oom-cgroup"},
+    {"id":"linux-oom-04","fault_type":"linux_oom","query":"load와 cgroup 메모리 범위를 구분해서 조사","expected_source_id":"linux-resource-observation"},
+    {"id":"disk-io-01","fault_type":"disk_io_stress","query":"디스크 용량 부족과 I/O 포화 구분","expected_source_id":"linux-disk-io"},
+    {"id":"disk-io-02","fault_type":"disk_io_stress","query":"proc pressure io some full 해석","expected_source_id":"linux-disk-io"},
+    {"id":"disk-io-03","fault_type":"disk_io_stress","query":"df 여유인데 파일 작업 timeout","expected_source_id":"linux-disk-io"},
+    {"id":"disk-io-04","fault_type":"disk_io_stress","query":"높은 load가 CPU 문제인지 I/O 대기인지","expected_source_id":"linux-resource-observation"},
+    {"id":"zombie-01","fault_type":"zombie_process","query":"프로세스 상태 Z 의미","expected_source_id":"linux-process-states"},
+    {"id":"zombie-02","fault_type":"zombie_process","query":"종료한 자식 프로세스가 회수되지 않음","expected_source_id":"linux-process-states"},
+    {"id":"zombie-03","fault_type":"zombie_process","query":"좀비 프로세스를 직접 kill하면 안 되는 이유","expected_source_id":"linux-process-states"},
+    {"id":"zombie-04","fault_type":"zombie_process","query":"부모의 wait reap 실패 확인","expected_source_id":"linux-process-states"},
+    {"id":"orphan-01","fault_type":"orphan_process","query":"PPID가 예상 supervisor와 다름","expected_source_id":"linux-process-states"},
+    {"id":"orphan-02","fault_type":"orphan_process","query":"부모 종료 후 init 또는 subreaper 입양","expected_source_id":"linux-process-states"},
+    {"id":"orphan-03","fault_type":"orphan_process","query":"고아 프로세스와 좀비 프로세스 차이","expected_source_id":"linux-process-states"},
+    {"id":"orphan-04","fault_type":"orphan_process","query":"pid ppid stat으로 부모 이탈 조사","expected_source_id":"linux-process-states"},
+    {"id":"service-01","fault_type":"service_failure","query":"systemd 없는 sandbox 서비스 실패 조사","expected_source_id":"linux-service-logs"},
+    {"id":"service-02","fault_type":"service_failure","query":"프로세스는 있는데 포트 LISTEN 없음","expected_source_id":"linux-network-sockets"},
+    {"id":"service-03","fault_type":"service_failure","query":"loopback bind 때문에 다른 구성요소 연결 실패","expected_source_id":"linux-network-sockets"},
+    {"id":"service-04","fault_type":"service_failure","query":"process log socket 순서로 서비스 장애 조사","expected_source_id":"linux-service-logs"},
+    {"id":"service-05","fault_type":"service_failure","query":"journalctl dmesg를 무조건 가정하면 안 되는 이유","expected_source_id":"linux-service-logs"}
+  ]
+}

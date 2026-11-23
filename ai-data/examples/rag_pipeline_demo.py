@@ -45,7 +45,9 @@ def test_rag_service():
     
     for query in test_queries:
         print(f"\n   Query: '{query}'")
-        results = rag.search_knowledge(query, top_k=2)
+        results = rag.search_knowledge(
+            query, environment="kubernetes", top_k=2
+        )
         print(f"   Found {len(results)} results:")
         for doc in results:
             print(f"     - {doc.source} (similarity: {doc.similarity:.3f})")

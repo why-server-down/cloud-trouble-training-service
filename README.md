@@ -181,10 +181,12 @@ python -m pytest tests/ -v
 - 검증 안정화 — `VALIDATION_BACKEND=k8s`, `prometheus` 실환경 테스트 강화
 - 테스트 커버리지 확대
 
-### 캡스톤 2 — 멀티 환경 고도화 (예정)
+### 캡스톤 2 — 멀티 환경 고도화 (진행 중)
 
-Kubernetes 외에 Docker-only, Linux, Application 환경을 탭으로 분리해 환경별 장애 유형을
-다룹니다. 장애 주입기를 추상 클래스 기반으로 설계해 두어, 환경이 늘어나도 같은 구조로 확장할 수 있습니다.
+Kubernetes 외에 **Docker, Linux** 환경을 탭으로 분리해 환경별 장애 유형을 다룹니다.
+(Application 환경은 스코프에서 제외) 먼저 `environment` 개념을 데이터 계층부터 API까지
+관통시키고, 장애 주입기/검증기를 환경별 구현체로 확장합니다. 현재는 Kubernetes 환경만
+실제 동작하며 Docker/Linux는 순차적으로 추가 중입니다. 별도로 AWS EKS 배포도 진행합니다.
 
 ## 참고 문서
 

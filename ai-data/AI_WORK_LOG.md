@@ -1,0 +1,645 @@
+# AI 작업 진행 기록
+
+## AI-00 환경·fault taxonomy 확정
+
+- 상태: 완료
+- 작업일: 2026-08-27
+- 작업 브랜치: `feature/ai-runner`
+- Wave: Wave 0
+- 선행 조건: 별도 선행 작업 없음. 코드 구현 없이 backend의 현재 compiler/injector/validator 계약을 확인함.
+- 변경 파일:
+  - `ai-data/docs/fault-taxonomy-v1.md`: 환경별 taxonomy, 학습 목표, 관측 신호, 허용 복구, mechanical validator와 backend 담당 작업 정리
+  - `ai-data/evals/metadata.json`: eval taxonomy version `v1` 기록
+- 결정:
+  - Kubernetes canonical fault 15종만 현재 AI scenario 생성 허용
+  - 기존 `pod_failure`, `memory_stress`, `service_misconfig`, `network_latency`는 legacy alias로 분류
+  - Docker 4종과 Linux 5종은 taxonomy 후보로 확정했지만 backend 구현 전까지 생성 비활성
+  - Application/DB는 `v1` 범위에서 제외
+- 검증:
+  - canonical compiler mapping 15종 확인
+  - canonical injector handler mapping 15종 확인
+  - canonical mechanical validator mapping 15종 확인
+  - `python3 -m json.tool ai-data/evals/metadata.json` 통과
+  - `git diff --check` 통과
+- 테스트 제한: 로컬에 `backend/venv`와 시스템 Python backend 의존성이 없어 backend pytest는 실행하지 못함. 코드 변경은 없음.
+- 평가 데이터 및 품질 수치: AI-00은 taxonomy 문서 작업이므로 retrieval 정확도·지연 평가는 해당 없음
+- 남은 의존성:
+  - Docker 활성화: BE-13 DockerChaosInjector, BE-14 DockerValidationService
+  - Linux 활성화: BE-17 LinuxChaosInjector, BE-18 LinuxValidationService
+  - backend allowed list에서 legacy alias와 canonical 생성 목록을 분리하는 후속 계약 정리 필요
+
+## AI-01 설정 경로 정리
+
+- 상태: 완료
+- 작업일: 2026-08-27
+- 작업 브랜치: `feature/ai-baseline`
+- Wave: Wave 1
+- 선행 조건 및 게이트:
+  - PR #33 backend CI `47 passed, 1 warning`
+  - `backend/app/schemas.py` environment 계약 확인
+  - `backend/alembic` 확인
+  - dev required checks 3종 확인
+- 변경 파일:
+  - `ai-data/config.py`: 불변 `AISettings`, standalone/backend 명시적 factory, provider별 model/embedding 설정
+  - `ai-data/ai_engine.py`: settings 객체로 model/timeout/token/temperature와 RAG 설정 주입
+  - `ai-data/rag_service.py`: settings 객체 사용, mock in-memory Qdrant와 offline embedding 경로, 명시적 0 설정 보존
+  - `ai-data/prompt_engine.py`: production module import 시 암묵적 `.env` 로드 제거
+  - `ai-data/scripts/ingest_knowledge.py`: `.env` 로드를 standalone CLI 경계로 이동
+  - `backend/app/ai/tutor_service.py`: 실행 중 `os.environ` mutation 제거, backend Settings를 `AISettings`로 변환해 전달
+  - `ai-data/requirements.txt`: 미사용 chromadb 제거, qdrant-client 반영
+  - `ai-data/tests/test_config_matrix.py`: mock/OpenAI/Gemini/default/import-order 설정 test 7개
+  - `ai-data/docs/backend-settings-handoff-ai-01.md`: backend 소유 설정 키 후속 작업 기록
+- 테스트 및 검증:
+  - config matrix 7개 직접 실행 통과
+  - 변경 Python 파일 `compileall` 통과
+  - TutorService `os.environ[...]` mutation 0건
+  - engine/RAG 초기화 오류에 provider exception·API key 값 미노출
+  - `git diff --check` 통과
+- 평가 데이터 및 품질 수치: 설정 작업이므로 retrieval 정확도·LLM latency 평가는 해당 없음
+- 제한:
+  - 로컬 Python에 backend/AI dependency와 pytest가 없어 전체 pytest는 실행하지 못함
+  - Python 3.14 임시 가상환경 설치는 `grpcio-tools` wheel build 호환 문제로 실패함. 프로젝트 기준 Python 3.11 CI에서 재검증 필요
+  - Docker daemon이 실행 중이 아니어서 Python 3.11 container 검증은 수행하지 못함
+  - backend core Settings의 추가 timeout/RAG 키와 qdrant startup 명시 주입은 백엔드 담당 후속 작업
+
+## AI-02 오프라인 테스트와 평가 실행기
+
+- 상태: 완료 — PR #39, merge commit `e99e831`
+- 작업일: 2026-08-28
+- 작업 브랜치: `feature/ai-offline-evals`
+- Wave: Wave 1
+- 변경:
+  - deterministic fake embedding과 OpenAI 호환 fake chat client 추가
+  - 기본 pytest를 API key, network, 외부 Qdrant 없이 실행 가능하게 구성
+  - 외부 연동 smoke test를 `integration` marker로 분리
+  - JSON parse, retrieval, environment filter 오프라인 평가 실행기 추가
+- 검증:
+  - AI pytest `33 passed, 3 deselected`
+  - offline eval `3/3 passed`
+- 후속: AI-03 metadata schema와 loader
+
+## AI-03 knowledge metadata schema와 loader
+
+- 상태: 완료 — PR #48, merge commit `5ce907c`
+- 작업일: 2026-08-29
+- 작업 브랜치: `feature/multi-env-knowledge`
+- Wave: Wave 2
+- 변경:
+  - `knowledge-base/manifest.json`을 문서 metadata 단일 원본으로 추가
+  - source ID, environment, fault type, authority, version 검증
+  - 미등록·빈·과대 문서 거부와 chunk index/content hash 추적 추가
+- 품질 수치:
+  - Kubernetes 문서 17개, chunk 217개 manifest coverage 확인
+- 검증:
+  - AI pytest `41 passed, 3 deselected`
+  - backend pytest `202 passed`
+  - offline eval `4/4 passed`
+- 후속: AI-04 Docker knowledge base
+
+## AI-04 Docker knowledge base
+
+- 상태: 완료 — PR #49, merge commit `b203385`
+- 작업일: 2026-08-29
+- 작업 브랜치: `feature/ai-docker-knowledge`
+- Wave: Wave 2
+- 변경:
+  - lifecycle, 명령, network, storage, resource, 안전 복구 문서 6종 추가
+  - backend Docker argv allowlist와 sandbox 경계에 맞춘 명령 예시 검증
+  - Docker fault 4종 retrieval 질문 20개 추가
+- 품질 수치: Docker Recall@5 `20/20 (100%)`
+- 검증:
+  - AI pytest `48 passed, 3 deselected`
+  - backend pytest `202 passed`
+  - offline eval `5/5 passed`
+- 후속: AI-05 Linux knowledge base
+
+## AI-05 Linux knowledge base
+
+- 상태: 완료 — PR #50, merge commit `946869d`
+- 작업일: 2026-08-29
+- 작업 브랜치: `feature/ai-linux-knowledge`
+- Wave: Wave 2
+- 변경:
+  - process, cgroup OOM, disk I/O, resource, service/log, socket, 안전 복구 문서 7종 추가
+  - Linux fault 5종 metadata와 retrieval 질문 21개 추가
+  - capability 기반 명령 안내와 host sandbox 안전 경계 검증
+- 검증:
+  - AI pytest `55 passed, 3 deselected`
+  - backend pytest `202 passed`
+  - offline eval `6/6 passed`
+- 후속: BE-16 capability와 문서 명령 재검증 — 이후 BE-16~18이 dev에 머지됨
+
+## AI-06 versioned idempotent Qdrant ingestion
+
+- 상태: 완료 — PR #51, merge commit `015cc92`
+- 작업일: 2026-08-29
+- 작업 브랜치: `feature/versioned-qdrant`
+- Wave: Wave 2
+- 변경:
+  - `uuid5(source_id + chunk_index + content_hash)` stable point ID 적용
+  - source별 stale chunk 교체와 added/updated/deleted/unchanged report 추가
+  - 기본 collection `afterfail_knowledge_v2`, dimension 불일치 시 기존 collection 보존
+  - 검증된 collection의 원자적 alias 전환과 관리용 sync command 추가
+- 검증:
+  - AI pytest `61 passed, 3 deselected`
+  - backend pytest `202 passed`
+  - offline eval `6/6 passed`
+- 남은 의존성: backend startup이 `needs_sync()`를 호출하도록 `qdrant_init.py` 후속 연동
+
+## AI-07 environment + fault RAG filter
+
+- 상태: 완료 — PR #63, merge commit `674996d`
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-rag`
+- Wave: Wave 3
+- 선행 조건:
+  - BE-14/15 범위 게이트와 BE-16~21 dev 머지 확인
+  - `RuntimeContextCollector.collect(environment, sandbox)` 계약 확인
+- 변경:
+  - environment/general과 fault/general을 Qdrant `must` 조건으로 AND 적용
+  - 누락·잘못된 environment 명시적 거부, retrieval metadata 보존
+  - TutorRequest에 environment 추가하되 기존 호출은 Kubernetes 기본값 유지
+  - tutor service가 DB attempt environment와 서버 복원 sandbox를 collector/RAG에 전달
+- 검증:
+  - AI pytest `69 passed, 3 deselected`
+  - backend pytest `363 passed`
+  - offline eval `6/6 passed`
+- 남은 의존성:
+  - backend가 Docker/Linux environment capability에 `tutor` 노출
+  - AI-10에서 공통 TrainingContext prompt로 observations 직접 반영
+
+## AI-08 dependency 없는 hybrid RAG reranking
+
+- 상태: 완료 — PR #64, merge commit `c4f8992`
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/ai-hybrid-reranking`
+- Wave: Wave 3
+- 변경:
+  - environment/fault filter 이후 vector 후보 20개 조회
+  - 한국어·영문·명령 token 정규화와 title/content keyword overlap 계산
+  - `0.75 semantic + 0.15 keyword + 0.10 authority` 점수 적용
+  - semantic/keyword/final score metadata와 deterministic tie-break 추가
+  - `rerank=False` vector baseline 비교 경로 추가
+- 품질 수치:
+  - Docker 20문항 vector-only Recall@5 `1.000`
+  - Docker 20문항 hybrid Recall@5 `1.000`
+- 검증:
+  - AI pytest `72 passed, 3 deselected`
+  - backend pytest `363 passed`
+  - offline eval `6/6 passed`
+- 후속: AI-09 3개 환경 retrieval 정식 평가와 latency 보고
+
+## AI-09 retrieval eval
+
+- 상태: 완료 — PR #65
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/ai-retrieval-eval`
+- Wave: Wave 3
+- 변경:
+  - `evals/retrieval_cases.jsonl`에 Kubernetes/Docker/Linux 각 20문항, 총 60문항 추가
+  - 한국어 70%, 영문/명령형 30%와 일반·애매·타 환경 용어 질문 포함
+  - Recall@1/3/5, MRR, environment contamination, empty retrieval, latency p50/p95 평가기 추가
+  - 환경별 Recall@5 85%와 contamination 1% 미만을 자동 gate로 적용
+  - mock ingestion의 불필요한 Gemini rate-limit 대기를 제거해 offline 평가 시간을 단축
+- 품질 수치:
+  - 전체 Recall@1/3/5: `0.6000 / 0.8333 / 0.9167`, MRR `0.7156`
+  - Kubernetes Recall@5 `0.85`, Docker `0.90`, Linux `1.00`
+  - environment contamination `0`, empty retrieval rate `0`
+  - 전체 latency p50 `5.32ms`, p95 `10.55ms` (offline deterministic embedding)
+  - 평가 근거로 `top_k=5`, candidate `20`, min similarity `0` 고정
+- 검증:
+  - AI pytest `76 passed, 3 deselected`
+  - backend pytest `363 passed`
+  - 기존 offline eval `6/6 passed`
+- 후속: AI-10 공통 TrainingContext와 prompt 일반화
+
+## AI-10 공통 TrainingContext와 prompt 일반화
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-09 PR #65 dev 머지 확인
+  - AI-07에서 확인한 BE-15 범위 결정과 BE-16~21 RuntimeContext 계약 유지 확인
+- 변경:
+  - Kubernetes/Docker/Linux 공통 `TrainingContext`를 추가하고 기존 context 호출 호환 adapter 유지
+  - mission, observations/runtime logs, recent commands, retrieved docs, learner history를 명시적 구역으로 분리
+  - 사용자 입력·관측값·로그·검색 문서를 untrusted data 경계로 표시
+  - 환경별 command vocabulary와 hint level 0~3 규칙을 코드·시스템 prompt에서 통일
+  - `TutorService`가 RuntimeContext의 공통 observations/metrics/logs를 K8s 전용 문자열로 축약하지 않고 전달
+  - RAG 문서를 문자열 치환하지 않고 `TrainingContext.retrieved_docs`로 전달
+- 인수 조건 검증:
+  - Docker level 2 prompt에 Docker 진단 vocabulary만 포함하고 recovery command 금지
+  - Linux level 0에서 root cause와 command 노출 금지
+  - level 3 명령을 현재 환경 vocabulary와 backend command policy에 제한
+- 검증:
+  - AI pytest `80 passed, 3 deselected`
+  - backend pytest `363 passed`
+- 후속: AI-11 TutorResult 정보 보존
+
+## AI-11 TutorResult 정보 보존
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 계약:
+  - 백엔드 계약 PR #67을 먼저 머지해 `TutorSource`와 `ChatResponse` 메타데이터 필드 확장
+- 변경:
+  - `AITutorEngine`의 sources, observations_used, token_usage, latency, fallback 상태를 응답 끝까지 보존
+  - source를 title/source_id/상대 path/environment/similarity만 포함하는 안전한 형태로 변환
+  - prompt에 실제 포함된 observation/metric/log/recent command 키를 observations_used로 기록
+  - RAG 또는 provider 실패 시 내부 exception을 숨기고 안전한 fallback과 빈 sources 반환
+  - `TutorService`가 최종 message만 저장하되 API에는 전체 `TutorResult`를 반환
+- 인수 조건 검증:
+  - ChatResponse가 sources/observations_used/token_usage를 반환하도록 백엔드 계약 연결
+  - 절대 로컬 경로와 raw exception/API key 문자열 노출 방지 테스트 추가
+  - RAG 실패 시 `fallback_used=true`, `sources=[]` 확인
+- 검증:
+  - AI pytest `82 passed, 3 deselected`
+  - backend pytest `364 passed`
+- DB 결정:
+  - TutorMessage에는 기존대로 최종 message만 저장하며 AI-11에서는 migration을 추가하지 않음
+- 후속: AI-12 prompt injection과 redaction
+
+## AI-12 prompt injection과 redaction
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-11 PR #68 dev 머지와 TutorResult fallback 계약 확인
+- 변경:
+  - user question, observations, runtime logs, recent commands, retrieved docs를 각각 untrusted data 경계로 분리
+  - raw 사용자 질문을 OpenAI user message로 중복 전송하던 경로 제거
+  - Bearer/provider token, password/secret/API key, Kubernetes Secret data, 환경변수 재귀 redaction 추가
+  - 모델 응답에도 동일 redaction을 적용해 출력 단계의 secret 반복 노출 차단
+  - question 2,000자, observations 8,000자, logs 4,000자, commands 3,000자, docs 8,000자 제한
+  - 전체 prompt를 약 9,000 token 상당의 36,000자 이내로 제한하고 observations를 문서·로그보다 우선 보존
+  - prompt 전체를 production log에 기록하는 코드가 없음을 확인
+- 보안 평가:
+  - `evals/prompt_injection_cases.jsonl`에 한국어/영문 prompt 탈취, role 변경, secret 출력 요청 등 20개 추가
+  - 20개 adversarial case에서 입력 secret 노출 0건
+  - 모델 출력 secret 재노출 방지와 raw question 중복 전송 방지 검증
+  - 장문 로그·문서가 truncate되어도 핵심 observation summary 유지 검증
+- 검증:
+  - AI pytest `105 passed, 3 deselected`
+  - backend pytest `364 passed`
+- 후속: AI-13 8주차 튜터 품질 게이트
+
+## AI-13 8주차 튜터 품질 게이트
+
+- 상태: 완료
+- 작업일: 2026-08-31
+- 작업 브랜치: `feature/cross-layer-tutor`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-10~12 공통 context, TutorResult, prompt injection 방어 dev 머지 확인
+- 변경:
+  - `evals/tutor_cases.jsonl`에 Kubernetes/Docker/Linux 각 20개, 총 60개 기준 응답 추가
+  - 각 환경에서 hint level 0~3, 진단·복구 질문, 관측 신호와 기대 source를 포함
+  - environment command correctness, hint leakage, source relevance, observation grounding, unsupported claim, dangerous command, Korean clarity 자동 평가기 추가
+  - prompt의 environment/hint level 계약도 케이스마다 함께 검증
+  - 실패 시 non-zero exit와 JSON report를 제공해 CI 품질 게이트로 사용 가능
+- 평가 방식:
+  - 외부 API 없이 재현 가능한 수동 검토 기준 응답(golden response)을 자동 채점
+  - 실제 OpenAI/Gemini 응답은 릴리스 평가에서 동일 데이터셋의 response를 교체해 별도 측정
+- 품질 수치:
+  - environment mismatch `0`
+  - level 0~2 direct solution leakage `0%`
+  - unsupported dangerous command `0`
+  - source relevance `100%`, observation grounding `100%`
+  - unsupported claim `0%`, Korean clarity `100%`
+  - Kubernetes/Docker/Linux 환경별 20/20 통과
+- 범위 판정:
+  - 튜터 품질 게이트는 통과했으나 backend 실행 계약이 없어 Application/DB는 후속 연구로 유지
+- 검증:
+  - AI pytest `109 passed, 3 deselected`
+  - backend pytest `364 passed`
+  - tutor offline eval `60/60 passed`
+- 후속: AI-14 environment-aware scenario input과 fixtures
+
+## AI-14 environment-aware scenario input과 fixtures
+
+- 상태: 완료 — AI PR #75 + backend 경계 PR
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`, `feature/be-scenario-environment-contract`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-13 PR #70 dev 머지와 Kubernetes/Docker/Linux 실행 fault allowlist 확인
+- 변경:
+  - `ScenarioGenerationInput.environment` 추가
+  - Kubernetes/Docker/Linux fixture를 환경별·난이도별로 분리
+  - LLM 요청에 environment를 전달하고 wrong-environment 응답을 거절
+  - provider/parse 실패 시 요청과 같은 environment fixture로만 fallback
+  - 빈 allowlist 또는 일치 fixture 부재 시 명시적 오류 반환
+  - ScenarioService가 요청 environment와 해당 환경 allowlist를 agent에 전달
+  - 최근 fault 중복 이력을 GeneratedScenario.environment 안에서만 조회
+  - Docker/Linux fault type이 Kubernetes `pod_failure`로 fallback되지 않고 해당 injector에 그대로 전달
+- 인수 조건 검증:
+  - Docker 요청 candidate environment `100% docker`
+  - Docker provider 실패 fallback environment `100% docker`
+  - 세 환경의 빈 allowlist가 모두 명시적 오류
+- 검증:
+  - AI pytest `118 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+- 후속: AI-15 환경별 scenario prompt와 schema
+
+## 백엔드 관측 handoff — AI-23 부분 구현
+
+- 상태: 완료 (AI-23 전체 완료 아님)
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/ai-hardening`
+- 요청 배경:
+  - 백엔드 담당이 추가한 `AI_CALLS`, `AI_CALL_DURATION`, `AI_TOKENS` 연결
+  - AI 소유 경로 `backend/app/ai/`에 남은 print 7건 제거
+- 변경:
+  - Tutor/Scenario/Validation LLM 호출을 provider와 purpose 저카디널리티 label로 계측
+  - success/fallback 호출 수, 호출 시간, prompt/completion/total token 기록
+  - user ID, namespace, prompt, response 본문은 metric label/value에 포함하지 않음
+  - print 7건을 표준 logging의 warning/exception으로 전환
+  - provider 실패 fallback도 result=fallback으로 기록
+- 검증:
+  - AI pytest `122 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+  - `backend/app/ai/` print 호출 `0건`
+- 남은 AI-23 범위:
+  - retrieval latency/result count/empty rate와 environment별 tutor result metric
+
+## AI-15 환경별 scenario prompt와 schema
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-14 PR #75와 backend 환경 전달 PR #76 dev 머지 확인
+- 변경:
+  - scenario prompt를 공통 exact schema와 Kubernetes/Docker/Linux 환경별 계약으로 일반화
+  - environment별 allowed fault, observation vocabulary, validation rule type 명시
+  - namespace/Pod command나 임의 실행 step 대신 declarative `fault.parameters`만 허용
+  - Pydantic `extra=forbid` strict nested schema로 candidate parse
+  - score 50~300, hint penalty 0~50, time limit 300~3600초, stability 0~300초 검증
+  - student_brief의 원인·정답·복구 명령·주입 방법 leakage 차단
+  - rejected candidate에 invalid JSON/schema/wrong environment/unknown fault/validation reason 보존
+  - 전체 후보 reject 시 동일 environment fixture를 별도 valid fallback으로 추가
+- 인수 조건 검증:
+  - invalid JSON, wrong environment, unknown field/fault, missing validation, answer leakage 모두 reject
+  - Kubernetes/Docker/Linux × 4개 난이도 fixture strict parse/compile `100%`
+- 검증:
+  - AI pytest `142 passed, 3 deselected`
+  - backend pytest `511 passed, 4 deselected`
+- 후속: AI-16 후보 scoring과 다양성
+
+## AI-16 후보 scoring과 다양성
+
+- 상태: 완료 — AI PR #79 + backend 경계 PR #80
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`, `feature/be-scenario-selection-contract`
+- 변경:
+  - 다양성·난이도·관측 신호·compiler·학습 근거 가산과 안전·중복·정답 노출 감점 적용
+  - schema/safety 거절 후보를 선택 전에 제외하고 후보별 reject reason과 score breakdown 보존
+  - seed/eval mode에서 동점 후보 결정적 선택 지원
+  - LLM 후보 전체 거절 시 fallback metric만 기록
+  - ScenarioService와 API randomize 계약을 안전 선택기에 연결
+- 검증:
+  - AI pytest `147 passed, 3 deselected`
+  - backend pytest `512 passed, 4 deselected`
+- 후속: AI-17 scenario eval
+
+## AI-17 scenario eval
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/multi-env-scenario`
+- Wave: Wave 3
+- 선행 조건:
+  - AI-14~16 및 backend 선택 계약 PR #80 dev 머지 확인
+- 변경:
+  - Kubernetes/Docker/Linux × 4개 난이도 × 5개, 총 60개 scenario eval dataset 추가
+  - schema/environment/allowed fault/compiler/observation/validation/leakage/unsafe 지표 추가
+  - 생성 latency와 token 사용량 보고 필드 추가
+  - 품질 목표를 종료 코드로 강제하는 offline runner와 회귀 테스트 추가
+- 평가 결과:
+  - 총 60개, Kubernetes/Docker/Linux 각 20개 및 환경×난이도 조합별 5개
+  - schema validity `100%`, environment match `100%`, compiler success `100%`
+  - observation availability `100%`, validation executability `100%`
+  - answer leakage `0건`, unsafe accepted `0건`
+  - offline mock token `0`, 생성 latency mean `0.06ms` 미만
+- 검증:
+  - scenario offline eval `60/60 passed`
+  - AI pytest `151 passed, 3 deselected`
+  - backend pytest `512 passed, 4 deselected`
+- 후속: AI-18 환경별 runtime observation 사용
+
+## AI-18 환경별 runtime observation 사용
+
+- 상태: 완료 — AI PR #82 + backend 경계 PR #83
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`, `feature/be-runtime-observation-contract`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-17 PR #81 및 `TutorResult`/`ValidationJudgment` backend 계약 dev 반영 확인
+- 변경:
+  - Kubernetes/Docker/Linux 관측값을 환경별 common observation schema로 정규화
+  - 질문과 관련된 summary key만 최대 5개 선택해 prompt 크기와 무관한 raw 상태 전달 제한
+  - 실제 prompt에 포함한 값만 `observations_used`에 기록
+  - 수집 상태를 complete/partial/unavailable과 available/missing key로 명시
+  - observation unavailable 시 없는 값을 추측하지 않도록 prompt 계약 추가
+  - command output과 log summary를 provider 전달 전에 재차 secret redaction
+  - backend collector에 환경별 최소 관측 probe와 collection status 연결
+- 인수 조건 검증:
+  - 세 환경별 질문 관련 grounding test 통과
+  - observation unavailable 상태와 추측 금지 문구 확인
+  - command/log의 token, password, bearer 값 비노출 확인
+- 검증:
+  - AI pytest `157 passed, 3 deselected`
+  - backend pytest `514 passed, 4 deselected`
+- 후속: AI-19 ValidationAgent advisory 전환
+
+## AI-19 ValidationAgent advisory 전환
+
+- 상태: 완료 — AI PR #85 + backend 경계 PR #86
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`, `feature/be-validation-advisory-contract`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-18 RuntimeContext grounding 및 backend observation 계약 dev 반영 확인
+- 변경:
+  - ValidationAgent의 Kubernetes 직접 조회 중복을 제거하고 환경별 RuntimeContext 입력으로 전환
+  - output에 evidence, advisory_only, error_code 추가
+  - mock 판정은 fault type과 target에 직접 연결된 정상화 근거만 인정
+  - unrelated healthy resource는 resolved 근거에서 제외
+  - confidence를 0~1로 clamp하고 invalid JSON/provider 실패는 safe false advisory 반환
+  - prompt에서 internal summary·정답·주입/복구 방법을 제외하고 reason 길이·secret 제한
+  - ScenarioService가 environment와 RuntimeContext를 전달하고 evidence/error를 저장
+  - AI advisory 실패가 mechanical validation과 점수 처리를 막거나 override하지 않도록 격리
+- 인수 조건 검증:
+  - unrelated healthy deployment 판정 false
+  - LLM resolved=true가 mechanical 결과를 덮어쓰는 경로 없음
+  - internal summary와 복구 명령이 validation prompt/reason에 포함되지 않음
+- 검증:
+  - AI pytest `164 passed, 3 deselected`
+  - backend pytest `515 passed, 4 deselected`
+- 공유 계약:
+  - `backend/app/schemas.py` ValidationJudgment에 evidence/error_code 추가 — FE·AI dev 재동기화 필요
+- 후속: AI-20 대화 memory와 보존
+
+## AI-20 대화 memory와 보존
+
+- 상태: 완료
+- 작업일: 2026-09-01
+- 작업 브랜치: `feature/runtime-ai-context`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-19 PR #85~87 dev 반영 및 TutorMessage retention job 확인
+- 변경:
+  - 동일 attempt의 최근 user/assistant 완성 pair 최대 5개를 시간순으로 prompt에 전달
+  - 최근 10개 메시지만 DB에서 읽고 `attempt_id` exact filter로 다른 attempt/user 혼입 차단
+  - incomplete user와 orphan assistant 메시지는 memory에서 제외
+  - 대화 context 2,000자 예산과 pair별 500자 상한을 적용하고 최신 pair 우선 보존
+  - 기존 `previous_questions` 호환 필드는 비워 중복 token 사용 방지
+- 인수 조건 검증:
+  - 반복 질문과 직전 assistant 답변이 같은 prompt에 포함됨
+  - 다른 attempt 조회 조건 없음 및 exact attempt bind 확인
+  - 30일 retention 기본값, 진행 중 attempt 제외, batch cleanup/startup 연결 테스트 유지
+  - retention metric에는 원문 대신 삭제 count와 table label만 사용
+- 검증:
+  - AI pytest `169 passed, 3 deselected`
+  - backend pytest `515 passed, 4 deselected`
+- 후속: AI-21 latency 최적화
+
+## AI-21 latency 최적화
+
+- 상태: 완료 — backend latency 계약 PR #97 + AI 실행 경로 PR
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-latency-contract`, `feature/ai-hardening`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-20 PR #88 및 TutorResult backend 계약 dev 반영 확인
+- 변경:
+  - RuntimeContext collection과 동기 RAG retrieval을 `asyncio.gather` + `to_thread`로 병렬 실행
+  - context/RAG/LLM에 각각 독립 timeout 적용
+  - RAG 실패·timeout은 문서 없는 튜터 응답으로 계속하고 error_code로 구분
+  - runtime 실패·timeout은 관측 없음 fallback으로 구분
+  - provider timeout 뒤 늦게 끝난 thread 결과는 응답/저장 경로에서 무시
+  - context/retrieval/rerank/llm/total latency breakdown과 저카디널리티 Histogram 추가
+  - prompt 문서는 기존 RAG top-k와 `DOCS_MAX_CHARS` 상한 유지
+- 측정:
+  - offline deterministic 30회, context 50ms + retrieval 50ms 병렬 조건
+  - 병렬 구간 p50 `51.646ms`, p95 `55.550ms`, max `55.699ms`
+  - 공식 end-to-end 1.5초 목표는 실제 provider/network 없이 검증하지 않았으며 운영 Histogram으로 별도 판정
+  - 측정 전 TTL cache 도입은 보류; 운영 retrieval p95 초과 시 재검토
+- 검증:
+  - event loop 비차단, 독립 timeout, late response 무시 테스트 통과
+  - AI pytest `174 passed, 3 deselected`
+  - backend pytest `518 passed, 4 deselected`
+- 후속: AI-22 token·cost 제한
+
+## AI-22 token·cost 제한
+
+- 상태: 완료 — backend 예산 계약 PR #99 + AI 실행 경로 PR
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-cost-contract`, `feature/ai-hardening`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-21 PR #97~98 dev 반영 및 chat rate limit 확인
+- 변경:
+  - question/command/log/docs 기존 문자 상한에 실제 tokenizer 기반 context token 상한 추가
+  - tutor completion 최대 500 token, retrieved chunk 최대 5개를 설정으로 강제
+  - provider 호출은 rate limit/connection만 최대 2 attempts, 비일시 오류는 재시도하지 않음
+  - scenario 3개 후보는 기존 단일 provider call 유지
+  - prompt/completion 실제 token으로 provider/purpose/model별 예상 USD metric 기록
+  - 알 수 없는 모델은 단가를 임의 추정하지 않고 cost metric에서 제외
+- 비용 추정(2026-09-02 공식 표준 단가):
+  - gpt-4o-mini input/output `$0.15/$0.60` per 1M token
+  - gemini-2.5-flash-lite input/output `$0.10/$0.40` per 1M token
+  - 시연 50 tutor + 10 scenario: OpenAI `$0.048`, Gemini `$0.032`
+  - 월 2,000 tutor + 100 scenario: OpenAI `$1.425`, Gemini `$0.950`
+  - embedding/hosting/network/free-tier/tax 제외; 실제 metric과 provider 청구서로 보정 필요
+- 인수 조건 검증:
+  - 긴 입력에서도 설정 context token budget 이하
+  - completion/retrieved chunk/retry 상한 테스트 통과
+  - 월/시연 비용과 단가 출처를 `evals/cost_report.json`에 기록
+- 검증:
+  - AI pytest `179 passed, 3 deselected`
+  - backend pytest `520 passed, 4 deselected`
+- 후속: AI-23 관측 메트릭 남은 범위
+
+## AI-23 관측 메트릭 완성
+
+- 상태: 완료 — metric 계약 PR #101 + AI 실행 경로 PR #102 + validation 일치도 PR #103
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/be-ai-quality-metrics`, `feature/ai-hardening`, `feature/be-validation-metrics`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-22 PR #99~100 dev 반영 및 `TutorResult`/`ValidationJudgment` 계약 확인
+- 변경:
+  - tutor 성공·fallback을 provider/environment별로 계측
+  - retrieval 성공·empty·fallback, 결과 수, 환경 오염 문서 수를 계측
+  - scenario 후보 valid·reject·fallback과 제한된 사유 label을 계측
+  - validation advisory와 기계 판정의 agree·disagree·unavailable을 계측
+  - Qdrant ingestion added·updated·deleted·error를 계측
+  - 사용자 ID·namespace·질문 원문·source 전체 경로·시나리오 제목을 label에서 배제
+- 검증:
+  - AI pytest `181 passed, 3 deselected`
+  - backend pytest `522 passed, 4 deselected`
+  - PR #102·#103 소유 경로/백엔드/프론트엔드 CI 전체 통과
+- 후속: AI-24 자동 평가 회귀 기준
+
+## AI-24 자동 평가 회귀 기준
+
+- 상태: 완료 — offline 회귀 게이트 PR #105 + 필수 CI 연결 PR #106
+- 작업일: 2026-09-02
+- 작업 브랜치: `feature/ai-hardening`, `feature/be-ai-eval-ci`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-23 PR #101~104 dev 반영 및 `TutorResult`/`ValidationJudgment` 계약 확인
+- 변경:
+  - retrieval/tutor/scenario/offline contract 평가를 단일 명령으로 실행
+  - 저장된 기준 대비 Recall@5, MRR, source/observation grounding, prompt contract,
+    scenario schema/environment/compiler/validation 지표의 3%p 초과 하락 차단
+  - environment contamination과 unsafe scenario acceptance는 한 건도 허용하지 않음
+  - `ai-data` 변경 시 기존 필수 `백엔드 테스트` CI check에서 AI offline suite와 회귀 게이트 실행
+- 프롬프트 재검토:
+  - 소크라테스식 hint level 0~3, untrusted data 경계, redaction 규칙 일치
+  - Kubernetes/Docker/Linux 명령 vocabulary 분리 일치
+  - scenario 정확히 3개 후보, environment allowlist, declarative schema 규칙 일치
+  - 문구 변경 없이 기존 prompt security/hint/schema 평가로 회귀 고정
+- 검증:
+  - AI pytest `185 passed, 3 deselected`
+  - backend pytest `522 passed, 4 deselected`
+  - 통합 회귀 게이트 `success=true`, contamination 0, unsafe acceptance 0
+  - PR #105~106 CI 전체 통과
+- 후속: AI-25 세 환경 end-to-end
+
+## AI-25 세 환경 end-to-end
+
+- 상태: 부분 완료 — offline E2E와 live DB/Qdrant/Kubernetes 확인 완료, provider 검증 대기
+- 작업일: 2026-09-03
+- 작업 브랜치: `feature/ai-release`
+- Wave: Wave 4
+- 선행 조건:
+  - AI-24 PR #105~107 dev 반영 및 AI 필수 CI 회귀 게이트 확인
+- 변경:
+  - scenario 생성 → compiler → mock injector → runtime observation → tutor level 0~3
+    → advisory → mechanical recovery → source/latency/token 기록을 단일 평가로 연결
+  - Kubernetes/Docker/Linux 각각 5회, 총 15회 실행
+  - Linux backend allowlist와 knowledge metadata의 taxonomy drift를 발견하고
+    `linux_disk_pressure`, `linux_cpu_saturation`, `linux_process_flood` 호환 mapping 추가
+- 검증:
+  - offline production-component E2E `15/15` 성공
+  - environment contamination `0`
+  - AI pytest `187 passed, 3 deselected`
+  - backend pytest `588 passed, 4 deselected`
+  - 기존 통합 회귀 게이트 `success=true`, PR #114 CI 전체 통과
+- 추가 live 검증(2026-09-04):
+  - Docker credential helper 정상 응답 및 PostgreSQL/Qdrant image pull 성공
+  - PostgreSQL health check와 Alembic `0004`까지 migration 성공
+  - Qdrant `/healthz` 및 integration test 통과
+  - Kubernetes API/CoreDNS 연결 확인
+- 남은 검증:
+  - OpenAI/Gemini API key가 없어 실제 provider 호출 2건 skip
+- 후속: provider key가 준비되면 integration sample을 실행하고 AI-25 완료 판정

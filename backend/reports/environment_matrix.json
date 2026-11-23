@@ -1,0 +1,498 @@
+{
+  "summary": {
+    "generated_at": "2026-09-15T17:06:37+0900",
+    "cluster": "docker-desktop",
+    "runs": 20,
+    "by_environment": {
+      "kubernetes": 8,
+      "docker": 6,
+      "linux": 6
+    },
+    "target_validation_ms": 300,
+    "validation_ms": {
+      "count": 58,
+      "min": 2.4,
+      "median": 33.8,
+      "p95": 60.4,
+      "max": 285.2
+    },
+    "inject_ms": {
+      "count": 20,
+      "min": 17.2,
+      "median": 225.6,
+      "p95": 394.7,
+      "max": 451.1
+    },
+    "recover_ms": {
+      "count": 20,
+      "min": 43.0,
+      "median": 123.8,
+      "p95": 439.0,
+      "max": 543.8
+    },
+    "revert_ms": {
+      "count": 20,
+      "min": 10.4,
+      "median": 46.8,
+      "p95": 100.2,
+      "max": 136.2
+    },
+    "detect_ms": {
+      "count": 20,
+      "min": 8.4,
+      "median": 50.5,
+      "p95": 2165.8,
+      "max": 2338.4
+    },
+    "resolve_ms": {
+      "count": 20,
+      "min": 3.2,
+      "median": 53.9,
+      "p95": 4068.8,
+      "max": 4075.7
+    },
+    "sandbox_provision_ms": {
+      "kubernetes": 2146.0,
+      "docker": 21327.6,
+      "linux": 2127.8
+    },
+    "websocket_overhead": [
+      {
+        "environment": "kubernetes",
+        "total_ms": 285.4,
+        "command_ms": 270.3,
+        "server_overhead_ms": 15.1
+      },
+      {
+        "environment": "kubernetes",
+        "total_ms": 184.0,
+        "command_ms": 183.5,
+        "server_overhead_ms": 0.5
+      },
+      {
+        "environment": "kubernetes",
+        "total_ms": 164.5,
+        "command_ms": 164.2,
+        "server_overhead_ms": 0.3
+      },
+      {
+        "environment": "linux",
+        "total_ms": 47.0,
+        "command_ms": 46.7,
+        "server_overhead_ms": 0.3
+      },
+      {
+        "environment": "linux",
+        "total_ms": 48.5,
+        "command_ms": 48.4,
+        "server_overhead_ms": 0.2
+      },
+      {
+        "environment": "linux",
+        "total_ms": 42.2,
+        "command_ms": 42.1,
+        "server_overhead_ms": 0.2
+      }
+    ]
+  },
+  "runs": [
+    {
+      "environment": "kubernetes",
+      "attempt": 1,
+      "chaos_type": "pod_failure",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl set image deployment/nginx nginx=nginx:1.29",
+      "inject_ms": 17.5,
+      "detect_ms": 10.6,
+      "recover_ms": 439.0,
+      "resolve_ms": 4068.8,
+      "revert_ms": 12.0,
+      "validation_samples_ms": [
+        10.6,
+        28.1,
+        18.3,
+        19.6
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 1,
+      "chaos_type": "memory_stress",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch deployment/nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"resources\":{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"memory\":\"64Mi\"}}}]}}}}'",
+      "inject_ms": 65.1,
+      "detect_ms": 10.9,
+      "recover_ms": 543.8,
+      "resolve_ms": 4075.7,
+      "revert_ms": 28.4,
+      "validation_samples_ms": [
+        10.9,
+        15.3,
+        37.3,
+        17.8
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 1,
+      "chaos_type": "service_misconfig",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch service webapp-svc -p '{\"spec\":{\"selector\":{\"app\":\"webapp\"}}}'",
+      "inject_ms": 44.8,
+      "detect_ms": 28.3,
+      "recover_ms": 301.9,
+      "resolve_ms": 4.0,
+      "revert_ms": 12.1,
+      "validation_samples_ms": [
+        28.3,
+        4.0
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 1,
+      "chaos_type": "network_latency",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch deployment/nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"readinessProbe\":null}]}}}}'",
+      "inject_ms": 28.7,
+      "detect_ms": 2020.1,
+      "recover_ms": 422.0,
+      "resolve_ms": 2017.0,
+      "revert_ms": 26.4,
+      "validation_samples_ms": [
+        13.1,
+        5.7,
+        4.4,
+        12.2
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 1,
+      "chaos_type": "docker_container_stopped",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker start training-app",
+      "inject_ms": 451.1,
+      "detect_ms": 46.3,
+      "recover_ms": 153.3,
+      "resolve_ms": 39.9,
+      "revert_ms": 45.1,
+      "validation_samples_ms": [
+        46.3,
+        39.9
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 1,
+      "chaos_type": "docker_network_disconnect",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker network connect training-net training-app",
+      "inject_ms": 294.1,
+      "detect_ms": 51.0,
+      "recover_ms": 81.7,
+      "resolve_ms": 53.5,
+      "revert_ms": 49.7,
+      "validation_samples_ms": [
+        51.0,
+        53.5
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 1,
+      "chaos_type": "docker_cpu_throttle",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker update --cpus 1 training-app",
+      "inject_ms": 252.8,
+      "detect_ms": 42.3,
+      "recover_ms": 48.7,
+      "resolve_ms": 49.2,
+      "revert_ms": 48.5,
+      "validation_samples_ms": [
+        42.3,
+        49.2
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 1,
+      "chaos_type": "linux_disk_pressure",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "rm /tmp/afterfail/afterfail-fill.dat",
+      "inject_ms": 244.9,
+      "detect_ms": 2103.3,
+      "recover_ms": 96.6,
+      "resolve_ms": 57.0,
+      "revert_ms": 100.2,
+      "validation_samples_ms": [
+        51.3,
+        50.8,
+        57.0
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 1,
+      "chaos_type": "linux_cpu_saturation",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "pkill -f afterfail-cpuburn",
+      "inject_ms": 276.1,
+      "detect_ms": 2338.4,
+      "recover_ms": 91.2,
+      "resolve_ms": 55.7,
+      "revert_ms": 82.7,
+      "validation_samples_ms": [
+        49.9,
+        285.2,
+        55.7
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 1,
+      "chaos_type": "linux_process_flood",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "pkill -f afterfail-worker",
+      "inject_ms": 356.9,
+      "detect_ms": 2096.3,
+      "recover_ms": 53.5,
+      "resolve_ms": 54.2,
+      "revert_ms": 136.2,
+      "validation_samples_ms": [
+        27.2,
+        68.1,
+        54.2
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 2,
+      "chaos_type": "pod_failure",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl set image deployment/nginx nginx=nginx:1.29",
+      "inject_ms": 17.8,
+      "detect_ms": 8.4,
+      "recover_ms": 248.1,
+      "resolve_ms": 4045.8,
+      "revert_ms": 10.4,
+      "validation_samples_ms": [
+        8.4,
+        19.6,
+        6.0,
+        17.9
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 2,
+      "chaos_type": "memory_stress",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch deployment/nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"resources\":{\"limits\":{\"memory\":\"128Mi\"},\"requests\":{\"memory\":\"64Mi\"}}}]}}}}'",
+      "inject_ms": 39.7,
+      "detect_ms": 12.9,
+      "recover_ms": 333.3,
+      "resolve_ms": 4051.2,
+      "revert_ms": 11.9,
+      "validation_samples_ms": [
+        12.9,
+        17.7,
+        19.3,
+        11.5
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 2,
+      "chaos_type": "service_misconfig",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch service webapp-svc -p '{\"spec\":{\"selector\":{\"app\":\"webapp\"}}}'",
+      "inject_ms": 64.2,
+      "detect_ms": 26.9,
+      "recover_ms": 163.2,
+      "resolve_ms": 3.2,
+      "revert_ms": 10.6,
+      "validation_samples_ms": [
+        26.9,
+        3.2
+      ]
+    },
+    {
+      "environment": "kubernetes",
+      "attempt": 2,
+      "chaos_type": "network_latency",
+      "user_id": "8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "namespace": "user-8ed1fa3a-0deb-4ea8-8bbf-8f538daaa35d",
+      "sandbox_id": "7390b103728d7ca5",
+      "container": "toolbox",
+      "user_recovery": "kubectl patch deployment/nginx -p '{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"nginx\",\"readinessProbe\":null}]}}}}'",
+      "inject_ms": 17.2,
+      "detect_ms": 2015.4,
+      "recover_ms": 150.3,
+      "resolve_ms": 2012.0,
+      "revert_ms": 26.7,
+      "validation_samples_ms": [
+        7.5,
+        6.9,
+        2.4,
+        8.7
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 2,
+      "chaos_type": "docker_container_stopped",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker start training-app",
+      "inject_ms": 394.7,
+      "detect_ms": 43.3,
+      "recover_ms": 169.1,
+      "resolve_ms": 47.3,
+      "revert_ms": 49.1,
+      "validation_samples_ms": [
+        43.3,
+        47.3
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 2,
+      "chaos_type": "docker_network_disconnect",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker network connect training-net training-app",
+      "inject_ms": 307.5,
+      "detect_ms": 49.9,
+      "recover_ms": 89.7,
+      "resolve_ms": 38.7,
+      "revert_ms": 39.1,
+      "validation_samples_ms": [
+        49.9,
+        38.7
+      ]
+    },
+    {
+      "environment": "docker",
+      "attempt": 2,
+      "chaos_type": "docker_cpu_throttle",
+      "user_id": "51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "namespace": "user-51c3ebff-feba-48b5-b5c0-37e2969c0f1d",
+      "sandbox_id": "6dd2dcca06cc53db",
+      "container": "dind",
+      "user_recovery": "docker update --cpus 1 training-app",
+      "inject_ms": 224.3,
+      "detect_ms": 57.7,
+      "recover_ms": 54.5,
+      "resolve_ms": 40.7,
+      "revert_ms": 59.8,
+      "validation_samples_ms": [
+        57.7,
+        40.7
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 2,
+      "chaos_type": "linux_disk_pressure",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "rm /tmp/afterfail/afterfail-fill.dat",
+      "inject_ms": 218.4,
+      "detect_ms": 2077.8,
+      "recover_ms": 43.0,
+      "resolve_ms": 39.5,
+      "revert_ms": 88.9,
+      "validation_samples_ms": [
+        46.2,
+        30.4,
+        39.5
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 2,
+      "chaos_type": "linux_cpu_saturation",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "pkill -f afterfail-cpuburn",
+      "inject_ms": 226.9,
+      "detect_ms": 2165.8,
+      "recover_ms": 97.2,
+      "resolve_ms": 60.4,
+      "revert_ms": 89.1,
+      "validation_samples_ms": [
+        38.5,
+        126.1,
+        60.4
+      ]
+    },
+    {
+      "environment": "linux",
+      "attempt": 2,
+      "chaos_type": "linux_process_flood",
+      "user_id": "a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "namespace": "user-a7b300a9-6814-45ba-914b-58a4628cc6a2",
+      "sandbox_id": "2eb79ffe0983e851",
+      "container": "shell",
+      "user_recovery": "pkill -f afterfail-worker",
+      "inject_ms": 257.4,
+      "detect_ms": 2105.5,
+      "recover_ms": 43.6,
+      "resolve_ms": 46.0,
+      "revert_ms": 81.0,
+      "validation_samples_ms": [
+        49.1,
+        55.3,
+        46.0
+      ]
+    }
+  ]
+}

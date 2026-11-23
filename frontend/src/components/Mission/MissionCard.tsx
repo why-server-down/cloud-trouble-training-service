@@ -1,64 +1,72 @@
 import React from 'react'
-
-interface Mission {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
-}
+import { getEnvironmentMeta } from '../../config/environments'
+import { MissionResponse } from '../../types/training'
+import { getMissionCopy } from './missionCopy'
+import { LockIcon } from './Icons'
 
 interface MissionCardProps {
-  mission: Mission
+  mission: MissionResponse
   isActive: boolean
   onStart: (missionId: string) => void
 }
 
-const missionCopy: Record<string, { name: string; description: string }> = {
-  pod_failure: {
-    name: '사라진 애플리케이션',
-    description: 'Nginx Pod가 ImagePullBackOff 상태입니다. 이미지 이름을 수정하여 Pod를 정상 상태로 복구하세요.',
-  },
-  memory_stress: {
-    name: '메모리 부족',
-    description: '애플리케이션 Pod가 메모리 부족으로 종료됩니다. 리소스 제한을 확인하고 조정하세요.',
-  },
-  service_misconfig: {
-    name: '끊어진 연결',
-    description: 'Service 설정 오류로 트래픽이 Pod에 전달되지 않습니다. selector 설정을 확인하세요.',
-  },
-  network_latency: {
-    name: '응답 없는 서버',
-    description: 'Pod에 지속적인 장애가 발생합니다. 상태 확인 설정을 점검하고 자동 복구되도록 구성하세요.',
-  },
-}
-
+/**
+ * 미션 큐의 한 줄 (FE-29). 레벨 번호 | 제목·설명·조건 | 상태.
+ * 카드 안의 카드와 줄마다 반복되던 환경 칩을 걷어냈다 — 환경은 위의 환경 탭이 말한다.
+ */
 const MissionCard: React.FC<MissionCardProps> = ({ mission, isActive, onStart }) => {
-  const copy = missionCopy[mission.chaos_type] || { name: mission.name, description: mission.description }
+  const copy = getMissionCopy(mission)
+  const isLocked = !mission.is_unlocked
+  /*
+   * 잠긴 카드와 진행 중 카드는 disabled 대신 aria-disabled 로 둔다 (설계 문서 8).
+   * disabled 는 Tab 순서에서 빠져 키보드·스크린리더 사용자가 "왜 못 누르는지"를 듣지 못한다.
+   * 대신 클릭은 여기서 막는다.
+   */
+  const isInert = isLocked || isActive
 
   return (
-  <button
-    className={`mission-card ${!mission.is_unlocked ? 'locked' : ''} ${isActive ? 'active' : ''}`}
-    type="button"
-    onClick={() => onStart(mission.id)}
-    disabled={!mission.is_unlocked || isActive}
-  >
-    <span className="mission-card-header">
-      <span className="mission-title">{!mission.is_unlocked && 'LOCKED / '}{copy.name}</span>
-      <span className="mission-level">Level {mission.level}</span>
-    </span>
-    <span className="mission-description">{copy.description}</span>
-    <span className="mission-info">
-      <span>제한 시간 {Math.floor(mission.time_limit / 60)}분</span>
-      <span>기본 {mission.base_score}점</span>
-      <span>힌트 -{mission.hint_penalty}점</span>
-    </span>
-    {isActive && <span className="mission-active-label">LIVE INCIDENT</span>}
-  </button>
+    <button
+      className={`mission-card${isLocked ? ' locked' : ''}${isActive ? ' active' : ''}`}
+      type="button"
+      onClick={() => {
+        if (!isInert) onStart(mission.id)
+      }}
+      aria-disabled={isInert || undefined}
+    >
+      <span className="mission-index" aria-hidden="true">
+        {String(mission.level).padStart(2, '0')}
+      </span>
+      <span className="mission-title">
+        {/* 줄에서 뺀 레벨과 환경은 스크린리더에는 그대로 읽힌다. */}
+        <span className="sr-only">레벨 {mission.level} · {getEnvironmentMeta(mission.environment).label} · </span>
+        {copy.name}
+      </span>
+      <span className="mission-description">{copy.description}</span>
+      <span className="mission-info">
+        <span>제한 시간 {Math.floor(mission.time_limit / 60)}분</span>
+        <span>기본 {mission.base_score}점</span>
+        <span>힌트 −{mission.hint_penalty}점</span>
+      </span>
+      {/* 오른쪽 끝은 줄의 상태다: 진행 중, 잠김과 열리는 조건, 또는 시작 안내. */}
+      {isActive ? (
+        <span className="mission-state mission-active-label">
+          <span className="ui-live-dot" aria-hidden="true" />
+          진행 중
+        </span>
+      ) : isLocked ? (
+        <span className="mission-state mission-lock-state">
+          <span className="ui-chip">
+            <LockIcon />
+            잠김
+          </span>
+          <span className="mission-lock-reason">이전 레벨을 완료하면 열립니다</span>
+        </span>
+      ) : (
+        <span className="mission-state mission-start-cue">
+          시작<span aria-hidden="true">→</span>
+        </span>
+      )}
+    </button>
   )
 }
 

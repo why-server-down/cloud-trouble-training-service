@@ -1,11 +1,135 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/k8s_survival"
+    # 스키마의 단일 출처는 Alembic 마이그레이션이다.
+    # 로컬 개발/테스트 편의를 위해서만 startup 시 create_all 을 허용하고,
+    # 배포 환경에서는 False 로 두고 `alembic upgrade head` 를 배포 단계에서 실행한다.
+    AUTO_CREATE_SCHEMA: bool = True
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
+    # Terminal 실행 (BE-05)
+    # 사용자 명령은 호스트 셸이 아니라 사용자 네임스페이스의 샌드박스 Pod 안에서 실행된다.
+    TERMINAL_BACKEND: str = "sandbox"  # "sandbox" | "mock"
+    COMMAND_TIMEOUT_SECONDS: int = 5
+    COMMAND_TIMEOUT_MAX_SECONDS: int = 30  # 환경별 override 상한
+    COMMAND_OUTPUT_LIMIT_BYTES: int = 64 * 1024  # 사용자에게 보내는 출력 상한
+    COMMAND_LOG_LIMIT_BYTES: int = 5 * 1024  # CommandLog 에 저장하는 상한
+
+    # 이 배포에서 열 훈련 환경 (쉼표 구분). 비우면 구현된 환경을 모두 연다.
+    # 배포처마다 여는 환경이 다를 수 있어 설정으로 둔다 — 예를 들어 Docker 환경은
+    # privileged DinD 가 필요해서, 다른 네트워크에 닿는 호스트에는 올리지 않는다.
+    # 구현되지 않은 환경 이름을 넣으면 기동 시점에 실패한다(조용히 무시하지 않는다).
+    ENABLED_ENVIRONMENTS: str = ""
+
+    # 보존 정책 (BE-29)
+    # 튜터 대화에는 사용자가 친 명령과 장애 상황이 그대로 남는다. 훈련이 끝난 뒤에도
+    # 무기한 보관할 이유가 없으므로 기간을 정해 지운다. 0 이하로 두면 정리하지 않는다.
+    TUTOR_MESSAGE_RETENTION_DAYS: int = 30
+    # 한 번에 지우는 행 수. 한 트랜잭션이 테이블을 오래 잡지 않게 나눠 지운다.
+    RETENTION_DELETE_BATCH: int = 1000
+
+    # 샌드박스 (BE-04)
+    # 이미지는 shell 을 포함해야 한다. toolbox Pod 가 /bin/sh 로 유지되기 때문이며,
+    # distroless 계열(registry.k8s.io/kubectl 등)은 쓸 수 없다.
+    # 클러스터와 kubectl 마이너 버전을 맞춘다.
+    SANDBOX_TOOLBOX_IMAGE: str = "alpine/k8s:1.34.1"
+    SANDBOX_READINESS_TIMEOUT_SECONDS: float = 90.0
+    # Docker 환경 샌드박스(DinD). rootless 가 클러스터에서 기동하지 않아 privileged 를 쓰며,
+    # 대신 자원 상한과 네트워크 정책으로 범위를 좁힌다. 자세한 사유는 sandbox_service 참고.
+    SANDBOX_DIND_IMAGE: str = "docker:27-dind"
+    SANDBOX_DIND_CPU_LIMIT: str = "1"
+    SANDBOX_DIND_MEMORY_LIMIT: str = "1Gi"
+    SANDBOX_DIND_STORAGE_LIMIT: str = "2Gi"
+    # DinD 안에서 훈련 대상이 되는 컨테이너
+    SANDBOX_TRAINING_IMAGE: str = "nginx:alpine"
+    SANDBOX_TRAINING_CONTAINER: str = "training-app"
+    SANDBOX_TRAINING_NETWORK: str = "training-net"
+    SANDBOX_TRAINING_VOLUME: str = "training-data"
+    SANDBOX_TRAINING_CPUS: str = "1"   # 훈련 컨테이너 정상 상태의 CPU 상한
+
+    # Kubernetes 환경의 훈련 대상 Deployment 이미지 (BE-25)
+    # `nginx:latest` 를 하드코딩하고 있었다. 태그가 움직이면 같은 미션이 다른
+    # 이미지 위에서 돌고, 게다가 `:latest` 는 imagePullPolicy 기본값이 Always 라
+    # 네임스페이스를 만들 때마다 레지스트리를 다시 다녀왔다.
+    # 배포에서는 아래 digest 형식으로 고정한다(.env.example 참고).
+    TRAINING_K8S_IMAGE: str = "nginx:1.29"
+
+    # Linux 환경 샌드박스. 관측 도구가 미리 들어 있는 이미지를 쓴다.
+    # (실측: journalctl/systemctl 은 systemd 부재로, dmesg 는 커널 버퍼 접근 제한으로
+    #  어떤 이미지에서도 동작하지 않는다. 그래서 명령 정책에서 제외한다)
+    SANDBOX_LINUX_IMAGE: str = "nicolaka/netshoot:v0.13"
+    SANDBOX_LINUX_CPU_LIMIT: str = "500m"
+    SANDBOX_LINUX_MEMORY_LIMIT: str = "512Mi"
+    SANDBOX_LINUX_STORAGE_LIMIT: str = "1Gi"
+    SANDBOX_LINUX_PID_LIMIT: int = 256
+    # 훈련 작업 디렉터리. tmpfs 로 마운트해 크기 상한이 df 에 보이게 한다.
+    # ephemeral-storage 상한은 kubelet 검사용이라 컨테이너 안 df 에 나타나지 않아
+    # 사용자가 디스크 압박을 관측할 수 없다.
+    SANDBOX_LINUX_WORKDIR: str = "/tmp/afterfail"
+    SANDBOX_LINUX_WORKDIR_SIZE: str = "64Mi"
+
+    # Chaos Mesh 가 설치된 네임스페이스.
+    # 공식 helm chart 기본값은 chaos-mesh 이고, 구버전 문서의 chaos-testing 과 다르다.
+    # 클러스터마다 다를 수 있어 설정으로 둔다.
+    CHAOS_MESH_NAMESPACE: str = "chaos-mesh"
+
+    # RuntimeContext 수집 (BE-19)
+    # 부분 실패를 허용하므로, 느린 수집 하나가 튜터 응답 전체를 붙잡지 않게 한다.
+    RUNTIME_CONTEXT_TIMEOUT_SECONDS: float = 3.0
+
+    # 환경별 분석 (BE-21)
+    # competency 의 speed 항이 기준으로 삼는 목표 복구 시간(초).
+    # 미션 time_limit 이 환경마다 다르므로 환경별 대표값을 설정으로 둔다.
+    TARGET_MTTR_SECONDS: int = 900
+
+    # 운영 설정 (BE-23)
+    # 쉼표로 구분한 허용 origin. 기본값은 로컬 개발용이며 배포에서는 반드시 지정한다.
+    # wildcard 와 allow_credentials 를 함께 쓰면 브라우저가 자격 증명을 아무 곳에나 보낸다.
+    # localhost 와 127.0.0.1 은 브라우저가 서로 다른 origin 으로 본다. 개발 중
+    # 어느 쪽으로 열어도 막히지 않도록 둘 다 기본값에 넣는다. LAN IP 로 시연할
+    # 때는 그 origin 을 .env 에 추가해야 한다(vite host:true 인 경우).
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://localhost:3000,"
+        "http://127.0.0.1:5173,http://127.0.0.1:3000"
+    )
+    SESSION_IDLE_TTL_SECONDS: int = 3600
+    # chat 은 LLM 호출 비용과 직결된다. 사용자당 분당 허용 횟수.
+    CHAT_RATE_LIMIT_PER_MINUTE: int = 12
+
+    # 배포 단계 표시. production 에서는 기동 시 비밀값이 안전한지 검사한다.
+    ENV: str = "development"  # "development" | "production"
+
+    _DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    def assert_secrets_ready(self) -> None:
+        """production 기동 시 기본값·약한 SECRET_KEY 를 거절한다.
+
+        공개 저장소에 있는 기본 키로 기동하면 누구나 임의 사용자 JWT 를 위조할 수
+        있다. 개발 환경(ENV=development)에서는 편의를 위해 통과시킨다.
+        """
+        if self.ENV != "production":
+            if self.SECRET_KEY == self._DEFAULT_SECRET_KEY:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "SECRET_KEY 가 기본값입니다. 배포 전에 반드시 교체하세요."
+                )
+            return
+        if self.SECRET_KEY == self._DEFAULT_SECRET_KEY or len(self.SECRET_KEY) < 32:
+            raise RuntimeError(
+                "production 기동 거부: SECRET_KEY 를 32자 이상의 고유한 값으로 설정하세요."
+            )
 
     # Mission system
     CHAOS_BACKEND: str = "mock"  # "mock" | "chaos_mesh"
@@ -23,6 +147,13 @@ class Settings(BaseSettings):
     SCENARIO_MODEL: str = "gpt-4o-mini"
     TUTOR_MODEL: str = "gpt-4o-mini"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    OPENAI_TIMEOUT: float = 10.0
+    CONTEXT_COLLECTION_TIMEOUT: float = 3.0
+    RAG_SEARCH_TIMEOUT: float = 2.0
+    AI_MAX_CONTEXT_TOKENS: int = 9_000
+    AI_MAX_COMPLETION_TOKENS: int = 500
+    AI_MAX_RETRIEVED_CHUNKS: int = 5
+    AI_PROVIDER_MAX_ATTEMPTS: int = 2
 
     # Gemini
     GEMINI_API_KEY: str = ""
@@ -33,8 +164,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = ""
     KNOWLEDGE_BASE_DIR: str = "../ai-data/knowledge-base"
 
-    class Config:
-        env_file = ".env"
+    # 실행 위치가 아니라 backend/.env 를 읽는다. 저장소 루트의 .env 는 docker compose 전용이라
+    # (GF_SECURITY_ADMIN_PASSWORD 등) 루트에서 실행하면 모르는 키로 기동이 실패했다.
+    model_config = SettingsConfigDict(env_file=BACKEND_ENV_FILE)
 
 
 settings = Settings()

@@ -55,11 +55,109 @@ k8s 타입:
 - 검증 안정화 (`VALIDATION_BACKEND=k8s` 실 테스트)
 - 미션 4 (network_latency) 재설계
 
-### 캡스톤 2 - 멀티 환경 고도화
+### 캡스톤 2 - 멀티 환경 고도화 (진행 중)
 
-- 탭 분리: Kubernetes / Docker-only / Linux / Application
-- 각 환경별 `BaseChaosInjector` 구현체 추가
-- 현재 ABC 구조가 확장을 고려해 설계되어 있어 캡스톤 2 진입 시 자연스럽게 붙인다
+> **실행 명세:** 2학기 구현은 [docs/backend-capstone2-semester-plan.md](docs/backend-capstone2-semester-plan.md)의
+> 작업 ID(`BE-00`~`BE-28`)를 단위로 진행한다. 프론트·AI는 각각
+> [docs/frontend-capstone2-semester-plan.md](docs/frontend-capstone2-semester-plan.md),
+> [docs/ai-capstone2-semester-plan.md](docs/ai-capstone2-semester-plan.md).
+> 아래 내용과 실행 명세가 어긋나면 실행 명세가 우선이며, 이 문서를 갱신한다.
+
+- 환경 3종: **Kubernetes(기존) / Docker / Linux**
+- **Application/DB는 목업 한정.** 백엔드 `SUPPORTED_ENVIRONMENTS`에 등록하지 않고
+  sandbox·injector·validator·명령 정책 어느 것도 제공하지 않는다. UI에서도 "개발 예정"이
+  아니라 **후속 연구**로 표기한다. 8주차 범위 게이트(BE-15)를 통과하고 백엔드가
+  application 실행 계약을 제공하기로 확정될 때만 별도 이슈로 승격한다.
+- `environment` 필드를 데이터 계층~API~팩토리까지 관통 (feature/env-schema, 완료)
+  - `core/environments.py` 상수·검증, 모델 3종에 `environment` 컬럼, 기존 DB idempotent 백필
+  - 현재 kubernetes만 실동작. docker/linux는 `assert_implemented`로 예약 → 선택 시 400
+  - 남은 구멍: `MissionAttempt`에 environment 없음, mission list API가 DB 값을 응답에 싣지 않음,
+    프론트가 environment를 요청 body에 보내지 않음 → `BE-02`/`BE-03`에서 닫는다.
+- injector/validation 레지스트리 디스패치 전환 (feature/injector-refactor, 완료 · PR #31)
+  - `_CHAOS_HANDLERS` / `_CHECKS` / `_RULE_RUNNERS`, `BaseChaosInjector`에 `environment`·`supports()`
+- 각 환경별 `BaseChaosInjector` / `BaseValidationService` 구현체 추가 (`BE-13`,`BE-14`,`BE-17`,`BE-18`)
+- AWS EKS 배포는 별도 트랙(feature/aws-migration, `BE-25`)
+
+#### 실행/격리 아키텍처 (설계 확정)
+
+멀티 환경의 핵심 난점은 injector가 아니라 **"장애를 어디서 실행하고 사용자별로 어떻게
+격리하느냐"** 이다. 이를 먼저 확정한다.
+
+**결정: K8s를 실행 기반으로 삼고, 환경은 그 위에 얹히는 "샌드박스 종류"로 본다.**
+사용자별 네임스페이스(`user-{id}`, 이미 존재)를 격리 경계로 재사용한다.
+
+```
+user-{id} 네임스페이스 (격리 경계)
+   ├─ ResourceQuota / LimitRange / 기본 deny NetworkPolicy
+   ├─ afterfail-k8s-toolbox     namespace-scoped ServiceAccount + kubectl  (kubernetes 실행 주체)
+   ├─ afterfail-k8s-target      기존 nginx/webapp 훈련 리소스              (kubernetes 공격 대상)
+   ├─ afterfail-docker-sandbox  rootless DinD 우선, 불가 시 제한 privileged DinD
+   └─ afterfail-linux-sandbox   제한 shell + 관측/stress 도구 + resource·ephemeral limit
+```
+
+- **격리:** 모든 환경이 사용자 네임스페이스 안의 Pod로 실행된다. Pod에 CPU/memory/
+  ephemeral-storage limit을 걸어 "진짜 OOM / 디스크 과부하"를 내도 노드·타 사용자에
+  영향이 없도록 한다. **호스트 커널 OOM과 호스트 디스크 fill은 주입 대상에서 제외한다.**
+- **실행 주체 분리:** kubernetes 환경에서도 사용자 명령은 백엔드 호스트가 아니라
+  toolbox Pod 안에서 실행된다. toolbox의 ServiceAccount는 자기 네임스페이스를 벗어나는
+  권한을 갖지 않는다.
+- **터미널 재설계(가장 큰 변경, `BE-05`·`BE-06`):** 현재 백엔드는 호스트에서 `kubectl`을
+  `shell=True` subprocess로 실행한다(`command_executor.py`). 이를 **사용자 Pod 안으로
+  exec하는 경로**로 바꾼다.
+  - `shell=True` / `create_subprocess_shell` 사용 0건이 완료 조건이다.
+  - validator 출력은 문자열이 아니라 **argv 리스트**가 되고, `shlex.split` 후
+    환경별 allowlist를 통과한 argv만 `connect_get_namespaced_pod_exec`로 실행한다.
+  - pipe·redirect·command substitution·chaining은 파서 이전에 거부한다.
+  - **실행 대상(namespace/pod/container)은 서버가 DB 세션에서 결정한다.** 브라우저가 보낸
+    값은 신뢰하지 않는다.
+  - WebSocket 연결 시 `session_id + user_id + is_active`로 소유권을 검증한다.
+    close code: `4001` 토큰 무효 / `4003` 소유자 불일치·비활성 / `4004` 세션·sandbox 없음 /
+    `4010` 환경 미가용.
+  - → `command_executor` / `websocket_handler` / `terminal.py` / `command_validator` /
+    신규 `sandbox_service.py`가 함께 바뀐다.
+- **상태 영속화(`BE-02`·`BE-08`):** 현재 활성 chaos ID가 프로세스 메모리 dict에만 있어
+  서버 재시작 시 장애를 정리할 수 없다. `MissionAttempt`에 `environment`·`chaos_id`·
+  `sandbox_id`를 저장하고 startup reconciliation으로 복구한다.
+- **주입 방식:** Chaos Mesh는 K8s 전용이므로 docker/linux엔 쓸 수 없다.
+  - docker: DinD 안에서 `docker` API로 네트워크 단절 / 볼륨·마운트 오류 / 리소스 고갈 주입
+  - linux: Pod 안에서 cgroup memory limit·`dd`/stress-ng·교육용 helper로
+    OOM / I/O 포화 / Zombie·Orphan 프로세스 주입
+  - 주입 전 원상태 snapshot을 저장하고 inject/revert는 idempotent해야 한다.
+
+**리스크 (구현 시 결정 필요 — `BE-00`):**
+- privileged 트레이드오프: 일부 커널 레벨 Linux 장애(I/O throttle 등)는 컨테이너 특권이 필요할
+  수 있다. 특권을 줄수록 격리가 약해진다 → "어디까지 진짜로 낼지 vs 안전" 선을 정해야 한다.
+  교육 목표를 container cgroup / ephemeral storage / PID 범위로 재정의하는 것이 기본 방침이다.
+- DinD는 통상 privileged가 필요 → rootless를 먼저 검증하고, 불가능하면 사유를 문서화한 뒤
+  제한 privileged를 쓰되 전용 node·strict quota·local demo 한정 여부를 함께 정한다.
+- 세션 재사용·만료·sandbox cleanup 정책을 한 가지로 고정한다(권장: 준비된 세션 재사용).
+
+#### 캡스톤2 브랜치 로드맵 (16주 / 8스프린트 / 백엔드 PR 10개)
+
+| # | 브랜치 | 작업 ID | 주차 | 내용 |
+|---|---|---|---|---|
+| — | `feature/env-schema` | — | 완료 | 환경 데이터 계층 관통 (PR #30) |
+| — | `feature/injector-refactor` | — | 완료 | 레지스트리 디스패치 전환 (PR #31) |
+| 1 | `feature/backend-baseline` | BE-01~03 | 1–2 | 테스트 녹색화, **Alembic 정식 도입**, API environment 필드 |
+| 2 | `feature/env-sandbox` | BE-04, BE-07 | 3–4 | `SandboxService`, Quota/NetworkPolicy/RBAC, 환경별 세션 API |
+| 3 | `feature/safe-terminal-exec` | BE-05, BE-06 | 3–4 | host shell 제거 → Pod exec, WebSocket 소유권 검증 |
+| 4 | `feature/env-runtime` | BE-08~10 | 5–6 | environment 기반 factory, 환경별 미션 잠금·seed, K8s 회귀 |
+| 5 | `feature/docker-env` | BE-11~15 | 7–8 | DinD sandbox·명령 정책·injector·validator, **8주차 범위 게이트** |
+| 6 | `feature/linux-env` | BE-16~18 | 9–10 | Linux sandbox·injector(OOM/I/O/Zombie)·validator |
+| 7 | `feature/cross-layer-contracts` | BE-19~21 | 11–12 | 환경별 RuntimeContext, AI 실행 계약, MTTR·competency analytics |
+| 8 | `feature/backend-hardening` | BE-22~24 | 13–14 | 동시성·재시작 reconciliation, CORS·메트릭, 테스트 확대 |
+| 9 | `feature/aws-migration` | BE-25 | 15–16 | EKS 보안 배포 (별도 트랙) |
+| 10 | `feature/backend-release` | BE-26~28 | 15–16 | 환경별 E2E, 성능 검증, 문서·시연 |
+
+순서 근거:
+- `backend-baseline`이 맨 앞이다. attempt에 `environment`·`chaos_id`가 없고 migration 이력이
+  없는 상태에서 sandbox를 얹으면 재시작 복구와 스키마 롤백이 불가능해진다.
+- `env-sandbox`(실행 기반)가 injector 구현체보다 먼저다. 실행/격리 환경이 없으면
+  injector를 짜도 "장애는 나는데 아무도 못 고치는" 반쪽이 된다.
+- Docker/Linux는 sandbox·safe-exec·factory가 끝난 뒤에야 병렬로 진행할 수 있다.
+
+**우선 해소 대상 (P0):** ① host `shell=True` 실행 ② WebSocket 소유권 미검증
+③ environment가 세션·명령 실행까지 미연결 ④ active chaos ID가 프로세스 메모리에만 존재.
 
 ---
 
@@ -110,18 +208,27 @@ k8s 타입:
 
 ## 캡스톤 1 선행 작업 (AI 구현 전 해결 필요)
 
-### 미션 4 (network_latency) 재설계 필요
+### 미션 4 (network_latency) — 해결됨 (BE-10, 2026-08-29)
 
-현재 미션 4의 해결 방식에 근본적인 문제가 있다.
+**과거 문제**: `NetworkChaos` 2초 지연 + Liveness Probe 추가를 정답으로 두었는데,
+Probe를 추가해도 지연은 사라지지 않아 "문제 해결"이 체감되지 않았다.
 
-- **현재 장애**: Chaos Mesh `NetworkChaos`로 2초 지연 주입
-- **현재 정답**: Liveness Probe 추가 (`kubectl patch deployment/nginx`)
-- **문제점**: Liveness Probe를 추가해도 NetworkChaos가 유지되는 한 지연은 사라지지 않는다. 사용자 입장에서 체감 가능한 "문제 해결"이 일어나지 않는다.
+**중간 변경**: 장애 방식을 readinessProbe 실패 주입(`/healthz-notexist`)으로 바꿨다.
 
-재설계 방향 후보:
-1. NetworkChaos를 제거하는 것 자체를 정답으로 바꿈 (`kubectl delete networkchaos`) 단, 사용자에게 chaos namespace 접근 권한이 있어야 함
-2. 네트워크 지연 대신 DNS misconfig 또는 잘못된 service port로 교체
-3. 현재 `CHAOS_BACKEND=mock` 환경에서 미션 4를 포기 미션으로 처리하고 새 장애로 교체
+**BE-10 실클러스터 회귀에서 드러난 결함**: 방식을 바꾼 뒤에도 미션이 동작하지 않았다.
+RollingUpdate 기본값(`maxSurge 25%`)에서는 새 Pod가 Ready가 되지 못하면 **기존 Ready
+Pod가 그대로 남는다.** 엔드포인트가 유지되어 서비스는 정상 동작하고, 검증기도
+"해결됨"으로 판정한다. 즉 **장애 자체가 발생하지 않았다.**
+
+```
+nginx-58d45b8fcf-zmqj5   1/1 Running   ← 기존 Pod, Ready 유지
+nginx-7794d56cc9-cgdnp   0/1 Running   ← 새 Pod, probe 실패
+endpoints: 10.244.0.26                  ← 서비스는 계속 정상
+```
+
+**해결**: 주입 시 롤아웃 전략을 `maxUnavailable=1 / maxSurge=0`으로 함께 조정해
+기존 Pod가 먼저 내려가게 했다. 복구(readinessProbe 제거) 시 전략도 기본값으로 되돌린다.
+실클러스터에서 주입 2초 만에 장애가 감지되고 복구 2초 만에 검증을 통과한다.
 
 ### cAdvisor 구축 필요
 
@@ -1501,7 +1608,7 @@ docker run -d -p 6333:6333 -p 6334:6334 \
 
 # 3. 환경 변수 설정 (.env)
 AI_BACKEND=gemini
-GEMINI_API_KEY=AIzaSyB8RN6K4NG4rdhkAu-7idUzIoOufkcgj0hGVHWepXjEYrY3QEA
+GEMINI_API_KEY=your-gemini-api-key-here
 GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
 QDRANT_URL=http://localhost:6333
 KNOWLEDGE_BASE_DIR=./knowledge-base

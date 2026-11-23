@@ -3,6 +3,7 @@ LLM Client Wrapper
 Provides a unified interface for OpenAI API calls with error handling and retry logic
 """
 
+import logging
 import time
 from typing import Optional, Dict, List
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ import openai
 from openai import OpenAI, APIError, RateLimitError, APIConnectionError
 
 from config import config
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,7 +45,7 @@ class LLMClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout: Optional[int] = None,
-        max_retries: int = 3,
+        max_retries: int = 2,
         retry_delay: float = 1.0
     ):
         """
@@ -134,7 +137,7 @@ class LLMClient:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_delay * (2 ** attempt)  # Exponential backoff
-                    print(f"Rate limit hit, retrying in {wait_time}s... (attempt {attempt + 1}/{self.max_retries})")
+                    logger.warning("LLM rate limited; retrying", extra={"attempt": attempt + 1})
                     time.sleep(wait_time)
                 else:
                     raise LLMClientError(f"Rate limit exceeded after {self.max_retries} retries: {str(e)}")
@@ -143,19 +146,13 @@ class LLMClient:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_delay * (2 ** attempt)
-                    print(f"Connection error, retrying in {wait_time}s... (attempt {attempt + 1}/{self.max_retries})")
+                    logger.warning("LLM connection failed; retrying", extra={"attempt": attempt + 1})
                     time.sleep(wait_time)
                 else:
                     raise LLMClientError(f"Connection failed after {self.max_retries} retries: {str(e)}")
             
             except APIError as e:
-                last_error = e
-                if attempt < self.max_retries - 1:
-                    wait_time = self.retry_delay
-                    print(f"API error, retrying in {wait_time}s... (attempt {attempt + 1}/{self.max_retries})")
-                    time.sleep(wait_time)
-                else:
-                    raise LLMClientError(f"API error after {self.max_retries} retries: {str(e)}")
+                raise LLMClientError(f"API error (not retried): {str(e)}")
             
             except Exception as e:
                 raise LLMClientError(f"Unexpected error: {str(e)}")

@@ -7,6 +7,30 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
+# 환경별 허용 fault type.
+# AI 가 다른 환경의 장애를 생성하면 그 환경 injector 가 처리할 수 없다.
+# 이 표가 AI 에게 전달되는 목록이자 컴파일 단계의 거절 기준이다.
+FAULT_TYPES_BY_ENVIRONMENT: dict[str, set[str]] = {
+    "docker": {
+        "docker_network_disconnect",
+        "docker_container_stopped",
+        "docker_cpu_throttle",
+    },
+    "linux": {
+        "linux_disk_pressure",
+        "linux_cpu_saturation",
+        "linux_process_flood",
+    },
+}
+
+
+def allowed_fault_types(environment: str) -> set[str]:
+    """그 환경에서 생성 가능한 fault type. AI 프롬프트와 컴파일 검증이 함께 쓴다."""
+    if environment in FAULT_TYPES_BY_ENVIRONMENT:
+        return set(FAULT_TYPES_BY_ENVIRONMENT[environment])
+    return set(ALLOWED_FAULT_TYPES)
+
+
 ALLOWED_FAULT_TYPES = {
     "image_pull_error",
     "crash_loop",
@@ -102,19 +126,37 @@ class ChaosPlanCompileError(Exception):
 class ChaosPlanCompiler:
     """AI 생성 scenario fault JSON → 검증된 ChaosPlan."""
 
-    def compile(self, scenario: dict, namespace: str) -> ChaosPlan:
+    def compile(
+        self, scenario: dict, namespace: str, environment: str = "kubernetes"
+    ) -> ChaosPlan:
         fault = scenario.get("fault", {})
         fault_type = fault.get("type", "")
 
-        if fault_type not in ALLOWED_FAULT_TYPES:
-            raise ChaosPlanCompileError(f"허용되지 않는 fault type: {fault_type}")
+        allowed = allowed_fault_types(environment)
+        if fault_type not in allowed:
+            # 다른 환경의 장애를 그 환경 injector 가 처리할 수 없다.
+            raise ChaosPlanCompileError(
+                f"'{environment}' 환경에서 허용되지 않는 fault type: {fault_type}"
+            )
 
         if not RESOURCE_NAME_PATTERN.match(namespace):
             raise ChaosPlanCompileError(f"유효하지 않은 namespace: {namespace}")
 
         plan_id = f"plan-{uuid.uuid4().hex[:12]}"
         plan = ChaosPlan(id=plan_id, namespace=namespace, fault_type=fault_type)
-        self._build_steps(plan, fault, namespace)
+        if environment == "kubernetes":
+            self._build_steps(plan, fault, namespace)
+        else:
+            # docker/linux 장애는 injector 가 고정된 절차로 주입한다.
+            # AI 가 임의 step 을 끼워 넣을 여지를 두지 않는다.
+            plan.steps.append(
+                ChaosStep(
+                    kind="sandbox_signal",
+                    resource="workload",
+                    name=fault_type,
+                    namespace=namespace,
+                )
+            )
 
         if len(plan.steps) > MAX_STEPS:
             raise ChaosPlanCompileError(f"최대 {MAX_STEPS}개 step만 허용됩니다")

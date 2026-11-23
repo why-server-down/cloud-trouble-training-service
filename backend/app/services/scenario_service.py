@@ -2,60 +2,73 @@
 ScenarioService - AI 시나리오 생성/시작/완료 오케스트레이터.
 기존 MissionService와 분리: /api/scenarios/* 전용.
 """
+import asyncio
+import logging
+import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
+
+from sqlalchemy.exc import IntegrityError
 
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
-from app.ai.scenario_agent import ScenarioGenerationInput, get_scenario_agent
+from app.ai.scenario_agent import ScenarioGenerationInput, get_scenario_agent, select_candidate
 from app.services.chaos_injector import BaseChaosInjector
-from app.services.chaos_plan import ChaosPlanCompiler, FAULT_TYPE_TO_CHAOS_TYPE
-from app.services.scoring_service import ScoringService
+from app.services.chaos_plan import (
+    ChaosPlanCompiler,
+    FAULT_TYPE_TO_CHAOS_TYPE,
+    allowed_fault_types,
+)
+from app.services.scoring_service import HINT_LIMIT_MESSAGE, MAX_HINT_LEVEL, ScoringService
 from app.services.validation_rule_service import ValidationRuleService
 from app.core.config import settings
+from app.core import environments
+from app.core.environments import DEFAULT_ENVIRONMENT
+from app.core.metrics import AI_VALIDATION_AGREEMENT
 
-ALLOWED_FAULT_TYPES = [
-    "image_pull_error",
-    "pod_failure",
-    "crash_loop",
-    "oom_killed",
-    "memory_stress",
-    "service_selector_mismatch",
-    "service_misconfig",
-    "network_latency",
-    "probe_failure",
-    "configmap_misconfig",
-    "liveness_probe_failure",
-    "init_container_failure",
-    "node_selector_mismatch",
-    "compound_probe_cascade",
-    "compound_crash_service",
-    "wrong_image_registry",
-    "secret_ref_missing",
-    "pvc_unbound",
-    "cpu_throttle",
-]
+logger = logging.getLogger(__name__)
+
+
+def _record_validation_agreement(*, provider, environment, mechanical, judgment):
+    agreement = "unavailable"
+    if judgment is not None:
+        agreement = "agree" if judgment.resolved == mechanical else "disagree"
+    AI_VALIDATION_AGREEMENT.labels(
+        provider=provider, environment=environment, agreement=agreement,
+    ).inc()
 
 
 class ScenarioService:
 
     def __init__(
         self,
-        chaos_injector: BaseChaosInjector,
+        injector_for: Callable[[str], BaseChaosInjector],
         scoring_service: ScoringService,
         validation_rule_service: ValidationRuleService,
     ):
-        self._chaos = chaos_injector
+        self._injector_for = injector_for
         self._scoring = scoring_service
         self._vrs = validation_rule_service
         self._compiler = ChaosPlanCompiler()
-        self._active_chaos_ids: dict[uuid.UUID, str] = {}  # attempt_id -> chaos_id
+        # 사용자별 시작 직렬화. 동시 요청(더블클릭·탭 2개)이 모두 활성 검사를
+        # 통과한 뒤 같은 nginx 에 장애를 주입하고, 진 쪽의 revert 가 이긴 쪽 장애까지
+        # 지우는 것을 막는다. ponytail: per-process 락. 멀티워커면 DB advisory lock 필요.
+        self._start_locks: dict[uuid.UUID, asyncio.Lock] = {}
 
     async def check_unlock_status(self, db: AsyncSession, user_id: uuid.UUID) -> dict:
-        """AI 모드 잠금 해제 상태 반환."""
-        result = await db.execute(select(Mission).order_by(Mission.level))
+        """AI 모드 잠금 해제 상태 반환.
+
+        이 배포에서 열린 환경의 미션만 센다 (BE-31). 닫힌 환경의 미션은 풀 수 없어서,
+        세면 AI 모드가 영영 열리지 않는다.
+        """
+        result = await db.execute(
+            select(Mission)
+            .where(Mission.environment.in_(environments.ENABLED_ENVIRONMENTS))
+            .order_by(Mission.level)
+        )
         missions = result.scalars().all()
         total = len(missions)
 
@@ -140,14 +153,24 @@ class ScenarioService:
         if scenario:
             scenario.status = "failed"
             if scenario.chaos_id:
-                await self._chaos.revert(scenario.chaos_id)
-                scenario.chaos_id = None
+                injector = self._injector_for(scenario.environment)
+                # revert 가 실패(False)했는데 chaos_id 를 지우면 장애가 영구히 남고
+                # reconciliation 도 추적하지 못한다. 성공했을 때만 비운다.
+                if await injector.revert(scenario.chaos_id, f"user-{attempt.user_id}"):
+                    scenario.chaos_id = None
+                    attempt.chaos_id = None
+        else:
+            # 고정 미션도 주입된 장애를 되돌린다(이전에는 ai_scenario 만 정리해,
+            # 시간 초과된 고정 미션의 장애가 다음 미션까지 남았다).
+            await self._cleanup_chaos(attempt)
 
         await db.commit()
         await db.refresh(attempt)
         return True
 
-    async def _get_recent_fault_types(self, db: AsyncSession, user_id: uuid.UUID, limit: int = 5) -> list[str]:
+    async def _get_recent_fault_types(
+        self, db: AsyncSession, user_id: uuid.UUID, environment: str, limit: int = 5
+    ) -> list[str]:
         result = await db.execute(
             select(GeneratedScenario.fault_type)
             .join(MissionAttempt, MissionAttempt.scenario_id == GeneratedScenario.id)
@@ -156,6 +179,7 @@ class ScenarioService:
                     MissionAttempt.user_id == user_id,
                     MissionAttempt.status.in_(["completed", "abandoned"]),
                     MissionAttempt.attempt_type == "ai_scenario",
+                    GeneratedScenario.environment == environment,
                 )
             )
             .order_by(MissionAttempt.start_time.desc())
@@ -168,9 +192,26 @@ class ScenarioService:
         db: AsyncSession,
         user: User,
         difficulty: str,
+        environment: str = DEFAULT_ENVIRONMENT,
         allow_demo_unlock: bool = False,
+        randomize: bool = True,
     ) -> dict:
         """난이도 선택 → AI 시나리오 생성 + 장애 주입 + attempt 생성 원스텝."""
+        lock = self._start_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:
+            return await self._start_random_locked(
+                db, user, difficulty, environment, allow_demo_unlock, randomize
+            )
+
+    async def _start_random_locked(
+        self,
+        db: AsyncSession,
+        user: User,
+        difficulty: str,
+        environment: str,
+        allow_demo_unlock: bool,
+        randomize: bool,
+    ) -> dict:
         await self._assert_unlocked(db, user.id, allow_demo_unlock=allow_demo_unlock)
 
         active = await self._get_active_attempt(db, user.id)
@@ -178,29 +219,44 @@ class ScenarioService:
             raise ValueError("이미 진행 중인 미션이 있습니다. 완료하거나 포기한 후 다시 시작하세요")
 
         # 생성 컨텍스트
-        recent_faults = await self._get_recent_fault_types(db, user.id)
+        recent_faults = await self._get_recent_fault_types(db, user.id, environment)
         namespace = f"user-{user.id}"
+        environment_fault_types = sorted(allowed_fault_types(environment))
 
         gen_input = ScenarioGenerationInput(
             difficulty=difficulty,
             namespace=namespace,
             recent_fault_types=recent_faults,
-            allowed_fault_types=ALLOWED_FAULT_TYPES,
+            allowed_fault_types=environment_fault_types,
+            environment=environment,
+            randomize=randomize,
         )
 
-        # AI 시나리오 생성
+        # AI 시나리오 생성. 동기 LLM 호출이라 스레드로 빼 이벤트 루프(터미널 WS·폴링)를
+        # 막지 않는다.
         agent = get_scenario_agent()
-        candidates = agent.generate(gen_input)
+        candidates = await asyncio.to_thread(agent.generate, gen_input)
         valid = [c for c in candidates if not c.rejected]
         if not valid:
             raise RuntimeError("시나리오 생성에 실패했습니다. 잠시 후 다시 시도해 주세요")
 
-        best = max(valid, key=lambda c: c.score)
+        best = select_candidate(valid, gen_input)
         scenario_json = best.scenario
+
+        # AI 가 만든 시나리오의 환경이 요청과 다르면 그 환경 injector 가 처리할 수 없다.
+        # 같은 환경 fixture 로의 fallback 만 허용하고, 환경을 바꾸는 fallback 은 막는다.
+        generated_environment = scenario_json.get("environment", environment)
+        if generated_environment != environment:
+            raise ValueError(
+                f"요청 환경('{environment}')과 생성된 시나리오 환경"
+                f"('{generated_environment}')이 일치하지 않습니다"
+            )
 
         # ChaosPlan 컴파일
         try:
-            plan = self._compiler.compile(scenario_json, namespace)
+            plan = self._compiler.compile(
+                scenario_json, namespace, environment=environment
+            )
         except Exception as e:
             raise RuntimeError(f"장애 계획 컴파일 실패: {e}")
 
@@ -209,6 +265,7 @@ class ScenarioService:
         scenario = GeneratedScenario(
             user_id=user.id,
             difficulty=difficulty,
+            environment=environment,
             title=scenario_json.get("title", "AI 생성 시나리오"),
             student_brief=scenario_json.get("student_brief", ""),
             internal_summary=scenario_json.get("internal_summary", ""),
@@ -234,26 +291,38 @@ class ScenarioService:
         )
 
         # 장애 주입 (fault_type → chaos_type 매핑 후 기존 inject() 사용)
-        chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(plan.fault_type, "pod_failure")
-        chaos_result = await self._chaos.inject(chaos_type, namespace)
+        chaos_type = FAULT_TYPE_TO_CHAOS_TYPE.get(plan.fault_type, plan.fault_type)
+        injector = self._injector_for(scenario.environment)
+        chaos_result = await injector.inject(chaos_type, namespace)
         if not chaos_result.success:
             raise RuntimeError(f"장애 주입 실패: {chaos_result.message}")
 
         scenario.status = "running"
         scenario.chaos_id = chaos_result.chaos_id
 
-        # MissionAttempt 생성
+        # chaos_id 를 attempt 에도 저장한다. 프로세스 메모리에만 두면 서버 재시작 후
+        # 주입된 장애를 되돌릴 수 없다.
         attempt = MissionAttempt(
             user_id=user.id,
             attempt_type="ai_scenario",
             scenario_id=scenario.id,
+            environment=scenario.environment,
+            chaos_id=chaos_result.chaos_id,
         )
         db.add(attempt)
-        await db.commit()
-        await db.refresh(attempt)
-        await db.refresh(scenario)
-
-        self._active_chaos_ids[attempt.id] = chaos_result.chaos_id
+        try:
+            await db.commit()
+            await db.refresh(attempt)
+            await db.refresh(scenario)
+        except IntegrityError:
+            # 동시 요청 두 개가 앞의 조회를 모두 통과하면 여기서 하나가 걸린다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise ValueError("이미 진행 중인 시나리오가 있습니다")
+        except Exception:
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise
 
         return {"scenario": scenario, "attempt": attempt}
 
@@ -282,7 +351,7 @@ class ScenarioService:
             attempt.end_time = now
             attempt.final_score = self._scoring.MIN_SCORE
             scenario.status = "failed"
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
 
         return {
@@ -307,6 +376,7 @@ class ScenarioService:
             raise ValueError("시나리오를 찾을 수 없습니다")
 
         namespace = f"user-{user_id}"
+        check_started = time.perf_counter()
         resolved, rule_results = await self._vrs.check_rules(
             scenario_id=scenario.id,
             namespace=namespace,
@@ -322,31 +392,68 @@ class ScenarioService:
                 namespace=namespace,
             )
 
-        # AI 판정: mechanical check 후에도 미해결 시 LLM이 K8s 상태 전체를 보고 재판정
+        # AI 판정은 **advisory 로만** 쓴다. mechanical 결과를 뒤집지 않는다.
+        #
+        # 이전에는 confidence >= 0.7 이면 resolved 를 LLM 판정으로 덮어썼다.
+        # 그러면 LLM 이 오판하는 순간 사용자가 고치지 않았는데도 완료 처리된다.
+        # 점수를 승인하는 유일한 기준은 mechanical validation 이다(BE-20).
         ai_judgment = None
         if not resolved and settings.VALIDATION_BACKEND != "mock" and settings.AI_BACKEND in ("openai", "gemini"):
-            from app.ai.validation_agent import get_validation_agent
-            agent = get_validation_agent()
-            ai_judgment = await agent.judge(
-                scenario_context={
-                    "title": scenario.title,
-                    "fault_type": scenario.fault_type,
-                    "student_brief": scenario.student_brief,
-                    "internal_summary": scenario.internal_summary,
-                    "namespace": namespace,
-                },
-                namespace=namespace,
+            try:
+                from app.ai.validation_agent import get_validation_agent
+                from app.services.runtime_context import get_runtime_context_collector
+                from app.services.sandbox_service import get_sandbox_service
+
+                sandbox = get_sandbox_service().reference_for(
+                    user_id=user_id,
+                    namespace=namespace,
+                    environment=scenario.environment,
+                )
+                runtime_context = await get_runtime_context_collector().collect(
+                    user_id=user_id,
+                    namespace=namespace,
+                    db=db,
+                    scenario_title=scenario.title,
+                    difficulty=scenario.difficulty,
+                    scenario_id=scenario.id,
+                    environment=scenario.environment,
+                    sandbox=sandbox,
+                )
+                agent = get_validation_agent()
+                ai_judgment = await agent.judge(
+                    scenario_context={
+                        "title": scenario.title,
+                        "fault_type": scenario.fault_type,
+                        "scenario_json": scenario.scenario_json,
+                    },
+                    namespace=namespace,
+                    runtime_context=runtime_context,
+                    environment=scenario.environment,
+                )
+            except Exception:
+                # advisory 계층의 실패가 mechanical 검증 결과나 점수 처리를 막지 않는다.
+                logger.exception("validation advisory collection failed")
+            _record_validation_agreement(
+                provider=settings.AI_BACKEND,
+                environment=scenario.environment,
+                mechanical=resolved,
+                judgment=ai_judgment,
             )
-            if ai_judgment.confidence >= 0.7:
-                resolved = ai_judgment.resolved
 
         attempt.last_validation_result = {
             "resolved": resolved,
+            "environment": scenario.environment,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "duration_ms": round((time.perf_counter() - check_started) * 1000),
             "rules": [{"name": r.name, "passed": r.passed, "error": r.error} for r in rule_results],
+            # advisory. 점수 승인에는 쓰이지 않는다.
             "ai_judgment": {
                 "resolved": ai_judgment.resolved,
                 "reason": ai_judgment.reason,
                 "confidence": ai_judgment.confidence,
+                "evidence": ai_judgment.evidence or [],
+                "advisory_only": True,
+                "error_code": ai_judgment.error_code,
             } if ai_judgment else None,
         }
 
@@ -359,7 +466,7 @@ class ScenarioService:
                 attempt.hints_used, scenario.hint_penalty,
             )
             scenario.status = "completed"
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
             return {
@@ -392,7 +499,7 @@ class ScenarioService:
         if scenario:
             scenario.status = "failed"
 
-        await self._cleanup_chaos(attempt.id)
+        await self._cleanup_chaos(attempt)
         await db.commit()
         return {"message": "AI 시나리오를 포기했습니다"}
 
@@ -401,6 +508,8 @@ class ScenarioService:
         attempt = await self._get_active_attempt(db, user_id)
         if not attempt or attempt.attempt_type != "ai_scenario":
             raise ValueError("진행 중인 AI 시나리오가 없습니다")
+        if attempt.hints_used >= MAX_HINT_LEVEL:
+            raise ValueError(HINT_LIMIT_MESSAGE)
 
         attempt.hints_used += 1
         await db.commit()
@@ -417,7 +526,12 @@ class ScenarioService:
         self._vrs.mark_resolved(attempt.scenario_id, namespace)
         return {"message": "[Mock] AI 시나리오 해결 상태로 설정했습니다. /api/scenarios/current/check로 확인하세요"}
 
-    async def _cleanup_chaos(self, attempt_id: uuid.UUID):
-        chaos_id = self._active_chaos_ids.pop(attempt_id, None)
-        if chaos_id:
-            await self._chaos.revert(chaos_id)
+    async def _cleanup_chaos(self, attempt: MissionAttempt) -> None:
+        """DB 에 저장된 chaos_id 로 되돌린다. 재시작 후에도 동작해야 한다."""
+        if not attempt.chaos_id:
+            return
+        injector = self._injector_for(attempt.environment)
+        # revert 성공 시에만 chaos_id 를 비운다. 실패했는데 비우면 장애가 영구히 남고
+        # reconciliation 도 재시도하지 못한다.
+        if await injector.revert(attempt.chaos_id, f"user-{attempt.user_id}"):
+            attempt.chaos_id = None

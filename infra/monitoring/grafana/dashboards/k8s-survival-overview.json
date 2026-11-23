@@ -25,23 +25,16 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "text"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
-              },
-              {
-                "color": "green",
-                "value": 1
-              },
-              {
-                "color": "green",
-                "value": 5
               }
             ]
           },
@@ -57,10 +50,9 @@
       },
       "id": 2,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -104,7 +96,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               },
               {
@@ -129,10 +121,9 @@
       },
       "id": 3,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -176,7 +167,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               },
               {
@@ -201,10 +192,9 @@
       },
       "id": 4,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -248,7 +238,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               },
               {
@@ -273,10 +263,9 @@
       },
       "id": 5,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -320,16 +309,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "red",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "text",
                 "value": 1
-              },
-              {
-                "color": "green",
-                "value": 5
               }
             ]
           },
@@ -345,10 +330,9 @@
       },
       "id": 6,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -392,7 +376,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "text",
                 "value": null
               },
               {
@@ -417,10 +401,9 @@
       },
       "id": 7,
       "options": {
-        "colorMode": "background",
+        "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
-        "noValue": "0",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [

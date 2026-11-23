@@ -9,6 +9,8 @@ Task 2: Vector Database Setup (Migrated to Qdrant)
 """
 
 import os
+import hashlib
+import re
 import time
 import uuid
 from typing import List, Dict, Optional
@@ -22,6 +24,11 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
     MatchAny,
+    PointIdsList,
+    CreateAlias,
+    CreateAliasOperation,
+    DeleteAlias,
+    DeleteAliasOperation,
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -29,17 +36,56 @@ try:
     from langchain_core.documents import Document
 except ImportError:
     from langchain.schema import Document
-from dotenv import load_dotenv
-
-from config import config
-
-load_dotenv()
+from config import AISettings, config
 
 # 임베딩 차원: OpenAI text-embedding-ada-002=1536, Gemini gemini-embedding-001=3072
 _EMBEDDING_DIMENSIONS = {
     "openai": 1536,
     "gemini": 3072,
+    "mock": 1536,
 }
+SUPPORTED_ENVIRONMENTS = frozenset({"kubernetes", "docker", "linux"})
+VECTOR_CANDIDATE_LIMIT = 20
+_TOKEN_PATTERN = re.compile(r"[가-힣]+|[a-z0-9_]+(?:[./:-][a-z0-9_]+)*")
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    """한국어, 영문, 숫자와 command 형태를 dependency 없이 정규화한다."""
+    return set(_TOKEN_PATTERN.findall(text.casefold()))
+
+
+def _keyword_overlap(query: str, title: str, content: str) -> float:
+    query_tokens = _normalized_tokens(query)
+    if not query_tokens:
+        return 0.0
+    document_tokens = _normalized_tokens(f"{title} {content}")
+    return len(query_tokens & document_tokens) / len(query_tokens)
+
+
+# 백엔드 fault_type(docker_*) → 지식베이스 태그(container_*) 별칭.
+# 양쪽 이름이 어긋나 Docker 장애에서 전용 문서가 하나도 검색되지 않았다.
+_FAULT_TYPE_ALIASES: dict[str, str] = {
+    "docker_network_disconnect": "container_network_disconnect",
+    "docker_cpu_throttle": "container_cpu_throttle",
+    "docker_container_stopped": "container_stopped",
+}
+
+
+class _OfflineEmbeddings:
+    """API key와 network 없이 사용하는 결정적 sparse embedding."""
+
+    def __init__(self, dimension: int):
+        self.dimension = dimension
+
+    def embed_query(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimension
+        for token in text.lower().split():
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            vector[int.from_bytes(digest[:4], "big") % self.dimension] += 1.0
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_query(text) for text in texts]
 
 
 @dataclass
@@ -49,6 +95,20 @@ class RetrievedDocument:
     similarity: float
     source: str
     metadata: Dict
+
+
+@dataclass(frozen=True)
+class IngestionReport:
+    """멱등 동기화 결과."""
+
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+    unchanged: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.added + self.updated + self.unchanged
 
 
 class RAGServiceError(Exception):
@@ -84,14 +144,15 @@ class RAGService:
     
     @property
     def EMBEDDING_DIMENSION(self) -> int:
-        return _EMBEDDING_DIMENSIONS.get(config.AI_BACKEND, 1536)
+        return _EMBEDDING_DIMENSIONS.get(self.settings.AI_BACKEND, 1536)
 
     def __init__(
         self,
-        collection_name: str = "k8s_docs",
+        collection_name: str = "afterfail_knowledge_v2",
         qdrant_url: Optional[str] = None,
         qdrant_api_key: Optional[str] = None,
-        use_memory: bool = False
+        use_memory: bool = False,
+        settings: Optional[AISettings] = None,
     ):
         """
         Initialize RAG service with Qdrant
@@ -106,17 +167,18 @@ class RAGService:
             QdrantConnectionError: If Qdrant initialization fails
         """
         self.collection_name = collection_name
+        self.settings = settings or config
         
         try:
             # Task 2.2: Initialize Qdrant client
-            if use_memory:
+            if use_memory or self.settings.AI_BACKEND == "mock":
                 # In-memory mode for testing
                 self.client = QdrantClient(":memory:")
-            elif qdrant_url or config.QDRANT_URL:
+            elif qdrant_url or self.settings.QDRANT_URL:
                 # Connect to Qdrant server (local or cloud)
                 self.client = QdrantClient(
-                    url=qdrant_url or config.QDRANT_URL,
-                    api_key=qdrant_api_key or config.QDRANT_API_KEY or None
+                    url=qdrant_url or self.settings.QDRANT_URL,
+                    api_key=qdrant_api_key or self.settings.QDRANT_API_KEY or None
                 )
             else:
                 # Default: connect to local Qdrant server
@@ -126,34 +188,42 @@ class RAGService:
                 )
             
             # 임베딩 초기화: gemini 또는 openai 백엔드 선택
-            if config.AI_BACKEND == "gemini":
-                gemini_key = config.GEMINI_API_KEY
+            if self.settings.AI_BACKEND == "mock":
+                self.embeddings = _OfflineEmbeddings(self.EMBEDDING_DIMENSION)
+            elif self.settings.AI_BACKEND == "gemini":
+                gemini_key = self.settings.GEMINI_API_KEY
                 if not gemini_key:
                     raise RAGServiceError("Gemini API key not configured")
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-                self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model=config.GEMINI_EMBEDDING_MODEL,
-                    google_api_key=gemini_key,
+                # 채팅과 같은 OpenAI 호환 REST 엔드포인트를 쓴다. langchain-google-genai(gRPC)는
+                # 새 형식 키(AQ.)에서 응답 없이 504 Deadline Exceeded 로 멈췄다(REST 는 1초 안에 응답).
+                self.embeddings = OpenAIEmbeddings(
+                    openai_api_key=gemini_key,
+                    openai_api_base=self.settings.api_base_url,
+                    model=self.settings.GEMINI_EMBEDDING_MODEL.removeprefix("models/"),
+                    # 문자열을 그대로 보낸다. 길이 검사용 tiktoken 토큰 배열은 OpenAI 전용이다.
+                    check_embedding_ctx_length=False,
                 )
             else:
-                api_key = config.OPENAI_API_KEY
+                api_key = self.settings.OPENAI_API_KEY
                 if not api_key or api_key == "your_openai_api_key_here":
                     raise RAGServiceError("OpenAI API key not configured")
                 self.embeddings = OpenAIEmbeddings(
                     openai_api_key=api_key,
-                    model="text-embedding-ada-002",
+                    model=self.settings.EMBEDDING_MODEL,
                 )
             
             # Task 2.3: Create collection if it doesn't exist
             self._ensure_collection_exists()
             
-        except Exception as e:
-            raise QdrantConnectionError(f"Failed to initialize Qdrant: {str(e)}")
+        except Exception as exc:
+            raise QdrantConnectionError(
+                "Failed to initialize Qdrant/RAG service"
+            ) from exc
     
     def _ensure_collection_exists(self):
         """
         Ensure collection exists with proper configuration.
-        차원이 현재 임베딩 모델과 다르면 컬렉션을 삭제하고 재생성한다.
+        차원이 다르면 기존 컬렉션을 보존하고 새 versioned collection을 만든다.
         """
         try:
             collections = self.client.get_collections().collections
@@ -165,8 +235,12 @@ class RAGService:
                 info = self.client.get_collection(self.collection_name)
                 existing_dim = info.config.params.vectors.size
                 if existing_dim != target_dim:
-                    print(f"Dimension mismatch ({existing_dim} → {target_dim}), recreating collection.")
-                    self.client.delete_collection(self.collection_name)
+                    suffix = hashlib.sha256(
+                        f"{self.collection_name}:{target_dim}".encode("utf-8")
+                    ).hexdigest()[:8]
+                    self.collection_name = f"{self.collection_name}_dim{target_dim}_{suffix}"
+                    if self.collection_name in collection_names:
+                        return
                 else:
                     print(f"Collection already exists: {self.collection_name} (dim={existing_dim})")
                     return
@@ -256,8 +330,12 @@ class RAGService:
             if not documents:
                 return []
             
-            chunk_size = chunk_size or config.RAG_CHUNK_SIZE
-            chunk_overlap = chunk_overlap or config.RAG_CHUNK_OVERLAP
+            chunk_size = self.settings.RAG_CHUNK_SIZE if chunk_size is None else chunk_size
+            chunk_overlap = (
+                self.settings.RAG_CHUNK_OVERLAP
+                if chunk_overlap is None
+                else chunk_overlap
+            )
             
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=chunk_size,
@@ -273,6 +351,113 @@ class RAGService:
             raise RAGServiceError(f"Failed to chunk documents: {str(e)}")
 
     
+    @staticmethod
+    def _point_id(document: Document, fallback_index: int) -> str:
+        metadata = document.metadata
+        source_id = str(metadata.get("source_id") or metadata.get("source") or "unknown")
+        chunk_index = metadata.get("chunk_index", fallback_index)
+        content_hash = str(
+            metadata.get("content_hash")
+            or hashlib.sha256(document.page_content.encode("utf-8")).hexdigest()
+        )
+        identity = f"{source_id}:{chunk_index}:{content_hash}"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+
+    def _existing_points(self) -> dict[str, dict]:
+        points: dict[str, dict] = {}
+        offset = None
+        while True:
+            batch, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in batch:
+                points[str(point.id)] = dict(point.payload or {})
+            if offset is None:
+                return points
+
+    def needs_sync(self, documents: List[Document]) -> bool:
+        """manifest/content hash 기반 desired point와 현재 collection 차이를 확인한다."""
+        desired = {
+            self._point_id(document, index): document
+            for index, document in enumerate(documents)
+        }
+        desired_sources = {
+            str(doc.metadata.get("source_id") or doc.metadata.get("source") or "unknown")
+            for doc in documents
+        }
+        existing = self._existing_points()
+        managed_ids = {
+            point_id
+            for point_id, payload in existing.items()
+            if str(payload.get("source_id") or payload.get("source") or "unknown")
+            in desired_sources
+        }
+        return set(desired) != managed_ids
+
+    def sync_documents(self, documents: List[Document]) -> IngestionReport:
+        """현재 source의 chunk를 안정 ID로 동기화하고 stale point를 제거한다."""
+        if not documents:
+            return IngestionReport()
+
+        desired = {
+            self._point_id(document, index): document
+            for index, document in enumerate(documents)
+        }
+        existing = self._existing_points()
+        desired_sources = {
+            str(doc.metadata.get("source_id") or doc.metadata.get("source") or "unknown")
+            for doc in documents
+        }
+        managed_existing = {
+            point_id: payload
+            for point_id, payload in existing.items()
+            if str(payload.get("source_id") or payload.get("source") or "unknown")
+            in desired_sources
+        }
+        unchanged_ids = set(desired) & set(managed_existing)
+        stale_ids = set(managed_existing) - set(desired)
+        new_ids = set(desired) - set(managed_existing)
+        existing_sources = {
+            str(payload.get("source_id") or payload.get("source") or "unknown")
+            for payload in managed_existing.values()
+        }
+        updated_ids = {
+            point_id
+            for point_id in new_ids
+            if str(
+                desired[point_id].metadata.get("source_id")
+                or desired[point_id].metadata.get("source")
+                or "unknown"
+            ) in existing_sources
+        }
+
+        if new_ids:
+            ordered_new_ids = sorted(new_ids)
+            self._upsert_documents(
+                [desired[point_id] for point_id in ordered_new_ids],
+                point_ids=ordered_new_ids,
+            )
+        if stale_ids:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=sorted(stale_ids)),
+                wait=True,
+            )
+
+        report = IngestionReport(
+            added=len(new_ids - updated_ids),
+            updated=len(updated_ids),
+            deleted=len(stale_ids),
+            unchanged=len(unchanged_ids),
+        )
+        from observability_bridge import record_ingestion_changes
+        record_ingestion_changes(report)
+        return report
+
     def ingest_documents(self, documents: List[Document]) -> int:
         """
         Generate embeddings and store in Qdrant
@@ -286,8 +471,21 @@ class RAGService:
         Raises:
             DocumentIngestionError: If ingestion fails
         """
+        try:
+            return self.sync_documents(documents).total
+        except Exception:
+            from observability_bridge import record_ingestion_changes
+            record_ingestion_changes(error=True)
+            raise
+
+    def _upsert_documents(
+        self,
+        documents: List[Document],
+        point_ids: Optional[List[str]] = None,
+    ) -> None:
+        """새롭거나 변경된 chunk만 embedding하고 upsert한다."""
         if not documents:
-            return 0
+            return
         
         try:
             texts = [doc.page_content for doc in documents]
@@ -312,13 +510,16 @@ class RAGService:
                             time.sleep(wait)
                         else:
                             raise DocumentIngestionError(f"Failed to generate embeddings: {str(e)}")
-                if batch_start + BATCH_SIZE < len(texts):
+                if (
+                    self.settings.AI_BACKEND != "mock"
+                    and batch_start + BATCH_SIZE < len(texts)
+                ):
                     time.sleep(35)  # 다음 배치 전 rate limit 회복 대기
 
             # Prepare points for Qdrant
             points = []
             for i, (text, embedding, metadata) in enumerate(zip(texts, all_embeddings, metadatas)):
-                point_id = str(uuid.uuid4())
+                point_id = point_ids[i] if point_ids else self._point_id(documents[i], i)
 
                 payload = {
                     "content": text,
@@ -346,30 +547,54 @@ class RAGService:
                 points=points
             )
 
-            return len(documents)
-            
         except DocumentIngestionError:
             raise
         except Exception as e:
             raise DocumentIngestionError(f"Failed to ingest documents: {str(e)}")
+
+    def promote_alias(self, alias_name: str) -> None:
+        """검증 완료 후에만 alias를 현재 collection으로 원자적으로 전환한다."""
+        if self.get_collection_stats()["document_count"] <= 0:
+            raise DocumentIngestionError("빈 collection은 운영 alias로 전환할 수 없습니다")
+
+        aliases = {alias.alias_name for alias in self.client.get_aliases().aliases}
+        operations = []
+        if alias_name in aliases:
+            operations.append(
+                DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=alias_name))
+            )
+        operations.append(
+            CreateAliasOperation(
+                create_alias=CreateAlias(
+                    collection_name=self.collection_name,
+                    alias_name=alias_name,
+                )
+            )
+        )
+        self.client.update_collection_aliases(change_aliases_operations=operations)
     
     def search_knowledge(
         self,
         query: str,
+        environment: Optional[str] = None,
+        fault_type: Optional[str] = None,
         top_k: Optional[int] = None,
         min_similarity: Optional[float] = None,
         filter_source: Optional[str] = None,
-        fault_type: Optional[str] = None,
+        rerank: bool = True,
+        timing: Optional[dict] = None,
     ) -> List[RetrievedDocument]:
         """
         Search vector DB for relevant documents using Qdrant
 
         Args:
             query: User query
+            environment: kubernetes, docker, linux 중 검색 대상 환경
+            fault_type: Optional chaos/fault type — filters to matching + general docs
             top_k: Number of results to return (defaults to config)
             min_similarity: Minimum similarity threshold 0-1 (defaults to config)
             filter_source: Optional filter by source metadata
-            fault_type: Optional chaos/fault type — filters to matching + general docs
+            rerank: semantic 후보에 keyword와 authority 점수를 결합할지 여부
 
         Returns:
             List of retrieved documents with similarity scores
@@ -378,34 +603,53 @@ class RAGService:
             SearchError: If search fails
         """
         try:
-            top_k = top_k or config.RAG_TOP_K
-            min_similarity = min_similarity or config.RAG_MIN_SIMILARITY
+            if environment not in SUPPORTED_ENVIRONMENTS:
+                raise SearchError(
+                    "environment는 kubernetes, docker, linux 중 하나여야 합니다"
+                )
+            top_k = self.settings.RAG_TOP_K if top_k is None else top_k
+            min_similarity = (
+                self.settings.RAG_MIN_SIMILARITY
+                if min_similarity is None
+                else min_similarity
+            )
+            if top_k == 0:
+                return []
+            if top_k < 0:
+                raise SearchError("top_k는 0 이상이어야 합니다")
 
             # Generate query embedding
             query_embedding = self.embeddings.embed_query(query)
 
             # Prepare filter
-            query_filter = None
+            conditions = [
+                FieldCondition(
+                    key="environments",
+                    match=MatchAny(any=[environment, "general"]),
+                )
+            ]
             if fault_type:
-                # fault_type에 해당하는 문서 + general 문서 포함
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="fault_types",
-                            match=MatchAny(any=[fault_type, "general"])
-                        )
-                    ]
+                # 백엔드는 docker_* 로 부르고 지식베이스는 container_* 로 태그돼 있어
+                # 일치하는 문서가 하나도 안 걸리고 general 만 돌아왔다. 별칭을 맞춰 준다.
+                aliased = _FAULT_TYPE_ALIASES.get(fault_type, fault_type)
+                wanted = {fault_type, aliased, "general"}
+                conditions.append(
+                    FieldCondition(
+                        key="fault_types",
+                        match=MatchAny(any=sorted(wanted)),
+                    )
                 )
-            elif filter_source:
-                query_filter = Filter(
-                    must=[
-                        FieldCondition(
-                            key="source",
-                            match=MatchValue(value=filter_source)
-                        )
-                    ]
+            if filter_source:
+                conditions.append(
+                    FieldCondition(
+                        key="source",
+                        match=MatchValue(value=filter_source),
+                    )
                 )
+            query_filter = Filter(must=conditions)
             
+            candidate_limit = VECTOR_CANDIDATE_LIMIT if rerank else top_k
+
             # Search similar documents in Qdrant (qdrant-client 1.7+ API)
             try:
                 # 신버전 API
@@ -413,7 +657,7 @@ class RAGService:
                 search_results = self.client.query_points(
                     collection_name=self.collection_name,
                     query=query_embedding,
-                    limit=top_k,
+                    limit=candidate_limit,
                     query_filter=query_filter,
                     score_threshold=min_similarity,
                 ).points
@@ -422,23 +666,61 @@ class RAGService:
                 search_results = self.client.search(
                     collection_name=self.collection_name,
                     query_vector=query_embedding,
-                    limit=top_k,
+                    limit=candidate_limit,
                     query_filter=query_filter,
                     score_threshold=min_similarity,
                 )
 
-            # Format results
+            # Format + hybrid rerank
+            rerank_started = time.perf_counter()
             documents = []
             for result in search_results:
+                payload = dict(result.payload or {})
+                semantic_score = float(result.score)
+                keyword_score = _keyword_overlap(
+                    query,
+                    str(payload.get("title", "")),
+                    str(payload.get("content", "")),
+                )
+                try:
+                    authority = min(1.0, max(0.0, float(payload.get("authority", 0))))
+                except (TypeError, ValueError):
+                    authority = 0.0
+                final_score = (
+                    0.75 * semantic_score
+                    + 0.15 * keyword_score
+                    + 0.10 * authority
+                    if rerank
+                    else semantic_score
+                )
+                payload.update(
+                    {
+                        "semantic_score": semantic_score,
+                        "keyword_score": keyword_score,
+                        "final_score": final_score,
+                    }
+                )
                 documents.append(RetrievedDocument(
-                    content=result.payload.get("content", ""),
-                    similarity=result.score,
-                    source=result.payload.get("source", "unknown"),
-                    metadata=result.payload
+                    content=payload.get("content", ""),
+                    similarity=semantic_score,
+                    source=payload.get("source", "unknown"),
+                    metadata=payload,
                 ))
+
+            documents.sort(
+                key=lambda document: (
+                    -document.metadata["final_score"],
+                    -document.metadata["semantic_score"],
+                    str(document.metadata.get("source_id", document.source)),
+                    str(document.metadata.get("content_hash", "")),
+                )
+            )
+            if timing is not None:
+                timing["rerank_ms"] = (time.perf_counter() - rerank_started) * 1000
+            return documents[:top_k]
             
-            return documents
-            
+        except SearchError:
+            raise
         except Exception as e:
             raise SearchError(f"Failed to search knowledge base: {str(e)}")
     
@@ -446,6 +728,7 @@ class RAGService:
         self,
         base_prompt: str,
         user_question: str,
+        environment: Optional[str] = None,
         top_k: int = 3
     ) -> str:
         """
@@ -460,7 +743,9 @@ class RAGService:
             Augmented prompt with retrieved knowledge
         """
         # Search for relevant docs
-        docs = self.search_knowledge(user_question, top_k=top_k)
+        docs = self.search_knowledge(
+            user_question, environment=environment, top_k=top_k
+        )
         
         if not docs:
             return base_prompt
@@ -523,7 +808,7 @@ def main():
     # Test search
     print("\nTesting search...")
     query = "Pod is in ImagePullBackOff status"
-    results = rag.search_knowledge(query, top_k=2)
+    results = rag.search_knowledge(query, environment="kubernetes", top_k=2)
     
     print(f"\nQuery: {query}")
     print(f"Found {len(results)} relevant documents:\n")

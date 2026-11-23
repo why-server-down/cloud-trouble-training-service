@@ -1,0 +1,18 @@
+# 애플리케이션 네임스페이스 (BE-25)
+#
+# Pod Security Admission 을 restricted 로 강제한다. 여기서 도는 것은 백엔드·프론트·
+# 마이그레이션 Job 뿐이고, 전부 비특권으로 돌 수 있다.
+#
+# 훈련용 사용자 네임스페이스(user-*)는 이 규칙을 쓸 수 없다. Docker 환경 샌드박스가
+# privileged DinD 이기 때문이다. 그래서 배포 경계를 나눈다 —
+# 자세한 근거는 infra/k8s/README.md 참고.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: afterfail
+  labels:
+    app.kubernetes.io/name: afterfail
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

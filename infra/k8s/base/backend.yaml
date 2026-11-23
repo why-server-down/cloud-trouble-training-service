@@ -1,0 +1,84 @@
+# 백엔드 (BE-25)
+#
+# 비특권으로 돈다 — PSA restricted 를 만족한다. 사용자 샌드박스는 특권이 필요할 수
+# 있지만(Docker 환경) **백엔드 자신은 아니다.** 둘을 섞지 않는다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: afterfail-backend
+  namespace: afterfail
+  labels:
+    app.kubernetes.io/name: afterfail
+    app.kubernetes.io/component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: afterfail
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: afterfail
+        app.kubernetes.io/component: backend
+    spec:
+      serviceAccountName: afterfail-backend
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: afterfail/backend:REPLACE_WITH_DIGEST
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: afterfail-config
+            - secretRef:
+                name: afterfail-secrets
+          # /health 는 프로세스만 본다. 여기서 DB 를 확인하면 DB 가 잠깐 흔들릴 때
+          # 살아 있는 프로세스가 재시작돼 복구가 더 어려워진다(BE-23).
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # /ready 가 의존 상태를 본다. 준비되지 않은 Pod 는 트래픽을 받지 않는다.
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: {cpu: "100m", memory: "256Mi"}
+            limits: {cpu: "1", memory: "1Gi"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem 이므로 쓰기가 필요한 곳만 tmpfs 로 준다.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: afterfail-backend
+  namespace: afterfail
+spec:
+  selector:
+    app.kubernetes.io/name: afterfail
+    app.kubernetes.io/component: backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

@@ -4,6 +4,8 @@ Qdrant 자동 초기화 서비스.
 
 조건:
 - AI_BACKEND=mock → skip (임베딩 API 없음)
+- AI_BACKEND·키·Qdrant 주소는 튜터와 같은 backend Settings(backend/.env)에서 읽는다.
+  예전에는 셸 환경변수만 봐서, backend/.env 에 gemini 를 적어도 mock 으로 보고 건너뛰었다.
 - Qdrant 컬렉션에 문서가 이미 있으면 → skip
 - 위 두 조건 모두 아닐 때만 ingestion 실행
 """
@@ -14,6 +16,8 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +43,13 @@ def _ensure_ai_data_path() -> bool:
 
 def _run_ingestion() -> None:
     """blocking: Qdrant 컬렉션 확인 후 비어있으면 ingestion 실행."""
-    from config import config  # ai-data/config.py
+    from config import AISettings  # ai-data/config.py
     from ingest import load_all_documents
     from rag_service import RAGService, RAGServiceError
 
+    ai_settings = AISettings.from_backend_settings(settings)
     try:
-        rag = RAGService()
+        rag = RAGService(settings=ai_settings)
     except RAGServiceError as e:
         logger.warning("Qdrant 연결 실패, auto-ingestion 건너뜀: %s", e)
         return
@@ -62,7 +67,7 @@ def _run_ingestion() -> None:
         return
 
     logger.info("Qdrant 컬렉션이 비어있음, knowledge-base auto-ingestion 시작...")
-    kb_dir = Path(config.KNOWLEDGE_BASE_DIR)
+    kb_dir = Path(ai_settings.KNOWLEDGE_BASE_DIR)
     if not kb_dir.exists():
         logger.warning("knowledge-base 디렉토리 없음: %s", kb_dir)
         return
@@ -83,7 +88,7 @@ async def auto_ingest_if_empty() -> None:
     임베딩 생성(CPU/네트워크 bound)은 ThreadPoolExecutor에서 실행한다.
     """
     # mock 모드는 임베딩 API 없으므로 경로 확인 전에 early return
-    if os.getenv("AI_BACKEND", "mock") == "mock":
+    if settings.AI_BACKEND == "mock":
         logger.info("AI_BACKEND=mock, Qdrant auto-ingestion 건너뜀")
         return
 
@@ -91,11 +96,15 @@ async def auto_ingest_if_empty() -> None:
         return
 
     try:
-        from config import config  # ai-data/config.py
+        import config  # noqa: F401 — ai-data/config.py
     except ImportError:
         logger.warning("ai-data config import 실패, auto-ingestion 건너뜀")
         return
 
+    # 적재는 튜터 품질을 높일 뿐 서버 기동 조건이 아니다. 임베딩 API 가 시간 초과(504)여도 서버는 뜬다.
     loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        await loop.run_in_executor(executor, _run_ingestion)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            await loop.run_in_executor(executor, _run_ingestion)
+    except Exception:
+        logger.exception("Qdrant auto-ingestion 실패, 문서 없이 계속한다")

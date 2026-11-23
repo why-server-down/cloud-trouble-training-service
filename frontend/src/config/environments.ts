@@ -1,0 +1,446 @@
+import {
+  ENVIRONMENT_IDS,
+  EnvironmentCapability,
+  EnvironmentDisabledReason,
+  EnvironmentId,
+  EnvironmentItem,
+  EnvironmentStatus,
+  isEnvironmentCapability,
+  isEnvironmentDisabledReason,
+  isEnvironmentStatus,
+} from '../types/training'
+
+/**
+ * 환경 탭에 쓰는 표시 문구.
+ *
+ * 백엔드 `GET /api/environments` 는 id / status / capabilities 만 내보내고
+ * label 같은 표시 문구는 프론트 책임이라고 계약되어 있다
+ * (`backend/app/api/environments.py` docstring).
+ * 그래서 이 파일은 순수 표시용 메타만 갖고, 가용성 판단은 담지 않는다.
+ */
+export interface EnvironmentDisplayMeta {
+  label: string
+  subtitle: string
+  /** 미션 시작 전 field guide 의 "상태 조사" 단계 설명 (FE-09). */
+  investigationHint: string
+}
+
+/** Record 로 선언해 환경이 추가되면 컴파일 단계에서 누락이 드러나게 한다. */
+export const ENVIRONMENT_META: Record<EnvironmentId, EnvironmentDisplayMeta> = {
+  kubernetes: {
+    label: 'Kubernetes',
+    subtitle: '쿠버네티스 장애 대응',
+    investigationHint: 'Pod, Deployment, Service 상태와 이벤트를 차례로 확인합니다.',
+  },
+  docker: {
+    label: 'Docker',
+    subtitle: '컨테이너 운영',
+    investigationHint: '컨테이너 상태와 로그, 네트워크·자원 설정을 차례로 확인합니다.',
+  },
+  linux: {
+    label: 'Linux',
+    subtitle: '시스템 관리',
+    investigationHint: '프로세스, 디스크 사용량, CPU 사용률을 차례로 확인합니다.',
+  },
+}
+
+/**
+ * 환경별 터미널 설정 (FE-07).
+ *
+ * `binary` 와 `completions` 의 원본은 백엔드 명령 정책
+ * (`backend/app/services/command_validator.py`) 이다. 프론트가 여기서 더 넓게
+ * 제안하면 사용자는 서버가 거절할 명령을 Tab 으로 완성하게 된다.
+ */
+export interface EnvironmentTerminalMeta {
+  /** 터미널 헤더 라벨. 어느 환경의 셸인지 한눈에 보이게 한다. */
+  headerLabel: string
+  /**
+   * argv[0] 이 고정 실행 파일인 환경의 그 실행 파일 (kubectl / docker).
+   * 명령 자체가 argv[0] 인 환경(Linux)은 null 이고 `allowedCommands` 를 쓴다.
+   */
+  binary: string | null
+  /**
+   * argv[0] 자체로 허용 여부가 갈리는 환경의 명령 목록 (FE-09).
+   * 원본은 `LinuxPolicy` 의 READ_COMMANDS + FILE_READ_COMMANDS + RECOVERY_COMMANDS 다.
+   * binary 환경은 null.
+   */
+  allowedCommands: readonly string[] | null
+  /** Tab 자동완성 후보. */
+  completions: readonly string[]
+  /**
+   * 미션 시작 전 field guide 에 보여줄 조사 시작 명령 (FE-09).
+   * 예전에는 App.tsx 에 kubectl 명령이 하드코딩돼 Docker/Linux 탭에서도 그대로 보였다.
+   */
+  investigationStarters: readonly string[]
+  /**
+   * 조사 명령을 실행한 뒤 출력에서 무엇을 볼지 (FE-28). 정답이 아니라 시선을 둘 자리다 —
+   * 명령을 쳤는데 무엇이 단서인지 몰라 막히는 첫 사용자를 위한 것이다. 명령 아래에 그대로
+   * 한 문장으로 붙으므로 '~를 찾습니다 / ~를 봅니다'처럼 끝맺는다.
+   */
+  investigationClues: Readonly<Record<string, string>>
+}
+
+export const ENVIRONMENT_TERMINAL: Record<EnvironmentId, EnvironmentTerminalMeta> = {
+  kubernetes: {
+    headerLabel: 'kubectl 터미널',
+    binary: 'kubectl',
+    allowedCommands: null,
+    investigationStarters: [
+      'kubectl get pods',
+      'kubectl get deployments',
+      'kubectl get services',
+      'kubectl get events --sort-by=.metadata.creationTimestamp',
+    ],
+    investigationClues: {
+      'kubectl get pods': 'READY가 1/1처럼 다 차지 않았거나, STATUS가 Running이 아니거나, RESTARTS가 늘고 있는 Pod를 찾습니다.',
+      'kubectl get deployments': 'READY가 원하는 개수(예: 1/1)를 채우는지 봅니다.',
+      'kubectl get services': '연결할 Service가 있는지 보고, 이어서 endpoints로 실제 연결 대상을 확인합니다.',
+      'kubectl get events --sort-by=.metadata.creationTimestamp': '맨 아래 Warning 이벤트의 REASON과 MESSAGE를 읽습니다.',
+    },
+    completions: [
+      'kubectl get pods',
+      'kubectl get services',
+      'kubectl get deployments',
+      'kubectl get endpoints',
+      'kubectl describe pod ',
+      'kubectl describe service ',
+      'kubectl logs ',
+      // 복구 계열. 고정 미션의 정답 경로다 — Pod 삭제는 같은 설정으로 다시 만들어질 뿐이라 넣지 않는다.
+      'kubectl set image deployment/nginx nginx=',
+      'kubectl set resources deployment/nginx --limits=memory=',
+      'kubectl rollout undo deployment/nginx',
+      'kubectl version',
+      'kubectl help',
+      'kubectl get all',
+      'clear',
+    ],
+  },
+  docker: {
+    headerLabel: 'docker 터미널',
+    binary: 'docker',
+    allowedCommands: null,
+    investigationStarters: [
+      'docker ps -a',
+      'docker logs ',
+      'docker inspect ',
+      'docker network inspect ',
+    ],
+    investigationClues: {
+      'docker ps -a': 'STATUS가 Exited로 멈춘 컨테이너가 있는지 봅니다.',
+      'docker logs ': '뒤에 컨테이너 이름을 붙여 실행하고, 오류가 없으면 앱이 아니라 컨테이너 설정에서 원인을 찾습니다.',
+      'docker inspect ': '뒤에 컨테이너 이름을 붙여 실행하고 State, NetworkSettings, HostConfig의 자원 제한을 봅니다.',
+      'docker network inspect ': '뒤에 네트워크 이름을 붙여 실행하고 Containers 목록에 훈련 컨테이너가 있는지 봅니다.',
+    },
+    // BE-12 DockerPolicy 의 READ_COMMANDS / READ_SUBCOMMANDS / RECOVERY_COMMANDS 범위 안에서만 고른다.
+    completions: [
+      'docker ps',
+      'docker ps -a',
+      'docker images',
+      'docker inspect ',
+      'docker logs ',
+      'docker stats --no-stream',
+      'docker top ',
+      'docker diff ',
+      'docker port ',
+      'docker network ls',
+      'docker network inspect ',
+      'docker volume ls',
+      'docker volume inspect ',
+      'docker container ls',
+      'docker container inspect ',
+      'docker start ',
+      'docker restart ',
+      'docker stop ',
+      'docker unpause ',
+      'docker update --cpus ',
+      'docker version',
+      'docker info',
+      'clear',
+    ],
+  },
+  linux: {
+    headerLabel: 'Linux 셸',
+    // Linux 는 단일 바이너리가 아니라 명령 자체가 argv[0] 이다 (BE-16 LinuxPolicy).
+    binary: null,
+    // LinuxPolicy 의 READ_COMMANDS + FILE_READ_COMMANDS + RECOVERY_COMMANDS 를 그대로 옮겼다.
+    allowedCommands: [
+      'ps', 'free', 'df', 'du', 'top', 'uptime', 'iostat',
+      'ss', 'netstat', 'lsof', 'pstree', 'id', 'whoami', 'env',
+      'cat', 'head', 'tail', 'wc', 'ls', 'stat', 'find',
+      'kill', 'pkill', 'rm', 'truncate',
+    ],
+    /*
+     * 실제 장애 유형(process_flood / disk_pressure / cpu_saturation)을 조사하는 순서대로.
+     * busybox `ps aux` 에는 %CPU 열이 없어 CPU 는 `top` 으로 본다. `/proc/loadavg` 는
+     * 노드 전체 값이라 이 샌드박스의 장애를 가리키지 못해 넣지 않는다.
+     */
+    investigationStarters: ['ps aux', 'df -h', 'ls -al /tmp/afterfail', 'top -b -n 1'],
+    investigationClues: {
+      'ps aux': '같은 이름으로 반복되는 프로세스가 있는지 찾습니다.',
+      'df -h': 'Use%가 100%에 가까운 마운트가 있는지 봅니다.',
+      'ls -al /tmp/afterfail': '크기가 유난히 큰 파일이 있는지 찾습니다.',
+      'top -b -n 1': '컨테이너 CPU 상한 때문에 %CPU 숫자는 작게 보이므로, 크기보다 맨 위에 있는 프로세스가 무엇인지 봅니다.',
+    },
+    /*
+     * 계획서 FE-09 의 최소 목록에는 systemctl / journalctl / dmesg 가 있지만
+     * LinuxPolicy 가 셋 다 배제한다 — 이 이미지에 systemd 가 없고 커널 링 버퍼도
+     * 막혀 있다(BE-16 실측). 제안하면 사용자가 그것을 정답으로 착각한다.
+     *
+     * 값이 분리되는 플래그(`-n 50`, `-s 0`)는 예전에 넣을 수 없었다 —
+     * `LinuxPolicy._check_paths` 가 플래그 값을 경로로 오인해 거절했다. 백엔드가
+     * 명령별 `VALUE_FLAGS` 표로 고쳤으므로(2026-09-02) 이제 넣는다. 아래 항목은
+     * `CommandValidator.validate_command(..., environment='linux')` 에 그대로 넣어
+     * OK / CONFIRM 을 확인한 것만 남겼다. 표에 없는 플래그는 여전히 값이 경로로
+     * 읽히므로, 새 항목을 넣기 전에 `VALUE_FLAGS` 를 먼저 본다.
+     */
+    completions: [
+      'ps aux',
+      'ps -ef',
+      'ps -o pid,rss,comm',
+      'pstree -p',
+      'top -b -n 1',
+      'uptime',
+      'free -m',
+      'df -h',
+      'du -sh /tmp/afterfail',
+      'du -d 1 /tmp/afterfail',
+      'iostat',
+      'ss -lntp',
+      'netstat -lntp',
+      'lsof ',
+      'id',
+      'whoami',
+      'env',
+      'cat /proc/loadavg',
+      'cat /proc/meminfo',
+      'ls -al /tmp/afterfail',
+      'find /tmp/afterfail',
+      'find /tmp/afterfail -type f',
+      'stat ',
+      'stat -c %s /tmp/afterfail/',
+      'head ',
+      'head -n 50 /tmp/afterfail/',
+      'tail ',
+      'tail -n 50 /tmp/afterfail/',
+      'wc -l ',
+      // 복구 계열. 전부 확인 계약을 거친다(LinuxPolicy.CONFIRM_SUBCOMMANDS).
+      'kill ',
+      'kill -s TERM ',
+      'pkill -f afterfail-',
+      'rm /tmp/afterfail/',
+      'truncate -s 0 /tmp/afterfail/',
+      'clear',
+    ],
+  },
+}
+
+export const getEnvironmentTerminal = (environment: EnvironmentId): EnvironmentTerminalMeta =>
+  ENVIRONMENT_TERMINAL[environment]
+
+/* ── 기능 광고(capabilities) 판정 (FE-22) ─────────────────────────────── */
+
+/**
+ * 이 환경이 광고하는 기능 목록. 계약에 없는 문자열은 버린다.
+ *
+ * `null` 은 **판정할 근거가 없다**는 뜻이다 — 환경 정보를 아직 못 받았거나
+ * 응답에 `capabilities` 가 없는 경우다. 빈 배열(`[]`)과 다르다: 빈 배열은
+ * 서버가 "없다"고 말한 것이다.
+ */
+export const capabilityList = (
+  item: EnvironmentItem | null | undefined,
+): EnvironmentCapability[] | null => {
+  if (!item || !Array.isArray(item.capabilities)) return null
+  return item.capabilities.filter(isEnvironmentCapability)
+}
+
+/**
+ * 그 기능을 쓸 수 있는가.
+ *
+ * `list` 가 null 이면 **막지 않는다.** capabilities 는 광고이고 관문은 백엔드
+ * `assert_implemented` 이므로, 모를 때 닫으면 계약이 안 맞는 배포에서 이미 되는
+ * 기능까지 사라진다. 반대로 빈 배열이면 서버가 명시적으로 없다고 말한 것이라 막는다.
+ */
+export const hasCapability = (
+  list: EnvironmentCapability[] | null,
+  capability: EnvironmentCapability,
+): boolean => list === null || list.includes(capability)
+
+/**
+ * 환경별 관측(Grafana / Prometheus) 설정 (FE-08).
+ *
+ * 대시보드 정의의 원본은 `infra/monitoring/grafana/dashboards/` 다(백엔드 소유 경로).
+ * 지금 존재하는 것은 `k8s-survival-overview` 하나뿐이므로 Docker / Linux 는
+ * `dashboard: null` 이다 — 없는 UID 를 추측해 iframe 을 띄우면 사용자에게
+ * Grafana 404 가 보인다. 대시보드가 추가되면 이 표만 채우면 화면이 열린다.
+ */
+export interface EnvironmentObservabilityMeta {
+  /** Grafana 대시보드. 이 환경 전용 대시보드가 없으면 null. */
+  dashboard: {
+    uid: string
+    /** URL 경로의 slug. Grafana 는 slug 가 틀려도 열어주지만 링크 가독성을 위해 맞춘다. */
+    slug: string
+    /** scope 값을 넘길 대시보드 변수 이름. */
+    scopeVar: string
+  } | null
+  /**
+   * readiness 판정에 쓸 PromQL. `{scope}` 자리에 escape 된 scope 가 들어간다.
+   * 대시보드가 없는 환경은 null 이다 — 없는 화면의 준비 상태를 물을 이유가 없다.
+   */
+  readinessQueryTemplate: string | null
+}
+
+export const ENVIRONMENT_OBSERVABILITY: Record<EnvironmentId, EnvironmentObservabilityMeta> = {
+  kubernetes: {
+    dashboard: {
+      uid: 'k8s-survival-overview',
+      slug: 'afterfail-incident-triage',
+      scopeVar: 'namespace',
+    },
+    readinessQueryTemplate: 'sum(kube_pod_status_phase{namespace=~"{scope}"})',
+  },
+  // BE 소유의 infra/monitoring 에 Docker 컨테이너 메트릭 대시보드가 아직 없다.
+  docker: { dashboard: null, readinessQueryTemplate: null },
+  // Linux 샌드박스 메트릭 대시보드도 마찬가지다.
+  linux: { dashboard: null, readinessQueryTemplate: null },
+}
+
+export const GRAFANA_BASE_URL = import.meta.env.VITE_GRAFANA_BASE_URL || 'http://localhost:3001'
+export const PROMETHEUS_BASE_URL = import.meta.env.VITE_PROMETHEUS_BASE_URL || 'http://localhost:9090'
+
+/** PromQL 라벨 값 안의 특수문자. 이걸 빼먹으면 namespace 에 `"` 가 있을 때 쿼리가 깨진다. */
+export const escapePrometheusLabelValue = (value: string) =>
+  value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+/**
+ * 이 환경 전용 Grafana 대시보드가 있는가.
+ *
+ * **`capabilities` 의 `observability` 와 다른 사실이다 (FE-22).** capability 는
+ * 백엔드 관측 probe 가 배선됐다는 뜻이고, 이 함수는 `infra/monitoring/grafana/
+ * dashboards/` 에 대시보드 정의가 있는지다. capability 로 갈음하면 대시보드가 없는
+ * 환경에서 iframe 을 열어 사용자에게 Grafana 404 를 보여준다. 둘 다 필요하다.
+ */
+export const hasObservabilityDashboard = (environment: EnvironmentId | null): boolean =>
+  Boolean(environment && ENVIRONMENT_OBSERVABILITY[environment].dashboard)
+
+/**
+ * 관측 대시보드 URL. 대시보드가 없는 환경은 null 을 준다.
+ * 호출자는 null 을 "관측 없음"으로 표시해야 한다 — K8s 대시보드로 대체하지 않는다.
+ */
+export const getGrafanaUrl = (
+  environment: EnvironmentId | null,
+  scope: string | null,
+): string | null => {
+  if (!environment) return null
+  const { dashboard } = ENVIRONMENT_OBSERVABILITY[environment]
+  if (!dashboard) return null
+  return (
+    `${GRAFANA_BASE_URL}/d/${dashboard.uid}/${dashboard.slug}` +
+    `?orgId=1&kiosk&refresh=5s` +
+    `&var-${dashboard.scopeVar}=${encodeURIComponent(scope || '.*')}`
+  )
+}
+
+/** readiness probe URL. 대시보드가 없으면 null — polling 자체를 하지 않게 한다. */
+export const getGrafanaDataProbeUrl = (
+  environment: EnvironmentId | null,
+  scope: string | null,
+): string | null => {
+  if (!environment) return null
+  const { readinessQueryTemplate } = ENVIRONMENT_OBSERVABILITY[environment]
+  if (!readinessQueryTemplate) return null
+  const query = readinessQueryTemplate.replace(
+    '{scope}',
+    escapePrometheusLabelValue(scope || '.*'),
+  )
+  return `${PROMETHEUS_BASE_URL}/api/v1/query?query=${encodeURIComponent(query)}`
+}
+
+/** 탭 노출 순서. 백엔드 SUPPORTED_ENVIRONMENTS 순서를 그대로 따른다. */
+export const ENVIRONMENT_ORDER: readonly EnvironmentId[] = ENVIRONMENT_IDS
+
+export const getEnvironmentMeta = (environment: EnvironmentId): EnvironmentDisplayMeta =>
+  ENVIRONMENT_META[environment]
+
+/**
+ * 상태별 보조 문구. tooltip 없이도 읽히도록 탭 안에 직접 노출한다(FE-03 인수 조건).
+ * 백엔드가 아직 내보내지 않는 status 는 `statusNote()` 가 '상태 확인 불가'로 처리한다.
+ */
+export const ENVIRONMENT_STATUS_NOTES: Record<EnvironmentStatus, string> = {
+  available: '훈련 가능',
+  degraded: '일부 기능 불안정',
+  preparing: '준비 중',
+  disabled: '사용 중지',
+}
+
+export const statusNote = (status: string): string =>
+  isEnvironmentStatus(status) ? ENVIRONMENT_STATUS_NOTES[status] : '상태 확인 불가'
+
+/**
+ * 닫힌 이유별 문구 (FE-23).
+ *
+ * `not_deployed` 를 "준비 중"이라고 쓰지 않는다. 구현이 끝난 환경을 그렇게 부르면
+ * 사용자는 기다리면 열린다고 믿는데 이 배포에서는 영영 열리지 않는다.
+ */
+export const ENVIRONMENT_REASON_NOTES: Record<EnvironmentDisabledReason, string> = {
+  not_implemented: '준비 중',
+  not_deployed: '이 서버에서 열지 않음',
+}
+
+/**
+ * 서버가 말한 닫힌 이유. 계약에 있는 값일 때만 돌려준다.
+ *
+ * 모르는 값을 그대로 화면에 쓰면 서버 내부 식별자가 사용자에게 노출되고, 없는
+ * 이유를 단정하게 된다 — 그때는 null 을 주고 호출부가 status 문구로 되돌린다
+ * (`api.ts` 가 모르는 capability 를 다루는 방식과 같다).
+ */
+export const closedReason = (item: EnvironmentItem): EnvironmentDisabledReason | null =>
+  isEnvironmentDisabledReason(item.reason) ? item.reason : null
+
+/**
+ * 선택할 수 없는 환경의 이유 문구. 이유 필드가 우선이고, 없거나 모르는 값이면
+ * status 문구로 되돌린다 — 필드가 없는 배포에서 이번 변경 이전과 같게 동작한다.
+ */
+export const unavailableNote = (item: EnvironmentItem): string => {
+  const reason = closedReason(item)
+  return reason ? ENVIRONMENT_REASON_NOTES[reason] : statusNote(item.status)
+}
+
+/**
+ * "열릴 예정" 목록을 보여줄 환경인가.
+ *
+ * `not_deployed` 는 이미 구현된 환경이므로 로드맵을 보여주면 끝난 일을 예정으로
+ * 광고하게 된다. 이유를 모를 때는(필드 없음) 기존 동작을 유지한다.
+ */
+export const showsRoadmap = (item: EnvironmentItem): boolean =>
+  closedReason(item) !== 'not_deployed'
+
+/**
+ * 선택 가능한 상태. degraded 는 경고를 띄우되 진입은 허용한다.
+ * 모르는 status 는 선택 불가로 처리한다 — 실행 가능 여부를 낙관하지 않는다.
+ */
+export const isSelectableStatus = (status: string): boolean =>
+  status === 'available' || status === 'degraded'
+
+/** 준비 중 환경에서 무엇이 열릴 예정인지. 탭이 눌리지 않으므로 별도 섹션에 보여준다. */
+export const ENVIRONMENT_ROADMAP: Record<EnvironmentId, string[]> = {
+  kubernetes: [],
+  docker: [
+    'Docker Compose 서비스 장애 시뮬레이션',
+    '컨테이너 리소스 제한 실습',
+    '네트워크 격리 및 볼륨 마운트 문제 해결',
+  ],
+  linux: [
+    '프로세스 및 서비스 장애 대응',
+    '디스크 / 메모리 / CPU 포화 상태 복구',
+    '시스템 로그 분석 및 트러블슈팅',
+  ],
+}
+
+/**
+ * 캡스톤2 스코프에서 빠진 영역. AGENTS.md 결정에 따라 "개발 예정" 탭이 아니라
+ * 후속 연구로 표기하며, 백엔드 SUPPORTED_ENVIRONMENTS 에도 없다.
+ */
+export const RESEARCH_TOPICS: { label: string; note: string }[] = [
+  { label: 'Application', note: '앱 성능 저하 · API 에러 패턴 분석' },
+  { label: 'Database', note: '쿼리 지연 · 커넥션 풀 고갈 대응' },
+]

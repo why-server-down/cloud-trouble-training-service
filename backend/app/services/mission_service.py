@@ -1,38 +1,71 @@
+import asyncio
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import GeneratedScenario, Mission, MissionAttempt, User
 from app.core.metrics import MISSION_COMPLETIONS
+from app.core import environments
+from app.core.environments import DEFAULT_ENVIRONMENT
 from app.services.chaos_injector import BaseChaosInjector
-from app.services.scoring_service import ScoringService
+from app.services.scoring_service import HINT_LIMIT_MESSAGE, MAX_HINT_LEVEL, ScoringService
 from app.services.validation_service import BaseValidationService
 
 
+def namespace_for(user_id: uuid.UUID) -> str:
+    return f"user-{user_id}"
+
+
 class MissionService:
+    """미션 오케스트레이터.
+
+    환경별 인스턴스를 따로 두지 않는다. 서비스는 상태를 갖지 않고, attempt 의
+    environment 로 그때그때 injector/validator 를 조회한다.
+    """
+
     def __init__(
         self,
-        chaos_injector: BaseChaosInjector,
-        validation_service: BaseValidationService,
+        *,
+        injector_for: Callable[[str], BaseChaosInjector],
+        validation_for: Callable[[str], BaseValidationService],
         scoring_service: ScoringService,
     ):
-        self._chaos = chaos_injector
-        self._validation = validation_service
+        self._injector_for = injector_for
+        self._validation_for = validation_for
         self._scoring = scoring_service
-        self._active_chaos_ids: dict[uuid.UUID, str] = {}
+        # 사용자별 시작 직렬화(더블클릭·탭 2개). 진 쪽 revert 가 이긴 쪽 장애를
+        # 지우는 것을 막는다. ponytail: per-process 락, 멀티워커면 DB advisory lock.
+        self._start_locks: dict[uuid.UUID, asyncio.Lock] = {}
 
-    async def list_missions(self, db: AsyncSession, user: User) -> list[dict]:
-        result = await db.execute(select(Mission).order_by(Mission.level))
+    async def list_missions(
+        self,
+        db: AsyncSession,
+        user: User,
+        environment: str = DEFAULT_ENVIRONMENT,
+    ) -> list[dict]:
+        """한 환경의 미션 목록과 잠금 상태.
+
+        잠금은 **같은 환경 안에서만** 계산한다. 환경을 섞으면 Kubernetes level 4 를
+        깬 사용자가 Docker level 2 를 건너뛰고 시작할 수 있다.
+        """
+        result = await db.execute(
+            select(Mission)
+            .where(Mission.environment == environment)
+            .order_by(Mission.level)
+        )
         missions = result.scalars().all()
 
-        # 유저가 완료한 미션의 레벨 목록
+        # 같은 환경에서 완료한 미션의 레벨 목록
         completed_result = await db.execute(
             select(Mission.level).join(MissionAttempt).where(
                 and_(
                     MissionAttempt.user_id == user.id,
                     MissionAttempt.status == "completed",
+                    Mission.environment == environment,
                 )
             )
         )
@@ -102,16 +135,26 @@ class MissionService:
         if scenario:
             scenario.status = "failed"
             if scenario.chaos_id:
-                await self._chaos.revert(scenario.chaos_id)
-                scenario.chaos_id = None
+                injector = self._injector_for(scenario.environment)
+                # revert 성공 시에만 비운다(실패 시 장애가 남아 reconciliation 이 재시도).
+                if await injector.revert(scenario.chaos_id, namespace_for(attempt.user_id)):
+                    scenario.chaos_id = None
+                    attempt.chaos_id = None
         else:
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
 
         await db.commit()
         await db.refresh(attempt)
         return True
 
     async def start_mission(
+        self, db: AsyncSession, user: User, mission_id: uuid.UUID
+    ) -> MissionAttempt:
+        lock = self._start_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:
+            return await self._start_mission_locked(db, user, mission_id)
+
+    async def _start_mission_locked(
         self, db: AsyncSession, user: User, mission_id: uuid.UUID
     ) -> MissionAttempt:
         # 이미 진행 중인 미션 체크
@@ -125,7 +168,10 @@ class MissionService:
         if not mission:
             raise ValueError("미션을 찾을 수 없습니다")
 
-        # 순차 잠금 해제 체크
+        # 미구현 환경의 미션은 시작할 수 없다.
+        environments.assert_implemented(mission.environment)
+
+        # 순차 잠금 해제 체크. 이전 레벨도 같은 환경 것만 인정한다.
         if mission.level > 1:
             prev_completed = await db.execute(
                 select(MissionAttempt.id)
@@ -135,6 +181,7 @@ class MissionService:
                         MissionAttempt.user_id == user.id,
                         MissionAttempt.status == "completed",
                         Mission.level == mission.level - 1,
+                        Mission.environment == mission.environment,
                     )
                 )
                 .limit(1)
@@ -142,19 +189,38 @@ class MissionService:
             if not prev_completed.scalar_one_or_none():
                 raise ValueError("이전 레벨을 먼저 완료해야 합니다")
 
-        # 장애 주입
-        namespace = f"user-{user.id}"
-        chaos_result = await self._chaos.inject(mission.chaos_type, namespace)
+        # 미션이 속한 환경의 주입기를 고른다. 미구현 환경이면 여기서 실패한다.
+        injector = self._injector_for(mission.environment)
+
+        namespace = namespace_for(user.id)
+        chaos_result = await injector.inject(mission.chaos_type, namespace)
         if not chaos_result.success:
             raise RuntimeError(f"장애 주입 실패: {chaos_result.message}")
 
-        # 시도 기록 생성
-        attempt = MissionAttempt(user_id=user.id, mission_id=mission.id)
+        # chaos_id 를 DB 에 저장한다. 프로세스 메모리에만 두면 서버가 재시작됐을 때
+        # 주입된 장애를 되돌릴 방법이 없다.
+        attempt = MissionAttempt(
+            user_id=user.id,
+            mission_id=mission.id,
+            environment=mission.environment,
+            chaos_id=chaos_result.chaos_id,
+        )
         db.add(attempt)
-        await db.commit()
-        await db.refresh(attempt)
-
-        self._active_chaos_ids[attempt.id] = chaos_result.chaos_id
+        try:
+            await db.commit()
+            await db.refresh(attempt)
+        except IntegrityError:
+            # 사용자당 in_progress attempt 는 DB partial unique index 로 1개다.
+            # 동시 요청 두 개가 앞의 조회를 모두 통과하면 여기서 하나가 걸린다.
+            # 서버 오류가 아니라 사용자에게 설명 가능한 상황이다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise ValueError("이미 진행 중인 미션이 있습니다")
+        except Exception:
+            # 기록에 실패하면 주입된 장애가 고아가 되므로 즉시 되돌린다.
+            await db.rollback()
+            await injector.revert(chaos_result.chaos_id, namespace)
+            raise
         return attempt
 
     async def get_status(self, db: AsyncSession, attempt_id: uuid.UUID) -> dict:
@@ -185,7 +251,7 @@ class MissionService:
             attempt.status = "failed"
             attempt.end_time = now
             attempt.final_score = self._scoring.MIN_SCORE
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
 
@@ -210,7 +276,7 @@ class MissionService:
         mission = mission_result.scalar_one_or_none()
 
         namespace = f"user-{attempt.user_id}"
-        validation = await self._validation.check_resolution(mission.chaos_type, namespace)
+        validation = await self._validation_for(attempt.environment).check_resolution(mission.chaos_type, namespace)
 
         if validation.is_resolved:
             now = datetime.now(timezone.utc)
@@ -221,7 +287,7 @@ class MissionService:
                 attempt.hints_used, mission.hint_penalty,
             )
             MISSION_COMPLETIONS.labels(str(mission.level)).inc()
-            await self._cleanup_chaos(attempt.id)
+            await self._cleanup_chaos(attempt)
             await db.commit()
             await db.refresh(attempt)
             return {"attempt": attempt, "message": f"미션 완료! 점수: {attempt.final_score}점"}
@@ -236,7 +302,7 @@ class MissionService:
         attempt.status = "abandoned"
         attempt.end_time = datetime.now(timezone.utc)
         attempt.final_score = 0
-        await self._cleanup_chaos(attempt.id)
+        await self._cleanup_chaos(attempt)
         await db.commit()
         await db.refresh(attempt)
         return attempt
@@ -248,13 +314,23 @@ class MissionService:
         attempt = result.scalar_one_or_none()
         if not attempt or attempt.status != "in_progress":
             raise ValueError("진행 중인 시도가 없습니다")
+        if attempt.hints_used >= MAX_HINT_LEVEL:
+            raise ValueError(HINT_LIMIT_MESSAGE)
 
         attempt.hints_used += 1
         await db.commit()
         await db.refresh(attempt)
         return attempt
 
-    async def _cleanup_chaos(self, attempt_id: uuid.UUID):
-        chaos_id = self._active_chaos_ids.pop(attempt_id, None)
-        if chaos_id:
-            await self._chaos.revert(chaos_id)
+    async def _cleanup_chaos(self, attempt: MissionAttempt) -> None:
+        """DB 에 저장된 chaos_id 로 되돌린다.
+
+        서버가 재시작돼 프로세스 메모리가 비어 있어도 동작해야 한다.
+        """
+        if not attempt.chaos_id:
+            return
+        injector = self._injector_for(attempt.environment)
+        # revert 성공 시에만 chaos_id 를 비운다. 실패했는데 비우면 장애가 영구히 남고
+        # reconciliation 도 재시도하지 못한다.
+        if await injector.revert(attempt.chaos_id, namespace_for(attempt.user_id)):
+            attempt.chaos_id = None

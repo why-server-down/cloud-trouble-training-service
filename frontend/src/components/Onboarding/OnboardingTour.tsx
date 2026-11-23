@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './OnboardingTour.css'
 
 export type TourStep = {
@@ -24,11 +24,33 @@ type TargetRect = {
 }
 
 const SPOTLIGHT_PADDING = 8
+/** 스포트라이트가 화면 끝에 붙지 않게 남기는 최소 여백. 헤더 버튼처럼 끝에 가까운 대상에도 맞도록 작게 둔다. */
+const SPOTLIGHT_EDGE = 4
 const TOOLTIP_WIDTH = 340
 const TOOLTIP_GAP = 16
-const EDGE_GUTTER = 14
+const EDGE_GUTTER = 16
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
+
+/**
+ * 대상이 보이도록 **사용자가 스크롤할 수 있는** 가장 가까운 영역만 움직인다.
+ * scrollIntoView 는 overflow: hidden 인 앱 틀까지 밀어서, 투어가 끝난 뒤 화면이 내려간 채로
+ * 남았다(환경 탭이 가려지고 사용자는 되돌릴 방법이 없었다).
+ */
+const scrollTargetIntoView = (element: Element) => {
+  let parent = element.parentElement
+  while (parent && parent !== document.body) {
+    const { overflowY } = getComputedStyle(parent)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && parent.scrollHeight > parent.clientHeight) {
+      const target = element.getBoundingClientRect()
+      const box = parent.getBoundingClientRect()
+      if (target.top < box.top) parent.scrollTop -= box.top - target.top + SPOTLIGHT_PADDING
+      else if (target.bottom > box.bottom) parent.scrollTop += target.bottom - box.bottom + SPOTLIGHT_PADDING
+      return
+    }
+    parent = parent.parentElement
+  }
+}
 
 const getVisibleRect = (selector: string): TargetRect | null => {
   const element = document.querySelector(selector)
@@ -46,62 +68,71 @@ const getVisibleRect = (selector: string): TargetRect | null => {
   }
 }
 
+/** 카드 높이 어림값. 문구가 세 줄일 때 약 230px 이라 넉넉히 잡는다. */
+const CARD_HEIGHT_ESTIMATE = 260
+
+type Placement = NonNullable<TourStep['placement']>
+
+/**
+ * 카드 위치. 원하는 방향에 자리가 없으면 아래 → 위 순서로 옮기고, 그래도 없으면
+ * 화면 아래 가운데에 둔다 (FE-28). 모바일에서는 대상이 화면 폭을 다 쓰므로 left/right 가
+ * 들어갈 수 없다 — 예전에는 그 좌표를 화면 안으로 끌어와 카드가 대상 한가운데를 덮었다.
+ */
 const getTooltipPosition = (rect: TargetRect | null, placement: TourStep['placement']) => {
-  const width = Math.min(TOOLTIP_WIDTH, window.innerWidth - EDGE_GUTTER * 2)
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.min(TOOLTIP_WIDTH, vw - EDGE_GUTTER * 2)
+  const centeredLeft = (vw - width) / 2
 
   if (!rect) {
-    return {
-      width,
-      left: (window.innerWidth - width) / 2,
-      top: Math.max(EDGE_GUTTER, window.innerHeight * 0.22),
-    }
+    return { width, left: centeredLeft, top: Math.max(EDGE_GUTTER, vh * 0.22) }
   }
 
-  const preferredPlacement = placement || 'bottom'
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-  let left = centerX - width / 2
-  let top = rect.top + rect.height + TOOLTIP_GAP
-
-  if (preferredPlacement === 'top') top = rect.top - TOOLTIP_GAP
-  if (preferredPlacement === 'left') {
-    left = rect.left - width - TOOLTIP_GAP
-    top = centerY
+  const right = rect.left + rect.width
+  const bottom = rect.top + rect.height
+  const fits: Record<Placement, boolean> = {
+    right: right + TOOLTIP_GAP + width <= vw - EDGE_GUTTER,
+    left: rect.left - TOOLTIP_GAP - width >= EDGE_GUTTER,
+    bottom: bottom + TOOLTIP_GAP + CARD_HEIGHT_ESTIMATE <= vh - EDGE_GUTTER,
+    top: rect.top - TOOLTIP_GAP - CARD_HEIGHT_ESTIMATE >= EDGE_GUTTER,
   }
-  if (preferredPlacement === 'right') {
-    left = rect.left + rect.width + TOOLTIP_GAP
-    top = centerY
+  const chosen = ([placement ?? 'bottom', 'bottom', 'top'] as Placement[]).find((p) => fits[p])
+
+  const alignedLeft = clamp(rect.left + rect.width / 2 - width / 2, EDGE_GUTTER, vw - width - EDGE_GUTTER)
+  const sideTop = clamp(rect.top + rect.height / 2 - 120, EDGE_GUTTER, vh - CARD_HEIGHT_ESTIMATE - EDGE_GUTTER)
+
+  switch (chosen) {
+    case 'right':
+      return { width, left: right + TOOLTIP_GAP, top: sideTop }
+    case 'left':
+      return { width, left: rect.left - width - TOOLTIP_GAP, top: sideTop }
+    case 'bottom':
+      return { width, left: alignedLeft, top: bottom + TOOLTIP_GAP }
+    case 'top':
+      return { width, left: alignedLeft, bottom: vh - rect.top + TOOLTIP_GAP }
+    default:
+      return { width, left: centeredLeft, bottom: EDGE_GUTTER }
   }
-
-  left = clamp(left, EDGE_GUTTER, window.innerWidth - width - EDGE_GUTTER)
-
-  if (preferredPlacement === 'top') {
-    return { width, left, bottom: window.innerHeight - rect.top + TOOLTIP_GAP }
-  }
-
-  if (preferredPlacement === 'left' || preferredPlacement === 'right') {
-    top = clamp(top - 120, EDGE_GUTTER, window.innerHeight - 260)
-  } else {
-    top = clamp(top, EDGE_GUTTER, window.innerHeight - 260)
-  }
-
-  return { width, left, top }
 }
 
 function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourProps) {
   const [stepIndex, setStepIndex] = useState(0)
   const [targetRect, setTargetRect] = useState<TargetRect | null>(null)
+  const cardRef = useRef<HTMLElement | null>(null)
   const currentStep = steps[stepIndex]
   const isLastStep = stepIndex === steps.length - 1
 
+  /*
+   * 대상 둘레에 여백을 둔 스포트라이트. 네 변을 따로 화면 안으로 자른다 — 예전에는 위치만
+   * 끌어오고 크기는 그대로라, 화면 맨 위의 프로필 버튼에서 상자가 아래로 밀려 어긋났다.
+   */
   const paddedRect = useMemo(() => {
     if (!targetRect) return null
-    return {
-      top: Math.max(EDGE_GUTTER, targetRect.top - SPOTLIGHT_PADDING),
-      left: Math.max(EDGE_GUTTER, targetRect.left - SPOTLIGHT_PADDING),
-      width: Math.min(window.innerWidth - EDGE_GUTTER * 2, targetRect.width + SPOTLIGHT_PADDING * 2),
-      height: Math.min(window.innerHeight - EDGE_GUTTER * 2, targetRect.height + SPOTLIGHT_PADDING * 2),
-    }
+    const top = Math.max(SPOTLIGHT_EDGE, targetRect.top - SPOTLIGHT_PADDING)
+    const left = Math.max(SPOTLIGHT_EDGE, targetRect.left - SPOTLIGHT_PADDING)
+    const bottom = Math.min(window.innerHeight - SPOTLIGHT_EDGE, targetRect.top + targetRect.height + SPOTLIGHT_PADDING)
+    const right = Math.min(window.innerWidth - SPOTLIGHT_EDGE, targetRect.left + targetRect.width + SPOTLIGHT_PADDING)
+    return { top, left, width: right - left, height: bottom - top }
   }, [targetRect])
 
   const tooltipPosition = useMemo(
@@ -113,12 +144,41 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
     if (run) setStepIndex(0)
   }, [run, steps])
 
+  /* 투어를 연 요소. 닫힌 뒤 focus 를 돌려준다. */
+  useEffect(() => {
+    if (!run) return
+    const opener = document.activeElement
+    return () => {
+      if (opener instanceof HTMLElement && document.contains(opener)) opener.focus()
+    }
+  }, [run])
+
+  /* 열릴 때와 단계가 바뀔 때 카드로 focus 를 옮긴다 (설계 문서 8). */
+  useEffect(() => {
+    if (run) cardRef.current?.focus({ preventScroll: true })
+  }, [run, stepIndex])
+
   useEffect(() => {
     if (!run || !currentStep) return
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-      if (event.key === 'ArrowRight' || event.key === 'Enter') {
+      const card = cardRef.current
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      /*
+       * Enter 는 focus 된 버튼이 처리한다. 전역에서 Enter 를 '다음'으로 가로채면
+       * 건너뛰기 버튼에서 Enter 를 눌러도 다음 단계로 넘어간다.
+       * 카드 자체에 focus 가 있을 때만 '다음'으로 쓴다.
+       */
+      if (event.key === 'Enter' && event.target === card) {
+        event.preventDefault()
+        if (stepIndex >= steps.length - 1) onClose()
+        else setStepIndex(stepIndex + 1)
+        return
+      }
+      if (event.key === 'ArrowRight') {
         event.preventDefault()
         setStepIndex((index) => (index >= steps.length - 1 ? index : index + 1))
       }
@@ -126,11 +186,26 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
         event.preventDefault()
         setStepIndex((index) => Math.max(0, index - 1))
       }
+      /* focus trap: Tab 이 투어 뒤의 화면으로 빠져나가지 않게 카드 버튼 안에서 돈다. */
+      if (event.key === 'Tab' && card) {
+        const buttons = Array.from(card.querySelectorAll<HTMLElement>('button:not([disabled])'))
+        if (buttons.length === 0) return
+        const first = buttons[0]
+        const last = buttons[buttons.length - 1]
+        const active = document.activeElement
+        if (event.shiftKey && (active === first || active === card || !card.contains(active))) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && (active === last || !card.contains(active))) {
+          event.preventDefault()
+          first.focus()
+        }
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentStep, onClose, run, steps.length])
+  }, [currentStep, onClose, run, stepIndex, steps.length])
 
   useLayoutEffect(() => {
     if (!run || !currentStep) return
@@ -139,7 +214,7 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
 
     const updateTarget = () => setTargetRect(getVisibleRect(currentStep.target))
     const target = document.querySelector(currentStep.target)
-    target?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
+    if (target) scrollTargetIntoView(target)
 
     const timer = window.setTimeout(updateTarget, 120)
     updateTarget()
@@ -164,9 +239,10 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
   }
 
   return (
-    <div className="onboarding-tour" role="dialog" aria-modal="true" aria-labelledby="onboarding-tour-title">
+    <div className="onboarding-tour">
       {paddedRect ? (
         <>
+          {/* 투어 중에는 뒤 화면을 누르지 못하게 막는다. 어둡게 하는 건 스포트라이트의 그림자다. */}
           <div className="tour-scrim tour-scrim-top" style={{ height: paddedRect.top }} />
           <div
             className="tour-scrim tour-scrim-left"
@@ -191,31 +267,44 @@ function OnboardingTour({ steps, run, onClose, onStepChange }: OnboardingTourPro
         <div className="tour-scrim tour-scrim-full" />
       )}
 
-      <section className="tour-card" style={tooltipPosition}>
+      <section
+        ref={cardRef}
+        className="tour-card material-popover"
+        style={tooltipPosition}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-tour-title"
+        aria-describedby="onboarding-tour-step onboarding-tour-body"
+        tabIndex={-1}
+      >
         <div className="tour-card-header">
           <span>{currentStep.eyebrow}</span>
-          <span>{String(stepIndex + 1).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}</span>
+          {/* 화면에는 짧게, 스크린리더에는 한국어 문장으로 단계를 알린다. */}
+          <span className="tour-count" aria-hidden="true">
+            {stepIndex + 1} / {steps.length}
+          </span>
+          <span id="onboarding-tour-step" className="sr-only">
+            {steps.length}단계 중 {stepIndex + 1}단계
+          </span>
         </div>
         <h2 id="onboarding-tour-title">{currentStep.title}</h2>
-        <p>{currentStep.body}</p>
-        <div className="tour-progress" aria-hidden="true">
-          {steps.map((step) => (
-            <span key={step.target + step.title} className={steps.indexOf(step) <= stepIndex ? 'active' : ''} />
-          ))}
-        </div>
+        <p id="onboarding-tour-body">{currentStep.body}</p>
         <div className="tour-actions">
-          <button className="tour-button ghost" type="button" onClick={onClose}>SKIP</button>
+          <button className="ui-button plain small" type="button" onClick={onClose}>
+            건너뛰기
+          </button>
           <div>
-            <button
-              className="tour-button ghost"
-              type="button"
-              onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
-              disabled={stepIndex === 0}
-            >
-              BACK
-            </button>
-            <button className="tour-button primary" type="button" onClick={goNext}>
-              {isLastStep ? 'DONE' : 'NEXT'}
+            {stepIndex > 0 && (
+              <button
+                className="ui-button plain small"
+                type="button"
+                onClick={() => setStepIndex((index) => Math.max(0, index - 1))}
+              >
+                이전
+              </button>
+            )}
+            <button className="ui-button primary small" type="button" onClick={goNext}>
+              {isLastStep ? '완료' : '다음'}
             </button>
           </div>
         </div>

@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "parse-valid-scenario",
+      "kind": "json_parse",
+      "input": "{\"environment\": \"kubernetes\", \"fault_type\": \"image_pull_error\"}",
+      "expected": {
+        "environment": "kubernetes",
+        "fault_type": "image_pull_error"
+      }
+    },
+    {
+      "id": "retrieve-crashloop-guide",
+      "kind": "keyword_retrieval",
+      "query": "pod crashloop logs",
+      "documents": [
+        {"id": "crashloop", "text": "CrashLoop pod logs previous container"},
+        {"id": "service", "text": "service selector endpoint mismatch"}
+      ],
+      "expected_id": "crashloop"
+    },
+    {
+      "id": "filter-docker-only",
+      "kind": "metadata_filter",
+      "requested_environment": "docker",
+      "documents": [
+        {"id": "docker", "environments": ["docker"]},
+        {"id": "general", "environments": ["general"]},
+        {"id": "kubernetes", "environments": ["kubernetes"]}
+      ],
+      "expected_ids": ["docker", "general"]
+    },
+    {
+      "id": "knowledge-manifest-coverage",
+      "kind": "manifest_coverage",
+      "manifest": "../knowledge-base/manifest.json",
+      "knowledge_base": "../knowledge-base",
+      "expected_documents": 30
+    },
+    {
+      "id": "docker-question-coverage",
+      "kind": "question_dataset_coverage",
+      "dataset": "docker_retrieval_questions.json",
+      "environment": "docker",
+      "minimum_questions": 20,
+      "required_fault_types": [
+        "container_network_disconnect",
+        "volume_mount_error",
+        "container_oom",
+        "container_cpu_throttle"
+      ]
+    },
+    {
+      "id": "linux-question-coverage",
+      "kind": "question_dataset_coverage",
+      "dataset": "linux_retrieval_questions.json",
+      "environment": "linux",
+      "minimum_questions": 20,
+      "required_fault_types": ["linux_oom", "disk_io_stress", "zombie_process", "orphan_process", "service_failure"]
+    }
+  ]
+}

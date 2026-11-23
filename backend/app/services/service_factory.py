@@ -1,5 +1,18 @@
+"""환경·백엔드 조합으로 서비스 구현체를 고른다.
+
+레지스트리 키가 `(environment, configured_backend)` 인 이유: 같은 백엔드 이름이라도
+환경마다 구현체가 다르다. docker/linux 구현체가 붙을 때 이 표에 줄만 추가하면 되고,
+등록되지 않은 조합은 kubernetes 로 조용히 대체되지 않고 실패한다.
+"""
+from collections.abc import Callable
+
+from app.core import environments
 from app.core.config import settings
 from app.services.chaos_injector import BaseChaosInjector, ChaosMeshInjector, MockChaosInjector
+from app.services.docker_chaos_injector import DockerChaosInjector
+from app.services.docker_validation_service import DockerValidationService
+from app.services.linux_chaos_injector import LinuxChaosInjector
+from app.services.linux_validation_service import LinuxValidationService
 from app.services.mission_service import MissionService
 from app.services.scenario_service import ScenarioService
 from app.services.scoring_service import ScoringService
@@ -11,29 +24,83 @@ from app.services.validation_service import (
     PrometheusValidationService,
 )
 
+K8S = environments.KUBERNETES
+DOCKER = environments.DOCKER
+LINUX = environments.LINUX
 
-def create_chaos_injector() -> BaseChaosInjector:
-    if settings.CHAOS_BACKEND == "mock":
-        return MockChaosInjector()
-    if settings.CHAOS_BACKEND == "chaos_mesh":
-        return ChaosMeshInjector()
-    raise ValueError(f"Unknown CHAOS_BACKEND: {settings.CHAOS_BACKEND}")
+# (environment, CHAOS_BACKEND) → injector 팩토리
+# CHAOS_BACKEND 는 "mock 이냐 실제냐"를 고르는 값이다. Docker 환경은 Chaos Mesh 를
+# 쓰지 않고 DinD 안에서 docker CLI 로 주입하지만, 실제 주입이라는 점에서 같은 키를 쓴다.
+_INJECTOR_FACTORIES: dict[tuple[str, str], Callable[[], BaseChaosInjector]] = {
+    (K8S, "mock"): lambda: MockChaosInjector(environment=K8S),
+    (K8S, "chaos_mesh"): ChaosMeshInjector,
+    (DOCKER, "mock"): lambda: MockChaosInjector(environment=DOCKER),
+    (DOCKER, "chaos_mesh"): DockerChaosInjector,
+    (LINUX, "mock"): lambda: MockChaosInjector(environment=LINUX),
+    (LINUX, "chaos_mesh"): LinuxChaosInjector,
+}
+
+# (environment, VALIDATION_BACKEND) → 검증 서비스 팩토리
+_VALIDATION_FACTORIES: dict[tuple[str, str], Callable[[], BaseValidationService]] = {
+    (K8S, "mock"): lambda: MockValidationService(
+        auto_pass=settings.MOCK_VALIDATION_AUTO_PASS, environment=K8S
+    ),
+    (K8S, "k8s"): K8sValidationService,
+    (K8S, "prometheus"): lambda: PrometheusValidationService(settings.PROMETHEUS_URL),
+    (DOCKER, "mock"): lambda: MockValidationService(
+        auto_pass=settings.MOCK_VALIDATION_AUTO_PASS, environment=DOCKER
+    ),
+    # Docker 는 Kubernetes API 도 Prometheus 도 쓰지 않는다. 두 backend 설정 모두에서
+    # 같은 검증기를 쓴다(샌드박스 exec 기반).
+    (DOCKER, "k8s"): DockerValidationService,
+    (DOCKER, "prometheus"): DockerValidationService,
+    (LINUX, "mock"): lambda: MockValidationService(
+        auto_pass=settings.MOCK_VALIDATION_AUTO_PASS, environment=LINUX
+    ),
+    # Linux 도 외부 의존 없이 샌드박스 exec 으로 검증한다.
+    (LINUX, "k8s"): LinuxValidationService,
+    (LINUX, "prometheus"): LinuxValidationService,
+}
 
 
-def create_validation_service() -> BaseValidationService:
-    if settings.VALIDATION_BACKEND == "mock":
-        return MockValidationService(auto_pass=settings.MOCK_VALIDATION_AUTO_PASS)
-    if settings.VALIDATION_BACKEND == "k8s":
-        return K8sValidationService()
-    if settings.VALIDATION_BACKEND == "prometheus":
-        return PrometheusValidationService(settings.PROMETHEUS_URL)
-    raise ValueError(f"Unknown VALIDATION_BACKEND: {settings.VALIDATION_BACKEND}")
+def _lookup(
+    registry: dict, environment: str, backend: str, kind: str
+) -> Callable:
+    environments.assert_implemented(environment)
+    factory = registry.get((environment, backend))
+    if factory is None:
+        available = sorted({env for env, _ in registry if env == environment})
+        raise ValueError(
+            f"'{environment}' 환경에 등록된 {kind} 구현이 없습니다 "
+            f"(backend={backend}). 등록된 조합: "
+            + ", ".join(f"{env}/{be}" for env, be in sorted(registry))
+            + (f" / 이 환경의 사용 가능한 backend 없음" if not available else "")
+        )
+    return factory
+
+
+def create_chaos_injector(
+    environment: str = environments.DEFAULT_ENVIRONMENT,
+) -> BaseChaosInjector:
+    factory = _lookup(_INJECTOR_FACTORIES, environment, settings.CHAOS_BACKEND, "장애 주입기")
+    return factory()
+
+
+def create_validation_service(
+    environment: str = environments.DEFAULT_ENVIRONMENT,
+) -> BaseValidationService:
+    factory = _lookup(
+        _VALIDATION_FACTORIES, environment, settings.VALIDATION_BACKEND, "검증 서비스"
+    )
+    return factory()
 
 
 def create_mission_service() -> MissionService:
+    # 환경별 서비스 인스턴스를 따로 두지 않는다. 서비스는 상태를 갖지 않고,
+    # attempt 의 environment 로 그때그때 구현체를 조회한다.
     return MissionService(
-        chaos_injector=create_chaos_injector(),
-        validation_service=create_validation_service(),
+        injector_for=create_chaos_injector,
+        validation_for=create_validation_service,
         scoring_service=ScoringService(),
     )
 
@@ -50,7 +117,7 @@ def get_mission_service() -> MissionService:
 
 def create_scenario_service() -> ScenarioService:
     return ScenarioService(
-        chaos_injector=create_chaos_injector(),
+        injector_for=create_chaos_injector,
         scoring_service=ScoringService(),
         validation_rule_service=ValidationRuleService(settings.PROMETHEUS_URL),
     )

@@ -1,3 +1,39 @@
+import {
+  DEFAULT_ENVIRONMENT,
+  EnvironmentId,
+  EnvironmentItem,
+  EnvironmentListResponse,
+  isEnvironmentCapability,
+  isEnvironmentDisabledReason,
+  isEnvironmentId,
+  MissionAttemptResponse,
+  MissionCompleteResponse,
+  MissionResponse,
+  MissionStatusResponse,
+  ScenarioResponse,
+  ScenarioStatusResponse,
+  SessionResponse,
+} from '../types/training'
+
+// 응답 타입의 단일 원본은 `types/training.ts` 다. 기존 호출부가 api 모듈에서
+// 타입을 가져오고 있으므로 여기서 다시 내보내 import 경로를 깨지 않는다.
+export type {
+  AttemptType,
+  EnvironmentCapability,
+  EnvironmentDisabledReason,
+  EnvironmentId,
+  EnvironmentItem,
+  EnvironmentListResponse,
+  EnvironmentStatus,
+  MissionAttemptResponse,
+  MissionCompleteResponse,
+  MissionResponse,
+  MissionStatusResponse,
+  ScenarioResponse,
+  ScenarioStatusResponse,
+  SessionResponse,
+} from '../types/training'
+
 const normalizeApiBaseUrl = (configuredUrl?: string) => {
   if (!configuredUrl) return ''
 
@@ -21,24 +57,48 @@ export const AUTH_EXPIRED_EVENT = 'auth-expired'
 
 export class ApiError extends Error {
   status: number
+  /**
+   * 429 응답의 Retry-After 를 초로 환산한 값. 읽을 수 없으면 null 이다.
+   * null 이라고 해서 제한이 없는 것이 아니다 — 아래 parseRetryAfter 주석 참고.
+   */
+  retryAfterSeconds: number | null
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+/**
+ * Retry-After 파싱. delta-seconds 와 HTTP-date 두 형식을 모두 받는다.
+ *
+ * Retry-After 는 CORS-safelisted response header 가 아니라 서버가
+ * `Access-Control-Expose-Headers` 에 넣어야 cross-origin 에서 읽힌다.
+ * 백엔드가 `expose_headers=["Retry-After"]` 를 붙였으므로(`backend/app/main.py`)
+ * 지금은 같은 origin(Vite proxy / nginx)과 cross-origin 양쪽에서 읽힌다.
+ *
+ * **그래도 null 을 "제한 없음"으로 해석해서는 안 된다.** 프록시가 헤더를 떨어뜨리거나
+ * 그 설정이 없는 배포를 만나면 다시 null 이 된다. 429 는 헤더 없이도 429 다.
+ */
+export const parseRetryAfter = (value: string | null | undefined): number | null => {
+  if (!value) return null
+
+  const trimmed = value.trim()
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed)
+    return Number.isFinite(seconds) ? Math.max(0, seconds) : null
+  }
+
+  const at = Date.parse(trimmed)
+  if (Number.isNaN(at)) return null
+  return Math.max(0, Math.ceil((at - Date.now()) / 1000))
 }
 
 interface LoginResponse {
   access_token: string
   token_type: string
-}
-
-interface SessionResponse {
-  id: string
-  namespace: string
-  created_at: string
-  is_active: boolean
 }
 
 interface RegisterResponse {
@@ -55,46 +115,73 @@ export interface UserProfileResponse {
   total_score: number
 }
 
-interface MissionResponse {
-  id: string
-  name: string
-  level: number
-  description: string
-  chaos_type: string
-  base_score: number
-  time_limit: number
-  hint_penalty: number
-  is_unlocked: boolean
+/**
+ * 튜터 답변의 근거 한 건. 백엔드 `TutorSource` 와 1:1 이다 (FE-11).
+ * `path` 는 지식 베이스 내부 경로일 수 있어 무조건 링크로 만들지 않는다.
+ */
+export interface TutorSource {
+  title: string
+  source_id?: string | null
+  path?: string | null
+  environment?: string | null
+  similarity?: number | null
 }
 
-export interface MissionAttemptResponse {
-  id: string
-  user_id: string
-  mission_id: string
-  status: string
-  start_time: string
-  end_time: string | null
-  final_score: number | null
-  hints_used: number
-}
-
-export interface MissionStatusResponse {
-  attempt: MissionAttemptResponse
-  elapsed_seconds: number
-  remaining_seconds: number
-  current_score: number
-}
-
-interface MissionCompleteResponse {
-  attempt: MissionAttemptResponse
-  message: string
-}
-
-interface ChatResponse {
+/**
+ * `POST /api/chat/` 응답. 백엔드 `ChatResponse` 와 1:1 이다 (FE-11).
+ */
+export interface ChatResponse {
   response: string
   hint_level: number
+  /**
+   * 튜터가 답의 근거로 삼은 환경 (백엔드 `ChatResponse.environment`).
+   *
+   * 요청 환경(활성 attempt)과 다르면 계층 간 계약이 어긋난 것이다 — 다른 환경
+   * 기준 힌트는 이 세션의 터미널이 거절할 명령을 안내하므로 화면에 드러낸다.
+   * 이 필드가 없던 시절의 응답도 있을 수 있어 호출부는 값을 검증한 뒤 비교한다.
+   */
+  environment: EnvironmentId
   mission_name: string | null
+  /** 답변에 쓰인 근거 문서. 없을 수 있다. */
+  sources?: TutorSource[] | null
+  /** 답변에 실제로 쓰인 관측값의 이름. 정답이 아니라 무엇을 봤는지를 알린다. */
+  observations_used?: string[] | null
+  token_usage?: Record<string, unknown> | null
+  /** 프로바이더 실패로 대체 응답을 준 경우. 사용자에게 숨기지 않는다. */
+  fallback_used?: boolean
 }
+
+/**
+ * 응답의 environment 를 검증한다.
+ *
+ * - 값이 있고 계약에 없는 문자열이면 ApiError 로 올려 사용자에게 표시한다.
+ *   (백엔드는 Literal 로 검증하므로 여기서 걸리면 계약이 어긋난 것이다)
+ * - 필드가 아예 없으면 kubernetes 로 폴백한다. 백엔드는 기본값과 함께 항상
+ *   내보내지만, environment 이전 버전 백엔드에 붙었을 때 화면 전체가 죽는 것을 막는다.
+ */
+const ensureEnvironment = (payload: { environment?: unknown }, context: string): EnvironmentId => {
+  const raw = payload.environment
+
+  if (raw === undefined || raw === null) return DEFAULT_ENVIRONMENT
+  if (!isEnvironmentId(raw)) {
+    throw new ApiError(`${context} 응답의 환경 값이 올바르지 않습니다: ${String(raw)}`, 502)
+  }
+
+  return raw
+}
+
+const withEnvironment = <T extends { environment?: unknown }>(payload: T, context: string) => ({
+  ...payload,
+  environment: ensureEnvironment(payload, context),
+})
+
+const withAttemptEnvironment = <T extends { attempt: MissionAttemptResponse }>(
+  payload: T,
+  context: string,
+) => ({
+  ...payload,
+  attempt: withEnvironment(payload.attempt, context),
+})
 
 const notifyIfUnauthorized = (response: Response) => {
   if (response.status === 401) {
@@ -142,6 +229,21 @@ export interface TierInfo {
   next_tier: string | null
 }
 
+/**
+ * 한 환경의 집계 (FE-13).
+ *
+ * `competency` 가 null 이면 **아직 시도가 없다**는 뜻이다. 0 과 구분해야 한다 —
+ * 0 은 "해봤는데 못했다"이고 null 은 "아직 안 했다"다
+ * (`analytics_service._environment_stats`).
+ */
+export interface EnvironmentStatEntry {
+  completed: number
+  average_score: number
+  average_mttr: number
+  hints_used: number
+  competency: number | null
+}
+
 export interface DashboardStatsResponse {
   username: string
   total_score: number
@@ -150,12 +252,21 @@ export interface DashboardStatsResponse {
   hints_used: number
   current_tier: TierInfo
   skill_scores: Record<'troubleshooting' | 'resource' | 'network' | 'ops', number>
+  /** 이 응답이 어느 환경으로 필터된 것인가. null 이면 전체 합계다. */
+  environment?: string | null
+  /**
+   * 환경별 분해. 백엔드는 **전체 조회(`environment=all`)일 때만** 채운다.
+   * 필터를 건 조회에서는 빈 객체다 — 없는 값을 0 으로 읽지 않도록 주의한다.
+   */
+  environment_stats?: Record<string, EnvironmentStatEntry>
 }
 
 export interface LearningCurveEntry {
   attempt_id: string
   mission_id: string
   mission_name: string
+  /** 이 시도가 어느 환경이었는지. 전체 보기에서 곡선을 구분하는 데 쓴다. */
+  environment?: string
   attempt_number: number
   completion_time: number
   score: number
@@ -204,19 +315,44 @@ export const register = async (username: string, password: string): Promise<Regi
   return response.json()
 }
 
-export const createTerminalSession = async (token: string): Promise<SessionResponse> => {
+/**
+ * 훈련 환경별 터미널 세션을 만든다.
+ *
+ * 백엔드는 같은 (user, environment) 조합에 대해 활성 세션을 재사용하므로
+ * 이 호출 자체는 멱등이다. 그래도 중복 호출은 샌드박스 readiness 대기를
+ * 그만큼 반복하게 하므로, 호출부(`useEnvironmentSessions`)에서 막는다.
+ */
+export const createTerminalSession = async (
+  token: string,
+  environment: EnvironmentId,
+): Promise<SessionResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/terminal/sessions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ environment }),
   })
 
   if (!response.ok) {
     throw new Error(await getErrorDetail(response, '터미널 세션 생성에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as SessionResponse, '터미널 세션')
+}
+
+/**
+ * 터미널 세션을 종료한다. 로그아웃 정리용이라 실패해도 화면 흐름을 막지 않는다 —
+ * 호출부가 결과를 무시할 수 있도록 예외 대신 성공 여부를 돌려준다.
+ */
+export const deleteTerminalSession = async (token: string, sessionId: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/terminal/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 export const getProfile = async (token: string): Promise<UserProfileResponse> => {
@@ -246,18 +382,45 @@ export const logoutUser = async (token: string): Promise<void> => {
   }
 }
 
-export const listMissions = async (token: string): Promise<MissionResponse[]> => {
-  const response = await fetch(`${API_BASE_URL}/api/missions/`, {
+/**
+ * 환경별 미션 목록. 백엔드는 `environment` 기본값을 두지만 프론트는 항상 명시한다
+ * (`backend/app/api/missions.py`) — 기본값에 기대면 탭을 바꿔도 같은 목록이 온다.
+ *
+ * `signal` 은 환경을 빠르게 전환했을 때 이전 요청을 끊기 위한 것이다. 끊지 않으면
+ * 늦게 도착한 이전 환경 응답이 현재 화면을 덮는다.
+ */
+export const listMissions = async (
+  token: string,
+  environment: EnvironmentId,
+  signal?: AbortSignal,
+): Promise<MissionResponse[]> => {
+  const query = new URLSearchParams({ environment })
+  const response = await fetch(`${API_BASE_URL}/api/missions/?${query}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    signal,
   })
 
   if (!response.ok) {
     throw new Error(await getErrorDetail(response, '미션 목록 조회에 실패했습니다'))
   }
 
-  return response.json()
+  const missions = (await response.json() as MissionResponse[]).map((mission) =>
+    withEnvironment(mission, '미션 목록'),
+  )
+
+  // 다른 환경 미션이 섞여 오면 조용히 걸러내지 않는다. 걸러내면 목록이 비어 보이는
+  // 이유가 "준비 중"인지 "계약이 깨졌는지" 구분되지 않는다.
+  const mismatched = missions.find((mission) => mission.environment !== environment)
+  if (mismatched) {
+    throw new ApiError(
+      `미션 목록 응답에 요청한 환경(${environment})이 아닌 ${mismatched.environment} 미션이 섞여 있습니다`,
+      502,
+    )
+  }
+
+  return missions
 }
 
 export const startMission = async (token: string, missionId: string): Promise<MissionAttemptResponse> => {
@@ -274,7 +437,7 @@ export const startMission = async (token: string, missionId: string): Promise<Mi
     throw new Error(await getErrorDetail(response, '미션 시작에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '미션 시작')
 }
 
 export const getMissionStatus = async (token: string): Promise<MissionStatusResponse> => {
@@ -288,7 +451,7 @@ export const getMissionStatus = async (token: string): Promise<MissionStatusResp
     throw new ApiError(await getErrorDetail(response, '미션 상태 조회에 실패했습니다'), response.status)
   }
 
-  return response.json()
+  return withAttemptEnvironment(await response.json() as MissionStatusResponse, '미션 상태')
 }
 
 export const checkMission = async (token: string): Promise<MissionCompleteResponse> => {
@@ -303,7 +466,7 @@ export const checkMission = async (token: string): Promise<MissionCompleteRespon
     throw new Error(await getErrorDetail(response, '미션 확인에 실패했습니다'))
   }
 
-  return response.json()
+  return withAttemptEnvironment(await response.json() as MissionCompleteResponse, '미션 확인')
 }
 
 export const abandonMission = async (token: string): Promise<MissionAttemptResponse> => {
@@ -318,10 +481,25 @@ export const abandonMission = async (token: string): Promise<MissionAttemptRespo
     throw new Error(await getErrorDetail(response, '미션 포기에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '미션 포기')
 }
 
-export const useHint = async (token: string): Promise<MissionAttemptResponse> => {
+/**
+ * 시도 하나를 조회한다 (BE-30). 정적 미션과 AI 시나리오 모두 된다.
+ * 서버는 시간이 다 된 시도를 정리한 뒤 status 조회에 404 를 주므로, 끝난 결과(최종 점수·끝난 시각)는
+ * 이 API 로 확인한다. 내 시도가 아니거나 없으면 404 다.
+ */
+export const getAttempt = async (token: string, attemptId: string): Promise<MissionAttemptResponse> =>
+  withEnvironment(
+    await getAuthorizedJson<MissionAttemptResponse>(
+      token,
+      `/api/attempts/${encodeURIComponent(attemptId)}`,
+      '시도 기록을 불러오지 못했습니다',
+    ),
+    '시도 조회',
+  )
+
+export const requestHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/missions/hint`, {
     method: 'POST',
     headers: {
@@ -333,10 +511,19 @@ export const useHint = async (token: string): Promise<MissionAttemptResponse> =>
     throw new Error(await getErrorDetail(response, '힌트 사용에 실패했습니다'))
   }
 
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, '힌트 사용')
 }
 
-export const askTutor = async (token: string, message: string, hintLevel: number = 0): Promise<ChatResponse> => {
+/**
+ * AI 튜터 질문. `signal` 로 취소할 수 있다 (FE-12).
+ * 취소된 요청은 AbortError 로 올라가므로 호출자가 메시지 목록에 넣지 않는다.
+ */
+export const askTutor = async (
+  token: string,
+  message: string,
+  hintLevel: number = 0,
+  signal?: AbortSignal,
+): Promise<ChatResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/chat/`, {
     method: 'POST',
     headers: {
@@ -344,20 +531,36 @@ export const askTutor = async (token: string, message: string, hintLevel: number
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ message, hint_level: hintLevel }),
+    signal,
   })
 
   if (!response.ok) {
-    throw new Error(await getErrorDetail(response, 'AI 튜터 응답을 받지 못했습니다'))
+    /*
+     * plain Error 를 던지면 호출자가 429 를 500 과 구분할 수 없다.
+     * chat 은 사용자당 분당 호출 제한이 걸려 있으므로(백엔드 CHAT_RATE_LIMIT_PER_MINUTE)
+     * 상태 코드와 재시도 시각을 그대로 올려 화면이 재시도를 막을 수 있게 한다.
+     */
+    throw new ApiError(
+      await getErrorDetail(response, 'AI 튜터 응답을 받지 못했습니다'),
+      response.status,
+      response.status === 429 ? parseRetryAfter(response.headers.get('Retry-After')) : null,
+    )
   }
 
   return response.json()
 }
 
-const getAuthorizedJson = async <T>(token: string, path: string, fallback: string): Promise<T> => {
+const getAuthorizedJson = async <T>(
+  token: string,
+  path: string,
+  fallback: string,
+  signal?: AbortSignal,
+): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
+    signal,
   })
 
   if (!response.ok) {
@@ -367,11 +570,35 @@ const getAuthorizedJson = async <T>(token: string, path: string, fallback: strin
   return response.json()
 }
 
-export const getDashboardStats = (token: string) =>
-  getAuthorizedJson<DashboardStatsResponse>(token, '/api/dashboard/stats', 'Failed to load dashboard stats.')
+/**
+ * 대시보드 환경 필터 (FE-13). 백엔드 `EnvironmentFilter` 와 같은 값이다.
+ * 'all' 은 전체 합계 + 환경별 분해를 뜻한다.
+ */
+export type DashboardEnvironmentFilter = EnvironmentId | 'all'
 
-export const getLearningCurve = (token: string) =>
-  getAuthorizedJson<LearningCurveEntry[]>(token, '/api/dashboard/learning-curve', 'Failed to load learning curve.')
+export const getDashboardStats = (
+  token: string,
+  environment: DashboardEnvironmentFilter = 'all',
+  signal?: AbortSignal,
+) =>
+  getAuthorizedJson<DashboardStatsResponse>(
+    token,
+    `/api/dashboard/stats?environment=${environment}`,
+    '통계를 불러오지 못했습니다',
+    signal,
+  )
+
+export const getLearningCurve = (
+  token: string,
+  environment: DashboardEnvironmentFilter = 'all',
+  signal?: AbortSignal,
+) =>
+  getAuthorizedJson<LearningCurveEntry[]>(
+    token,
+    `/api/dashboard/learning-curve?environment=${environment}`,
+    '학습 곡선을 불러오지 못했습니다',
+    signal,
+  )
 
 export const getLeaderboard = (token: string) =>
   getAuthorizedJson<LeaderboardEntry[]>(token, '/api/leaderboard?limit=10', 'Failed to load leaderboard.')
@@ -379,31 +606,73 @@ export const getLeaderboard = (token: string) =>
 export const getAchievements = (token: string) =>
   getAuthorizedJson<AchievementsResponse>(token, '/api/achievements', 'Failed to load achievements.')
 
+// Environments
+
+/**
+ * 훈련 환경 가용 상태 목록.
+ *
+ * 계약에 없는 id 는 응답 전체를 실패시키지 않고 건너뛴다 — 백엔드가 환경을 먼저
+ * 추가해도 이미 열려 있는 환경의 훈련이 멈추면 안 된다. 반대로 미션·attempt·세션의
+ * environment 는 사용자의 실제 훈련 대상이라 잘못된 값이면 오류로 올린다
+ * (`withEnvironment`). 같은 필드가 아니라 역할이 다르다.
+ */
+export const getEnvironments = async (token: string): Promise<EnvironmentItem[]> => {
+  const payload = await getAuthorizedJson<EnvironmentListResponse>(
+    token,
+    '/api/environments',
+    '환경 목록을 불러오지 못했습니다',
+  )
+
+  if (!Array.isArray(payload?.items)) {
+    throw new ApiError('환경 목록 응답 형식이 올바르지 않습니다', 502)
+  }
+
+  const known = payload.items.filter((item) => isEnvironmentId(item.id))
+  if (known.length !== payload.items.length) {
+    console.warn(`프론트가 모르는 환경 ${payload.items.length - known.length}건을 건너뛰었습니다.`)
+  }
+
+  /*
+   * 계약에 없는 capability 는 버리는 것으로 충분하다(`hasCapability` 가 무시한다).
+   * 다만 조용히 버리면 백엔드가 기능을 추가했는데 프론트가 못 그리는 상태를
+   * 아무도 모른다 — 환경 id 와 같은 방식으로 경고만 남긴다 (FE-22).
+   */
+  const unknownCapabilities = [
+    ...new Set(
+      known.flatMap((item) =>
+        Array.isArray(item.capabilities)
+          ? item.capabilities.filter((capability) => !isEnvironmentCapability(capability))
+          : [],
+      ),
+    ),
+  ]
+  if (unknownCapabilities.length > 0) {
+    console.warn(`프론트가 모르는 capability: ${unknownCapabilities.join(', ')}`)
+  }
+
+  /*
+   * 닫힌 이유도 같다 (FE-23). 모르는 값은 `unavailableNote()` 가 status 문구로
+   * 되돌리므로 화면은 멀쩡하지만, 백엔드가 이유를 추가했는데 프론트가 그 문구를
+   * 못 고르는 상태를 아무도 모르게 두지 않는다.
+   */
+  const unknownReasons = [
+    ...new Set(
+      known
+        .map((item) => item.reason)
+        .filter(
+          (reason): reason is string =>
+            typeof reason === 'string' && !isEnvironmentDisabledReason(reason),
+        ),
+    ),
+  ]
+  if (unknownReasons.length > 0) {
+    console.warn(`프론트가 모르는 환경 비활성 사유: ${unknownReasons.join(', ')}`)
+  }
+
+  return known
+}
+
 // AI Scenario
-
-export interface ScenarioResponse {
-  scenario_id: string
-  title: string
-  difficulty: string
-  student_brief: string
-  time_limit_seconds: number
-  base_score: number
-  hint_penalty: number
-  safety_status: string
-}
-
-export interface ScenarioStatusResponse {
-  scenario_id: string
-  attempt_id: string
-  title: string
-  difficulty: string
-  student_brief: string
-  elapsed_seconds: number
-  remaining_seconds: number
-  current_score: number
-  hints_used: number
-  status: string
-}
 
 export interface ScenarioCheckResponse {
   resolved: boolean
@@ -420,21 +689,28 @@ export interface UnlockStatusResponse {
 export const getUnlockStatus = (token: string) =>
   getAuthorizedJson<UnlockStatusResponse>(token, '/api/scenarios/unlock-status', 'AI 잠금 상태를 불러오지 못했습니다')
 
-export const getScenarioStatus = (token: string) =>
-  getAuthorizedJson<ScenarioStatusResponse>(token, '/api/scenarios/status', 'AI 시나리오 상태를 불러오지 못했습니다')
+export const getScenarioStatus = async (token: string) => {
+  const status = await getAuthorizedJson<ScenarioStatusResponse>(
+    token,
+    '/api/scenarios/status',
+    'AI 시나리오 상태를 불러오지 못했습니다',
+  )
+  return withEnvironment(status, 'AI 시나리오 상태')
+}
 
 export const startRandomScenario = async (
   token: string,
   difficulty: string,
+  environment: EnvironmentId,
   demoUnlock: boolean = false,
 ): Promise<ScenarioResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/scenarios/start-random`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ difficulty, randomize: true, demo_unlock: demoUnlock }),
+    body: JSON.stringify({ difficulty, environment, randomize: true, demo_unlock: demoUnlock }),
   })
   if (!response.ok) throw new Error(await getErrorDetail(response, 'AI 시나리오 시작에 실패했습니다'))
-  return response.json()
+  return withEnvironment(await response.json() as ScenarioResponse, 'AI 시나리오 시작')
 }
 
 export const checkScenario = async (token: string): Promise<ScenarioCheckResponse> => {
@@ -454,12 +730,12 @@ export const abandonScenario = async (token: string): Promise<void> => {
   if (!response.ok) throw new Error(await getErrorDetail(response, 'AI 시나리오 포기에 실패했습니다'))
 }
 
-export const useScenarioHint = async (token: string): Promise<MissionAttemptResponse> => {
+export const requestScenarioHint = async (token: string): Promise<MissionAttemptResponse> => {
   const response = await fetch(`${API_BASE_URL}/api/scenarios/current/hint`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new Error(await getErrorDetail(response, '힌트 사용에 실패했습니다'))
-  return response.json()
+  return withEnvironment(await response.json() as MissionAttemptResponse, 'AI 시나리오 힌트')
 }
 

@@ -1,7 +1,12 @@
 import asyncio
+import logging
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class K8sSetupService:
@@ -32,17 +37,27 @@ class K8sSetupService:
             if e.status == 404:
                 self._core_api.create_namespace(
                     body=client.V1Namespace(
-                        metadata=client.V1ObjectMeta(name=namespace)
+                        metadata=client.V1ObjectMeta(
+                            name=namespace,
+                            # patch/set 으로 nginx 를 privileged·hostPath Pod 로 바꿔
+                            # 노드를 침해하는 경로를 막는다. baseline 은 일반 nginx·toolbox 는
+                            # 허용하고 privileged/hostPID/hostPath 만 거절한다.
+                            # (Docker DinD 는 sandbox_service 가 해당 네임스페이스만 완화한다)
+                            labels={
+                                "pod-security.kubernetes.io/enforce": "baseline",
+                                "pod-security.kubernetes.io/enforce-version": "latest",
+                            },
+                        )
                     )
                 )
-                print(f"[K8s] 네임스페이스 생성: {namespace}")
+                logger.info(f"[K8s] 네임스페이스 생성: {namespace}")
             else:
                 raise
 
     def _ensure_nginx_deployment(self, namespace: str) -> None:
         try:
             self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
-            print(f"[K8s] nginx 이미 존재: {namespace}")
+            logger.info(f"[K8s] nginx 이미 존재: {namespace}")
         except ApiException as e:
             if e.status == 404:
                 deployment = client.V1Deployment(
@@ -58,7 +73,10 @@ class K8sSetupService:
                                 containers=[
                                     client.V1Container(
                                         name="nginx",
-                                        image="nginx:latest",
+                                        image=settings.TRAINING_K8S_IMAGE,
+                                        # 태그가 움직이지 않으므로 이미 있으면 받지 않는다.
+                                        # (`:latest` 는 기본값이 Always 라 매번 다녀왔다)
+                                        image_pull_policy="IfNotPresent",
                                         ports=[client.V1ContainerPort(container_port=80)],
                                         resources=client.V1ResourceRequirements(
                                             requests={"memory": "64Mi", "cpu": "50m"},
@@ -73,14 +91,14 @@ class K8sSetupService:
                 self._apps_api.create_namespaced_deployment(
                     namespace=namespace, body=deployment
                 )
-                print(f"[K8s] nginx 배포 완료: {namespace}")
+                logger.info(f"[K8s] nginx 배포 완료: {namespace}")
             else:
                 raise
 
     def _ensure_nginx_service(self, namespace: str) -> None:
         try:
             self._core_api.read_namespaced_service(name="nginx-svc", namespace=namespace)
-            print(f"[K8s] nginx-svc 이미 존재: {namespace}")
+            logger.info(f"[K8s] nginx-svc 이미 존재: {namespace}")
         except ApiException as e:
             if e.status == 404:
                 service = client.V1Service(
@@ -91,19 +109,22 @@ class K8sSetupService:
                     ),
                 )
                 self._core_api.create_namespaced_service(namespace=namespace, body=service)
-                print(f"[K8s] nginx-svc 생성 완료: {namespace}")
+                logger.info(f"[K8s] nginx-svc 생성 완료: {namespace}")
             else:
                 raise
 
     async def teardown_user_namespace(self, namespace: str) -> None:
-        """네임스페이스 전체 삭제 (세션 종료 시 정리용)."""
+        """사용자 계정 전체 정리에만 사용한다.
+
+        개별 터미널 세션 종료는 SandboxService.cleanup()으로 처리한다.
+        """
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: self._teardown_sync(namespace))
 
     def _teardown_sync(self, namespace: str) -> None:
         try:
             self._core_api.delete_namespace(name=namespace)
-            print(f"[K8s] 네임스페이스 삭제: {namespace}")
+            logger.info(f"[K8s] 네임스페이스 삭제: {namespace}")
         except ApiException as e:
             if e.status != 404:
                 raise

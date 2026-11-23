@@ -1,0 +1,46 @@
+# 스키마 마이그레이션 (BE-25)
+#
+# 배포 **전에** 실행한다. 앱은 AUTO_CREATE_SCHEMA=false 로 돌기 때문에 스키마를
+# 스스로 만들지 않는다.
+#
+# Job 이 끝나기 전에 백엔드가 뜨면, 기동 시 스키마 드리프트 검사가 걸려
+# CrashLoopBackOff 로 기다린다. 이건 설계된 동작이다 — 옛 스키마 위에서 조용히
+# 도는 것보다 뜨지 않는 게 낫다. Job 이 끝나면 다음 재시도에서 정상 기동한다.
+#
+# 이미지 태그는 백엔드 Deployment 와 **같은 것**을 써야 한다. 다르면 코드와
+# 마이그레이션 리비전이 어긋난다.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: afterfail-migrate
+  namespace: afterfail
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: afterfail
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alembic
+          image: afterfail/backend:REPLACE_WITH_DIGEST
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: afterfail-secrets
+          resources:
+            requests: {cpu: "50m", memory: "128Mi"}
+            limits: {cpu: "500m", memory: "512Mi"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

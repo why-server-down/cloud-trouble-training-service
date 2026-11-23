@@ -30,7 +30,13 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    try:
+        user_uuid = uuid.UUID(user_id)
+    except (ValueError, TypeError):
+        # sub 가 UUID 가 아닌 토큰(키 유출·위조)은 500 이 아니라 401 로 돌려준다.
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception

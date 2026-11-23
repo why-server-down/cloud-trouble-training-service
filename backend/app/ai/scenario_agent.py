@@ -6,10 +6,21 @@ AI 시나리오 생성 에이전트.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
+import re
+import time
+from copy import deepcopy
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.config import settings
+from app.ai.observability import record_ai_call, record_scenario_candidate
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -18,6 +29,10 @@ class ScenarioGenerationInput:
     namespace: str
     recent_fault_types: list[str]
     allowed_fault_types: list[str]
+    environment: str = "kubernetes"
+    randomize: bool = True
+    seed: int | None = None
+    eval_mode: bool = False
 
 
 @dataclass
@@ -26,6 +41,73 @@ class ScenarioCandidate:
     score: float
     rejected: bool = False
     rejection_reason: str | None = None
+    score_breakdown: dict[str, float] | None = None
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScenarioTarget(_StrictModel):
+    kind: str
+    name: str
+    namespace: str
+
+
+class ScenarioFault(_StrictModel):
+    type: str
+    target: ScenarioTarget | None = None
+    parameters: dict = Field(default_factory=dict)
+
+
+class ExpectedSolution(_StrictModel):
+    summary: str
+    allowed_fix_patterns: list[str]
+
+
+class Observability(_StrictModel):
+    symptoms: list[str] = Field(min_length=1)
+    suggested_queries: list[str]
+    log_signals: list[str]
+
+
+class ValidationRuleSchema(_StrictModel):
+    name: str
+    type: str
+    query: str
+    stability_seconds: int = Field(ge=0, le=300)
+    is_required: bool = True
+
+
+class ValidationSchema(_StrictModel):
+    rules: list[ValidationRuleSchema] = Field(min_length=1)
+    all_required: bool
+
+
+class ScoringSchema(_StrictModel):
+    base_score: int = Field(ge=50, le=300)
+    hint_penalty: int = Field(ge=0, le=50)
+    time_limit_seconds: int = Field(ge=300, le=3600)
+
+
+class GeneratedScenarioSchema(_StrictModel):
+    environment: Literal["kubernetes", "docker", "linux"]
+    title: str = Field(min_length=2, max_length=80)
+    difficulty: Literal["beginner", "intermediate", "advanced", "expert"]
+    learning_objectives: list[str] = Field(min_length=1, max_length=5)
+    student_brief: str = Field(min_length=10, max_length=600)
+    internal_summary: str = Field(min_length=3, max_length=500)
+    fault: ScenarioFault
+    expected_solution: ExpectedSolution
+    observability: Observability
+    validation: ValidationSchema
+    scoring: ScoringSchema
+
+VALIDATION_TYPES_BY_ENVIRONMENT = {
+    "kubernetes": {"k8s"},
+    "docker": {"mock"},
+    "linux": {"mock"},
+}
 
 
 # 난이도별 Mock Fixture 시나리오
@@ -735,48 +817,187 @@ _MOCK_FIXTURES: dict[str, list[dict]] = {
 }
 
 
-def _score_candidate(candidate: dict, gen_input: ScenarioGenerationInput) -> float:
-    score = 50.0
+def _sandbox_fixture(environment: str, difficulty: str, fault_type: str) -> dict:
+    labels = {
+        "docker_network_disconnect": ("컨테이너 네트워크 단절", "training-net 연결 상태"),
+        "docker_container_stopped": ("컨테이너 예기치 않은 중지", "training-app 실행 상태"),
+        "docker_cpu_throttle": ("컨테이너 CPU 제한", "CPU 사용률과 제한값"),
+        "linux_disk_pressure": ("Linux 디스크 압박", "작업 경로 사용률"),
+        "linux_cpu_saturation": ("Linux CPU 포화", "load와 CPU 사용률"),
+        "linux_process_flood": ("Linux 프로세스 급증", "프로세스 개수와 상태"),
+    }
+    title, observation = labels[fault_type]
+    score = {"beginner": 80, "intermediate": 110, "advanced": 150, "expert": 200}.get(
+        difficulty, 80
+    )
+    return {
+        "environment": environment,
+        "title": title,
+        "difficulty": difficulty,
+        "learning_objectives": [f"{environment} 환경에서 {observation}을 관찰하고 복구할 수 있다"],
+        "student_brief": f"훈련 환경에 장애가 발생했습니다. {observation}을 확인하고 정상화하세요.",
+        "internal_summary": f"{fault_type} fixture 장애",
+        "fault": {"type": fault_type, "parameters": {}},
+        "expected_solution": {"summary": "허용된 환경 명령으로 정상 상태를 복구한다", "allowed_fix_patterns": []},
+        "observability": {"symptoms": [observation], "suggested_queries": [], "log_signals": []},
+        "validation": {
+            "rules": [{
+                "name": f"{fault_type}_resolved", "type": "mock",
+                "query": f"{environment}:{fault_type}:resolved", "stability_seconds": 5,
+            }],
+            "all_required": True,
+        },
+        "scoring": {"base_score": score, "hint_penalty": 7, "time_limit_seconds": 1200},
+    }
+
+
+_SANDBOX_FAULTS = {
+    "docker": ("docker_network_disconnect", "docker_container_stopped", "docker_cpu_throttle"),
+    "linux": ("linux_disk_pressure", "linux_cpu_saturation", "linux_process_flood"),
+}
+_MOCK_FIXTURES_BY_ENVIRONMENT: dict[str, dict[str, list[dict]]] = {
+    "kubernetes": _MOCK_FIXTURES,
+    **{
+        environment: {
+            difficulty: [
+                _sandbox_fixture(environment, difficulty, fault_type)
+                for fault_type in fault_types
+            ]
+            for difficulty in ("beginner", "intermediate", "advanced", "expert")
+        }
+        for environment, fault_types in _SANDBOX_FAULTS.items()
+    },
+}
+
+
+_ANSWER_LEAKAGE = re.compile(
+    r"원인은|정답|내부 요약|주입 방법|exit\s+1|wrongtag|6Mi|"
+    r"kubectl\s+(?:patch|edit|set|apply|delete)|"
+    r"docker\s+(?:network\s+connect|start|restart|update)|kill\s+-",
+    re.IGNORECASE,
+)
+_UNSAFE_PARAMETER_KEY = re.compile(
+    r"(?i)(command|argv|script|shell|hostpath|privileged|capabilities|sudo)"
+)
+_UNSAFE_PARAMETER_VALUE = re.compile(
+    r"(?i)(rm\s+-rf|sudo\b|/etc/(?:shadow|passwd)|curl\b.*\|\s*(?:sh|bash)|"
+    r"kubectl\s+(?:auth|exec|delete\s+namespace)|docker\s+system\s+prune)"
+)
+_SOURCE_BACKED_FAULTS = frozenset(
+    fault
+    for fixtures in _MOCK_FIXTURES_BY_ENVIRONMENT.values()
+    for scenarios in fixtures.values()
+    for scenario in scenarios
+    for fault in [scenario.get("fault", {}).get("type")]
+    if fault
+)
+
+
+def _unsafe_parameter_reason(parameters) -> str | None:
+    if isinstance(parameters, dict):
+        for key, value in parameters.items():
+            if _UNSAFE_PARAMETER_KEY.search(str(key)):
+                return f"unsafe parameter key: {key}"
+            reason = _unsafe_parameter_reason(value)
+            if reason:
+                return reason
+    elif isinstance(parameters, list):
+        for value in parameters:
+            reason = _unsafe_parameter_reason(value)
+            if reason:
+                return reason
+    elif _UNSAFE_PARAMETER_VALUE.search(str(parameters)):
+        return "unsafe executable parameter value"
+    return None
+
+
+def _score_candidate_details(
+    candidate: dict, gen_input: ScenarioGenerationInput
+) -> tuple[float, dict[str, float]]:
+    breakdown: dict[str, float] = {"base": 40.0}
     fault_type = candidate.get("fault", {}).get("type", "")
-
-    # 최근에 풀지 않은 장애 유형 가산
     if fault_type not in gen_input.recent_fault_types:
-        score += 20.0
-
-    # 난이도 일치 가산
+        breakdown["new_fault"] = 20.0
     if candidate.get("difficulty") == gen_input.difficulty:
-        score += 15.0
+        breakdown["difficulty_match"] = 15.0
+    if len(candidate.get("observability", {}).get("symptoms", [])) >= 2:
+        breakdown["observable_signals"] = 10.0
+    try:
+        from app.services.chaos_plan import ChaosPlanCompiler
 
-    # 관찰 가능성 가산
-    if candidate.get("observability", {}).get("symptoms"):
-        score += 10.0
+        ChaosPlanCompiler().compile(candidate, gen_input.namespace, gen_input.environment)
+        breakdown["compiler_success"] = 10.0
+    except Exception:
+        breakdown["compiler_success"] = 0.0
+    if fault_type in _SOURCE_BACKED_FAULTS and candidate.get("learning_objectives"):
+        breakdown["source_backed_objective"] = 5.0
+    if _unsafe_parameter_reason(candidate.get("fault", {}).get("parameters", {})):
+        breakdown["unsafe_parameter"] = -30.0
+    if fault_type in gen_input.recent_fault_types[:3]:
+        breakdown["recent_three_duplicate"] = -20.0
+    if _ANSWER_LEAKAGE.search(candidate.get("student_brief", "")):
+        breakdown["answer_leakage"] = -20.0
+    return sum(breakdown.values()), breakdown
 
-    return score
+
+def _score_candidate(candidate: dict, gen_input: ScenarioGenerationInput) -> float:
+    return _score_candidate_details(candidate, gen_input)[0]
+
+
+def select_candidate(
+    candidates: list[ScenarioCandidate], gen_input: ScenarioGenerationInput
+) -> ScenarioCandidate:
+    valid = [candidate for candidate in candidates if not candidate.rejected]
+    if not valid:
+        reasons = [candidate.rejection_reason for candidate in candidates]
+        raise ValueError(f"선택 가능한 시나리오 후보가 없습니다: {reasons}")
+    best_score = max(candidate.score for candidate in valid)
+    tied = sorted(
+        (candidate for candidate in valid if candidate.score == best_score),
+        key=lambda candidate: candidate.scenario.get("fault", {}).get("type", ""),
+    )
+    if not gen_input.randomize or len(tied) == 1:
+        return tied[0]
+    seed = 0 if gen_input.eval_mode and gen_input.seed is None else gen_input.seed
+    return random.Random(seed).choice(tied) if seed is not None else random.choice(tied)
 
 
 class MockScenarioAgent:
     """개발/테스트용 Mock 에이전트 (fixture 기반, OpenAI 불필요)."""
 
     def generate(self, gen_input: ScenarioGenerationInput) -> list[ScenarioCandidate]:
-        fixtures = _MOCK_FIXTURES.get(gen_input.difficulty, _MOCK_FIXTURES["beginner"])
+        environment_fixtures = _MOCK_FIXTURES_BY_ENVIRONMENT.get(gen_input.environment)
+        if environment_fixtures is None:
+            raise ValueError(f"지원하지 않는 시나리오 환경입니다: {gen_input.environment}")
+        if not gen_input.allowed_fault_types:
+            raise ValueError(f"'{gen_input.environment}' 환경의 허용 fault type 목록이 비어 있습니다")
+        fixtures = environment_fixtures.get(
+            gen_input.difficulty, environment_fixtures["beginner"]
+        )
 
         # allowed_fault_types 필터링
         valid = [
             f for f in fixtures
-            if not gen_input.allowed_fault_types
-            or f.get("fault", {}).get("type") in gen_input.allowed_fault_types
+            if f.get("fault", {}).get("type") in gen_input.allowed_fault_types
         ]
         if not valid:
-            valid = fixtures
+            raise ValueError(
+                f"'{gen_input.environment}' 환경에서 허용된 fixture를 찾을 수 없습니다"
+            )
 
         candidates = []
-        for scenario in valid[:3]:
-            score = _score_candidate(scenario, gen_input)
-            candidates.append(ScenarioCandidate(scenario=scenario, score=score))
+        for fixture in valid[:3]:
+            scenario = deepcopy(fixture)
+            scenario["environment"] = gen_input.environment
+            score, breakdown = _score_candidate_details(scenario, gen_input)
+            candidates.append(ScenarioCandidate(
+                scenario=scenario, score=score, score_breakdown=breakdown
+            ))
 
-        if not candidates:
-            fallback = _MOCK_FIXTURES["beginner"][0]
-            candidates = [ScenarioCandidate(scenario=fallback, score=30.0)]
+        for candidate in candidates:
+            record_scenario_candidate(
+                provider="mock", environment=gen_input.environment, result="valid",
+            )
 
         return candidates
 
@@ -791,10 +1012,12 @@ class OpenAIScenarioAgent:
         os.path.dirname(__file__), "../../../ai-data/prompts/scenario_gen.md"
     )
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str | None = None):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str | None = None,
+                 provider: str = "openai"):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
+        self._provider = provider
         self._system_prompt = self._load_system_prompt()
 
     def _load_system_prompt(self) -> str:
@@ -802,9 +1025,10 @@ class OpenAIScenarioAgent:
             with open(self._SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
-            return "You are a Kubernetes chaos scenario generator. Return JSON array of 3 scenario candidates."
+            return "You are a multi-environment chaos scenario generator. Return JSON scenario candidates."
 
     def generate(self, gen_input: ScenarioGenerationInput) -> list[ScenarioCandidate]:
+        started = time.perf_counter()
         try:
             import openai
             client_kwargs: dict = {"api_key": self._api_key}
@@ -827,21 +1051,61 @@ class OpenAIScenarioAgent:
             )
 
             raw = response.choices[0].message.content
-            return self._parse_response(raw, gen_input)
+            parsed = self._parse_response(raw, gen_input)
+            for candidate in parsed:
+                record_scenario_candidate(
+                    provider=self._provider,
+                    environment=gen_input.environment,
+                    result="rejected" if candidate.rejected else "valid",
+                    reason=candidate.rejection_reason or "none",
+                )
+            if any(not candidate.rejected for candidate in parsed):
+                record_ai_call(
+                    provider=self._provider, purpose="scenario", result="success",
+                    duration_seconds=time.perf_counter() - started,
+                    token_usage=getattr(response, "usage", None),
+                    model=self._model,
+                )
+                return parsed
+            logger.warning(
+                "scenario LLM candidates rejected; appending environment fixture fallback",
+                extra={"reject_reasons": [candidate.rejection_reason for candidate in parsed]},
+            )
+            record_ai_call(
+                provider=self._provider, purpose="scenario", result="fallback",
+                duration_seconds=time.perf_counter() - started,
+                token_usage=getattr(response, "usage", None),
+                model=self._model,
+            )
+            record_scenario_candidate(
+                provider=self._provider, environment=gen_input.environment,
+                result="fallback", reason="all_rejected",
+            )
+            return [*parsed, *MockScenarioAgent().generate(gen_input)]
 
-        except Exception as e:
-            print(f"[ScenarioAgent] OpenAI 호출 실패, mock fallback: {e}")
+        except Exception:
+            record_ai_call(
+                provider=self._provider, purpose="scenario", result="fallback",
+                duration_seconds=time.perf_counter() - started,
+                model=self._model,
+            )
+            record_scenario_candidate(
+                provider=self._provider, environment=gen_input.environment,
+                result="fallback", reason="provider_error",
+            )
+            logger.exception("scenario LLM call failed; using environment fixture fallback")
             return MockScenarioAgent().generate(gen_input)
 
     def _build_user_message(self, gen_input: ScenarioGenerationInput) -> str:
         recent = ", ".join(gen_input.recent_fault_types) if gen_input.recent_fault_types else "없음"
         allowed = ", ".join(gen_input.allowed_fault_types)
         return (
+            f"환경: {gen_input.environment}\n"
             f"난이도: {gen_input.difficulty}\n"
             f"사용자 namespace: {gen_input.namespace}\n"
             f"최근 풀었던 fault type (중복 피할 것): {recent}\n"
             f"허용된 fault type 목록: {allowed}\n\n"
-            f"위 조건에 맞는 Kubernetes 장애 시나리오 후보 3개를 JSON으로 생성해주세요.\n"
+            f"위 조건과 동일한 환경의 장애 시나리오 후보 3개를 JSON으로 생성해주세요.\n"
             f"반드시 JSON 객체 형태로 응답하세요: {{\"scenarios\": [...]}}"
         )
 
@@ -850,9 +1114,12 @@ class OpenAIScenarioAgent:
     ) -> list[ScenarioCandidate]:
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            print(f"[ScenarioAgent] JSON 파싱 실패: {e}")
-            return MockScenarioAgent().generate(gen_input)
+        except json.JSONDecodeError as exc:
+            logger.warning("scenario LLM response JSON parsing failed")
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason=f"invalid_json: {exc.msg}",
+            )]
 
         # {"scenarios": [...]} 또는 배열 직접 처리
         if isinstance(data, dict):
@@ -863,26 +1130,88 @@ class OpenAIScenarioAgent:
         elif isinstance(data, list):
             scenarios = data
         else:
-            return MockScenarioAgent().generate(gen_input)
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason="invalid_top_level: scenarios 배열이 필요합니다",
+            )]
 
         candidates = []
         for s in scenarios[:3]:
             if not isinstance(s, dict):
+                candidates.append(ScenarioCandidate(
+                    scenario={}, score=0, rejected=True,
+                    rejection_reason="schema_error: candidate는 JSON object여야 합니다",
+                ))
                 continue
-            # 필수 필드 검증
-            if not all(k in s for k in ("title", "student_brief", "fault", "validation")):
+            try:
+                parsed = GeneratedScenarioSchema.model_validate(s)
+            except ValidationError as exc:
+                candidates.append(ScenarioCandidate(
+                    scenario=s, score=0, rejected=True,
+                    rejection_reason=f"schema_error: {exc.errors(include_url=False)}",
+                ))
                 continue
-            # namespace placeholder 확인
-            fault_str = json.dumps(s.get("fault", {}))
-            if "{{namespace}}" not in fault_str and "namespace" not in fault_str:
+            scenario = parsed.model_dump()
+            if scenario["environment"] != gen_input.environment:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=(
+                        f"wrong_environment: requested={gen_input.environment}, "
+                        f"generated={scenario['environment']}"
+                    ),
+                ))
+                continue
+            fault_type = scenario["fault"]["type"]
+            if fault_type not in gen_input.allowed_fault_types:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=f"unknown_fault: {fault_type}",
+                ))
+                continue
+            score, breakdown = _score_candidate_details(scenario, gen_input)
+            unsafe_reason = _unsafe_parameter_reason(scenario["fault"]["parameters"])
+            if unsafe_reason:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=score, rejected=True,
+                    rejection_reason=f"unsafe_parameter: {unsafe_reason}",
+                    score_breakdown=breakdown,
+                ))
+                continue
+            if _ANSWER_LEAKAGE.search(scenario["student_brief"]):
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=score, rejected=True,
+                    rejection_reason="answer_leakage: student_brief가 정답 또는 주입 방법을 노출합니다",
+                    score_breakdown=breakdown,
+                ))
+                continue
+            allowed_rule_types = VALIDATION_TYPES_BY_ENVIRONMENT[gen_input.environment]
+            actual_rule_types = {rule["type"] for rule in scenario["validation"]["rules"]}
+            if not actual_rule_types.issubset(allowed_rule_types):
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason=(
+                        f"invalid_validation_type: {sorted(actual_rule_types)}; "
+                        f"allowed={sorted(allowed_rule_types)}"
+                    ),
+                ))
+                continue
+            fault_str = json.dumps(scenario["fault"])
+            if gen_input.environment == "kubernetes" and "{{namespace}}" not in fault_str and "namespace" not in fault_str:
+                candidates.append(ScenarioCandidate(
+                    scenario=scenario, score=0, rejected=True,
+                    rejection_reason="missing_namespace_placeholder",
+                ))
                 continue
 
-            score = _score_candidate(s, gen_input)
-            candidates.append(ScenarioCandidate(scenario=s, score=score))
+            candidates.append(ScenarioCandidate(
+                scenario=scenario, score=score, score_breakdown=breakdown
+            ))
 
         if not candidates:
-            print("[ScenarioAgent] 유효한 후보 없음, mock fallback")
-            return MockScenarioAgent().generate(gen_input)
+            return [ScenarioCandidate(
+                scenario={}, score=0, rejected=True,
+                rejection_reason="empty_candidates",
+            )]
 
         return candidates
 
@@ -893,10 +1222,12 @@ def get_scenario_agent() -> MockScenarioAgent | OpenAIScenarioAgent:
             api_key=settings.GEMINI_API_KEY,
             model=settings.GEMINI_MODEL,
             base_url=_GEMINI_BASE_URL,
+            provider="gemini",
         )
     if settings.AI_BACKEND == "openai" and settings.OPENAI_API_KEY:
         return OpenAIScenarioAgent(
             api_key=settings.OPENAI_API_KEY,
             model=settings.SCENARIO_MODEL,
+            provider="openai",
         )
     return MockScenarioAgent()

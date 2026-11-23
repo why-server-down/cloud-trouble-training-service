@@ -1,9 +1,14 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+import logging
 import asyncio
 import re
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 import httpx
+
+from app.core import environments
 
 
 RETRY_MESSAGE = "틀렸습니다. 다시 시도해 주세요."
@@ -18,6 +23,14 @@ class ValidationResult:
 
 
 class BaseValidationService(ABC):
+    """해결 검증 공통 인터페이스.
+
+    environment: 이 검증기가 담당하는 훈련 환경.
+    docker/linux 구현체는 후속 브랜치에서 이 클래스를 상속해 추가한다.
+    """
+
+    environment: str = environments.KUBERNETES
+
     @abstractmethod
     async def check_resolution(self, chaos_type: str, namespace: str) -> ValidationResult:
         pass
@@ -26,7 +39,8 @@ class BaseValidationService(ABC):
 class MockValidationService(BaseValidationService):
     """Docker 개발 환경용 Mock 구현. debug/resolve 엔드포인트로 수동 해결 트리거."""
 
-    def __init__(self, auto_pass: bool = False):
+    def __init__(self, auto_pass: bool = False, environment: str = environments.KUBERNETES):
+        self.environment = environment
         self._auto_pass = auto_pass
         self._resolved_namespaces: set[str] = set()
 
@@ -70,10 +84,12 @@ class MissionValidationQueries:
                 namespace="{namespace}",endpoint="webapp-svc",ready="true"
             }) > 0
         """,
+        # 장애는 readinessProbe 실패다. 예전 쿼리는 Liveness 성공을 셌는데 nginx 에는 livenessProbe 가
+        # 없어 고쳐도 통과할 수 없었다. nginx-svc 의 ready 엔드포인트로 본다.
         "network_latency": """
-            sum(increase(prober_probe_total{
-                namespace="{namespace}",probe_type="Liveness",result="successful"
-            }[1m])) > 0
+            sum(kube_endpoint_address{
+                namespace="{namespace}",endpoint="nginx-svc",ready="true"
+            }) > 0
         """,
     }
 
@@ -113,7 +129,7 @@ class PrometheusValidationService(BaseValidationService):
             if self._is_resolved(result):
                 return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Prometheus query failed for {chaos_type} in {namespace}: {e}")
+            logger.warning(f"[Validation] Prometheus query failed for {chaos_type} in {namespace}: {e}")
         return ValidationResult(is_resolved=False, message=RETRY_MESSAGE)
 
     @staticmethod
@@ -155,20 +171,14 @@ class K8sValidationService(BaseValidationService):
                 return self._retry()
             return result
         except Exception as e:
-            print(f"[Validation] Failed to check {chaos_type} in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to check {chaos_type} in {namespace}: {e}")
             return self._retry()
 
     def _check_resolution_sync(self, chaos_type: str, namespace: str) -> ValidationResult:
-        if chaos_type == "pod_failure":
-            return self._check_pod_failure(namespace)
-        elif chaos_type == "memory_stress":
-            return self._check_memory_stress(namespace)
-        elif chaos_type == "service_misconfig":
-            return self._check_service_misconfig(namespace)
-        elif chaos_type == "network_latency":
-            return self._check_network_latency(namespace)
-        else:
+        check = self._CHECKS.get(chaos_type)
+        if check is None:
             return self._retry()
+        return check(self, namespace)
 
     def _check_pod_failure(self, namespace: str) -> ValidationResult:
         try:
@@ -180,7 +190,7 @@ class K8sValidationService(BaseValidationService):
             if nginx_container.image == "nginx:wrongtag":
                 return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
             return self._retry()
 
         try:
@@ -198,8 +208,25 @@ class K8sValidationService(BaseValidationService):
             
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect pods in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect pods in {namespace}: {e}")
             return self._retry()
+
+    @staticmethod
+    def _rollout_complete(dep) -> bool:
+        """Deployment 롤아웃이 끝나 모든 replica 가 새 템플릿으로 Ready 인가.
+
+        Pod phase 만 보면 CrashLoopBackOff 도 Running 이라 고치지 않아도 통과했고, 주입 직후
+        이전 Pod 가 아직 Ready 인 1~2초 동안 확인해도 통과했다.
+        """
+        replicas = dep.spec.replicas if dep.spec.replicas is not None else 1
+        status = dep.status
+        return (
+            (status.observed_generation or 0) >= (dep.metadata.generation or 0)
+            and (status.updated_replicas or 0) == replicas
+            and (status.ready_replicas or 0) == replicas
+            and (status.available_replicas or 0) == replicas
+            and not status.unavailable_replicas
+        )
 
     def _check_memory_stress(self, namespace: str) -> ValidationResult:
         try:
@@ -224,42 +251,45 @@ class K8sValidationService(BaseValidationService):
                     return self._retry()
             else:
                 return self._retry()
-        except Exception as e:
-            print(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
-            return self._retry()
-
-        try:
-            pods = self._core_api.list_namespaced_pod(namespace=namespace, label_selector="app=nginx")
-            if not pods.items:
+            if not self._rollout_complete(dep):
                 return self._retry()
-            for pod in pods.items:
-                if pod.status.phase != "Running":
-                    return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect pods in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect deployment in {namespace}: {e}")
             return self._retry()
 
     def _check_service_misconfig(self, namespace: str) -> ValidationResult:
         try:
             svc = self._core_api.read_namespaced_service(name="webapp-svc", namespace=namespace)
-            selector = svc.spec.selector or {}
-            if selector.get("app") != "webapp":
+            # 정확히 일치해야 한다. 키를 더 붙이면 Pod 를 고르지 못해 Endpoints 가 비어도 통과했다.
+            if (svc.spec.selector or {}) != {"app": "webapp"}:
                 return self._retry()
             return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
         except Exception as e:
-            print(f"[Validation] Failed to inspect service in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect service in {namespace}: {e}")
             return self._retry()
 
     def _check_network_latency(self, namespace: str) -> ValidationResult:
-        # nginx-svc에 ready 엔드포인트가 존재하면 readiness probe가 정상화된 것
+        # nginx 롤아웃이 끝나 Pod 가 Ready 이고 nginx-svc 에 ready 엔드포인트가 있으면 정상화된 것.
+        # 엔드포인트만 보면 주입 직후 이전 Pod 가 빠지기 전이나, 다른 Pod 에 app=nginx 라벨을 붙여도 통과했다.
         try:
+            dep = self._apps_api.read_namespaced_deployment(name="nginx", namespace=namespace)
+            if not self._rollout_complete(dep):
+                return self._retry()
             ep = self._core_api.read_namespaced_endpoints(name="nginx-svc", namespace=namespace)
             for subset in (ep.subsets or []):
                 if subset.addresses:
                     return ValidationResult(is_resolved=True, message=SUCCESS_MESSAGE)
             return self._retry()
         except Exception as e:
-            print(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
+            logger.warning(f"[Validation] Failed to inspect endpoints in {namespace}: {e}")
             return self._retry()
+
+    # chaos_type → 검증 핸들러 레지스트리. 새 chaos_type 검증은 여기에 등록한다.
+    _CHECKS = {
+        "pod_failure": _check_pod_failure,
+        "memory_stress": _check_memory_stress,
+        "service_misconfig": _check_service_misconfig,
+        "network_latency": _check_network_latency,
+    }
 

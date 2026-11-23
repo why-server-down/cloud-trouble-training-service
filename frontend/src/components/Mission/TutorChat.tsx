@@ -1,11 +1,39 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { askTutor } from '../../services/api'
+import { ApiError, askTutor, TutorSource } from '../../services/api'
+import { getEnvironmentMeta } from '../../config/environments'
+import { getSafeSourceHref } from '../../utils/tutorSources'
+import { markStart, measureSince, PERF } from '../../utils/perf'
+import { EnvironmentId, isEnvironmentId } from '../../types/training'
+import { AlertIcon } from './Icons'
+import { HINT_LEVELS, hintLevelOf, MAX_HINT_LEVEL } from './missionCopy'
 
 interface TutorChatProps {
   token: string
   missionId: string
+  /**
+   * 이 대화가 속한 훈련 환경 = 활성 attempt 의 환경 (FE-11).
+   * 튜터 응답의 `environment` 와 비교해 계약 불일치를 판정하는 기준값이다.
+   */
+  environment: EnvironmentId
+  /**
+   * 대화를 보존할 key = 시도 id + 환경 (FE-25). 주면 화면 배치가 바뀌어 다시 마운트돼도
+   * 같은 시도의 대화를 이어서 보여준다. 없으면 보존하지 않는다.
+   */
+  conversationKey?: string
   hintsUsed: number
+  /**
+   * 힌트를 샀다는 신호 (FE-28). 값이 바뀌면 올라간 단계의 힌트를 튜터에게 바로 묻는다 —
+   * 점수를 내고도 아무것도 받지 못하는 일이 없게 한다.
+   */
+  autoHintKey?: number
+  /**
+   * 다음 힌트 단계를 연다(확인 시트를 거친다). 단계 안내 바로 옆에서 올릴 수 있게 한다 —
+   * 모바일은 튜터 탭에 인시던트 바의 힌트 버튼이 없다.
+   */
+  onRequestHint?: () => void
+  /** 힌트 한 단계 감점. 알 때만 버튼에 적는다. */
+  hintPenalty?: number | null
   disabled?: boolean
   floating?: boolean
   floatingOpen?: boolean
@@ -15,12 +43,48 @@ interface TutorChatProps {
 interface ChatMessage {
   role: 'user' | 'assistant'
   text: string
+  /** 어시스턴트 답변의 근거. 없을 수 있고, 없어도 레이아웃이 바뀌지 않는다 (FE-11). */
+  sources?: TutorSource[]
+  /** 답변에 쓰인 관측값 이름. */
+  observations?: string[]
+  /** 프로바이더 실패로 받은 대체 응답인가. */
+  fallback?: boolean
+  /** 이 답이 나온 힌트 단계. 힌트를 산 뒤 답이 어떻게 달라졌는지 대화 안에서 보이게 한다. */
+  hintLevel?: number
+  /** 질문 전송부터 답변 도착까지 걸린 ms (FE-20). 숨기지 않고 그대로 보여준다. */
+  latencyMs?: number | null
+  /**
+   * 응답이 요청 환경과 **다른** 환경을 근거로 왔을 때 그 환경 (FE-11).
+   * 일치하거나 판정할 수 없으면 null 이다 — 값이 있을 때만 경고를 붙인다.
+   */
+  mismatchedEnvironment?: EnvironmentId | null
 }
+
+/**
+ * 마지막 대화 한 벌 (FE-25). 진행 중인 시도는 사용자당 하나라 한 벌이면 된다.
+ * 화면 배치(데스크톱 보조 패널 ↔ 모바일 탭)가 바뀌어 TutorChat 이 다시 마운트돼도
+ * 질문과 답변이 사라지지 않게 컴포넌트 밖에 둔다. 새로고침까지 넘기지는 않는다.
+ */
+let savedConversation: { key: string; messages: ChatMessage[] } | null = null
 
 const initialMessages: ChatMessage[] = [
   { role: 'assistant', text: '막힌 지점을 질문해 주세요. 정답보다 다음 확인 순서를 먼저 제안합니다.' },
 ]
 const FLOATING_TUTOR_QUERY = '(max-width: 980px), (max-height: 760px)'
+/** 이 시간이 지나면 "무엇을 하고 있는지" 보조 문구를 띄운다 (FE-12). */
+const SLOW_RESPONSE_HINT_MS = 1500
+/** 이 시간이 지나면 취소 버튼을 준다. 자동 실패 처리는 하지 않는다 (FE-12). */
+const CANCELLABLE_AFTER_MS = 15000
+/**
+ * 429 인데 Retry-After 를 읽지 못했을 때 쓸 최소 대기 (초).
+ *
+ * 백엔드가 `expose_headers=["Retry-After"]` 를 붙여 정상 경로에서는 서버가 준
+ * 숫자를 그대로 쓴다. 이 값은 헤더가 가려지는 경우(중간 프록시가 떨어뜨림,
+ * 그 설정이 없는 배포)를 위한 안전장치로 남긴다 — 재시도를 열어두면 사용자가
+ * 버튼을 두드려 429 만 계속 받는다. 숫자를 모르므로 초는 표시하지 않는다.
+ */
+const RATE_LIMIT_FALLBACK_COOLDOWN_SEC = 5
+
 
 const renderInlineText = (text: string) => {
   const parts = text.split(/(`[^`]+`)/g)
@@ -74,36 +138,158 @@ const ChatMessageContent: React.FC<{ text: string }> = ({ text }) => {
   )
 }
 
+/** 접기 영역. sources / observations 가 없으면 아무것도 그리지 않는다 (FE-11). */
+const ChatMessageEvidence: React.FC<{ message: ChatMessage }> = ({ message }) => {
+  const observations = message.observations ?? []
+  const sources = message.sources ?? []
+  const latency = message.latencyMs
+  if (observations.length === 0 && sources.length === 0 && latency == null) return null
+
+  return (
+    <div className="chat-evidence">
+      {latency != null && (
+        // 측정값을 숨기지 않는다 (FE-20). 느렸다면 사용자도 알아야 한다.
+        <span className="chat-latency">응답 {(latency / 1000).toFixed(1)}초</span>
+      )}
+      {observations.length > 0 && (
+        <details className="chat-evidence-group">
+          <summary>사용한 관측 정보 {observations.length}건</summary>
+          <ul>
+            {observations.map((name) => (
+              <li key={name}><code>{name}</code></li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {sources.length > 0 && (
+        <details className="chat-evidence-group">
+          <summary>참고 자료 {sources.length}건</summary>
+          <ul>
+            {sources.map((source, index) => {
+              const href = getSafeSourceHref(source.path)
+              return (
+                <li key={`${source.source_id ?? source.title}-${index}`}>
+                  {href ? (
+                    <a href={href} target="_blank" rel="noreferrer noopener">{source.title}</a>
+                  ) : (
+                    <span>{source.title}</span>
+                  )}
+                  {source.path && !href && <code className="chat-source-path">{source.path}</code>}
+                </li>
+              )
+            })}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
+}
+
 const TutorChat: React.FC<TutorChatProps> = ({
   token,
   missionId,
+  environment,
+  conversationKey,
   hintsUsed,
+  autoHintKey = 0,
+  onRequestHint,
+  hintPenalty,
   disabled,
   floating = false,
   floatingOpen = true,
   onToggleFloating,
 }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
+  const restoreMessages = (key: string | undefined) =>
+    key && savedConversation?.key === key ? savedConversation.messages : initialMessages
+  const [messages, setMessages] = useState<ChatMessage[]>(() => restoreMessages(conversationKey))
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 실패한 질문. 사용자의 입력을 버리지 않고 재전송 버튼을 준다 (FE-11). */
+  const [retryQuestion, setRetryQuestion] = useState<string | null>(null)
+  /** 응답이 늦을 때 무엇을 하고 있는지 알린다 (FE-12). */
+  const [isSlow, setIsSlow] = useState(false)
+  /** 오래 걸리면 취소 버튼을 준다. 자동 실패 처리는 하지 않는다 (FE-12). */
+  const [isCancellable, setIsCancellable] = useState(false)
+  /**
+   * 429 로 막힌 동안 남은 초. 0 이면 제한이 풀렸다.
+   * 서버가 준 Retry-After 를 못 읽었을 때는 `isCooldownExact` 가 false 다 —
+   * 그때는 초를 표시하지 않는다(모르는 숫자를 만들어 보여주지 않는다).
+   */
+  const [cooldown, setCooldown] = useState(0)
+  const [isCooldownExact, setIsCooldownExact] = useState(false)
+  /** 제한이 걸린 순간 한 번 읽어 줄 문구. 카운트다운이 줄어도 바뀌지 않는다. */
+  const [cooldownAnnouncement, setCooldownAnnouncement] = useState('')
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
+  /** 진행 중인 질문의 controller. unmount·attempt 종료·환경 변경에서 취소한다 (FE-11). */
+  const requestRef = useRef<AbortController | null>(null)
   const [isFloatingViewport, setIsFloatingViewport] = useState(() =>
     typeof window === 'undefined' || !window.matchMedia ? false : window.matchMedia(FLOATING_TUTOR_QUERY).matches,
   )
-  const hintLevel = Math.min(hintsUsed, 3)
-  const isChatDisabled = loading || !missionId || disabled
+  const hintLevel = hintLevelOf(hintsUsed)
+  const isChatDisabled = loading || !missionId || disabled || cooldown > 0
+  const environmentLabel = getEnvironmentMeta(environment).label
+  const isRateLimited = cooldown > 0
   const panelClassName = [
     'tutor-panel',
     floating ? 'tutor-floating' : '',
     floating && !floatingOpen ? 'tutor-collapsed' : '',
   ].filter(Boolean).join(' ')
 
+  /*
+   * attempt 나 환경이 바뀌면 대화를 비운다 (FE-11).
+   * 진행 중인 질문도 취소한다 — 늦게 도착한 이전 환경의 답변이 새 대화에
+   * 붙으면 사용자는 그것을 지금 환경의 근거로 읽는다.
+   */
   useEffect(() => {
-    setMessages(initialMessages)
+    requestRef.current?.abort()
+    requestRef.current = null
+    setMessages(restoreMessages(conversationKey))
     setInput('')
     setError(null)
-  }, [missionId])
+    setRetryQuestion(null)
+    setLoading(false)
+    setIsSlow(false)
+    setIsCancellable(false)
+    setCooldown(0)
+    setIsCooldownExact(false)
+  }, [missionId, environment, conversationKey])
+
+  useEffect(() => {
+    if (conversationKey) savedConversation = { key: conversationKey, messages }
+  }, [conversationKey, messages])
+
+  /** unmount 에서도 진행 중인 질문을 남기지 않는다. */
+  useEffect(() => () => requestRef.current?.abort(), [])
+
+  /** 호출 제한 남은 시간 카운트다운. 0 이 되면 다시 질문할 수 있다. */
+  useEffect(() => {
+    if (cooldown <= 0) return undefined
+
+    const timer = window.setInterval(() => {
+      setCooldown((remaining) => (remaining <= 1 ? 0 : remaining - 1))
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [cooldown])
+
+  /** 지연 단계 타이머. loading 이 끝나면 함께 사라진다 (FE-12). */
+  useEffect(() => {
+    if (!loading) {
+      setIsSlow(false)
+      setIsCancellable(false)
+      return undefined
+    }
+
+    const slowTimer = window.setTimeout(() => setIsSlow(true), SLOW_RESPONSE_HINT_MS)
+    const cancelTimer = window.setTimeout(() => setIsCancellable(true), CANCELLABLE_AFTER_MS)
+
+    return () => {
+      window.clearTimeout(slowTimer)
+      window.clearTimeout(cancelTimer)
+    }
+  }, [loading])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -121,71 +307,303 @@ const TutorChat: React.FC<TutorChatProps> = ({
     return () => mediaQuery.removeEventListener('change', handleViewportChange)
   }, [])
 
-  const submitQuestion = async (event: React.FormEvent) => {
+  /**
+   * 질문 1회 = chat API 1회 (FE-12).
+   * `loading` 이 isChatDisabled 에 들어 있어 중복 제출이 막힌다. 진행 중인
+   * controller 가 남아 있으면 그것도 방어선으로 쓴다.
+   */
+  const ask = useCallback(async (question: string) => {
+    // 호출 제한 중에는 요청 자체를 보내지 않는다. 보내도 429 만 하나 더 받는다.
+    if (!question || !missionId || disabled || requestRef.current || cooldown > 0) return
+
+    const controller = new AbortController()
+    requestRef.current = controller
+    markStart(PERF.TUTOR_RESPONSE)
+
+    setLoading(true)
+    setError(null)
+    setRetryQuestion(null)
+    setMessages((current) => [...current, { role: 'user', text: question }])
+
+    try {
+      const response = await askTutor(token, question, hintLevel, controller.signal)
+      // 취소된 요청의 응답은 목록에 넣지 않는다.
+      if (controller.signal.aborted) return
+
+      /*
+       * 응답 시간을 measure 로 남긴다 (FE-20). AI 1.5초 목표는 백엔드·LLM 을 포함한
+       * 목표라서 프론트가 감추면 달성 여부를 판단할 수 없다.
+       */
+      const latencyMs = measureSince(PERF.TUTOR_RESPONSE)
+
+      /*
+       * 튜터가 실제로 어느 환경을 보고 답했는지 확인한다 (FE-11).
+       * 요청 환경과 다르면 계약이 어긋난 것이다 — 다른 환경 기준 힌트는 이 세션의
+       * 터미널이 거절할 명령을 안내한다. 그렇다고 답변을 버리지는 않는다.
+       * 버리면 사용자는 재전송해도 같은 결과를 받아 아무것도 못 얻는다.
+       * 계약에 없는 값이면 판정하지 않는다 — 모르는 것을 불일치로 단정하지 않는다.
+       */
+      const answered = isEnvironmentId(response.environment) ? response.environment : null
+
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          text: response.response,
+          sources: response.sources ?? [],
+          observations: response.observations_used ?? [],
+          fallback: Boolean(response.fallback_used),
+          hintLevel: response.hint_level,
+          latencyMs,
+          mismatchedEnvironment: answered !== null && answered !== environment ? answered : null,
+        },
+      ])
+    } catch (err) {
+      // 사용자가 취소한 것은 오류가 아니다.
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) return
+
+      /*
+       * 429 는 "다시 누르면 되는 실패"가 아니다. 서버가 알려준 시간만큼 입력과
+       * 재전송을 잠근다. Retry-After 를 못 읽으면 최소 대기만 걸고 초는 감춘다.
+       */
+      if (err instanceof ApiError && err.status === 429) {
+        const exact = err.retryAfterSeconds !== null && err.retryAfterSeconds > 0
+        setCooldown(exact ? (err.retryAfterSeconds as number) : RATE_LIMIT_FALLBACK_COOLDOWN_SEC)
+        setIsCooldownExact(exact)
+        // 보이는 카운트다운과 문장을 달리 둔다 — 같은 문장이 두 번 있으면 찾기·낭독이 겹친다.
+        setCooldownAnnouncement(
+          exact
+            ? `질문 횟수 제한에 걸려 ${err.retryAfterSeconds}초 동안 질문을 보낼 수 없습니다.`
+            : '질문 횟수 제한에 걸려 잠시 질문을 보낼 수 없습니다.',
+        )
+        /*
+         * 백엔드 detail 에도 "N초 후" 가 들어 있는데 그것은 응답 시점의 고정값이다.
+         * 아래 카운트다운과 함께 띄우면 서로 다른 두 숫자가 동시에 보인다.
+         * 제한 안내는 카운트다운 한 곳에서만 낸다.
+         */
+        setError(null)
+        setRetryQuestion(question)
+        return
+      }
+
+      setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다.')
+      setRetryQuestion(question)
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null
+        setLoading(false)
+      }
+    }
+  }, [cooldown, disabled, environment, hintLevel, missionId, token])
+
+  /*
+   * 힌트를 사면 그 단계의 힌트를 바로 묻는다. 처음 마운트될 때의 값은 이미 처리한 것으로 본다 —
+   * 화면 배치가 바뀌어 다시 마운트돼도 같은 힌트를 또 묻지 않는다.
+   */
+  const handledAutoHintRef = useRef(autoHintKey)
+  /**
+   * 보내야 할 힌트 질문. 다른 질문에 답하는 중이거나 호출 제한 중이면 바로 보낼 수 없다 —
+   * 그때 버리면 점수만 깎이고 힌트를 못 받는다. 보낼 수 있게 되면 그때 보낸다.
+   */
+  const [pendingAutoHint, setPendingAutoHint] = useState(false)
+  useEffect(() => {
+    if (!autoHintKey || autoHintKey === handledAutoHintRef.current) return
+    handledAutoHintRef.current = autoHintKey
+    setPendingAutoHint(true)
+    messagesRef.current?.focus()
+  }, [autoHintKey])
+  useEffect(() => {
+    if (!pendingAutoHint || loading || cooldown > 0 || disabled || requestRef.current) return
+    setPendingAutoHint(false)
+    void ask(`힌트 ${hintLevel}단계를 주세요.`)
+  }, [ask, cooldown, disabled, hintLevel, loading, pendingAutoHint])
+
+  const submitQuestion = (event: React.FormEvent) => {
     event.preventDefault()
     const question = input.trim()
     if (!question || isChatDisabled) return
 
     setInput('')
-    setLoading(true)
-    setError(null)
-    setMessages((current) => [...current, { role: 'user', text: question }])
+    void ask(question)
+  }
 
-    try {
-      const response = await askTutor(token, question, hintLevel)
-      setMessages((current) => [...current, { role: 'assistant', text: response.response }])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'AI 튜터 응답을 받지 못했습니다.')
-    } finally {
-      setLoading(false)
-    }
+  /** 취소. 진행 중 요청만 끊고 사용자의 질문은 목록에 남긴다 (FE-12). */
+  const cancelQuestion = () => {
+    requestRef.current?.abort()
+    requestRef.current = null
+    setLoading(false)
+    setError('질문을 취소했습니다. 다시 물어보실 수 있습니다.')
   }
 
   const tutorChat = (
     <>
       {floating && !floatingOpen && (
-        <button className="tutor-floating-launcher" type="button" onClick={onToggleFloating}>
+        <button className="tutor-floating-launcher material-popover" type="button" onClick={onToggleFloating}>
           AI 튜터
         </button>
       )}
       <section className={panelClassName}>
         <div className="tutor-header">
           <div className="tutor-title-group">
-            <span>AI 튜터</span>
-            <span className="tutor-hint-level">힌트 단계 {hintLevel}</span>
+            <h3 className="tutor-title">AI 튜터</h3>
+            {/* 색만으로 구분하지 않는다 — 환경 이름을 그대로 쓴다 (FE-11). */}
+            <span className="ui-chip tutor-environment-badge" data-environment={environment}>
+              {environmentLabel}
+            </span>
           </div>
           {floating && (
-            <button className="tutor-floating-close" type="button" onClick={onToggleFloating}>
+            <button className="ui-button plain small tutor-floating-close" type="button" onClick={onToggleFloating}>
               닫기
             </button>
           )}
         </div>
-        <div className="chat-messages" aria-live="polite">
+        {/*
+          * 힌트 단계는 튜터가 얼마나 구체적으로 답하는지다 (설계 문서 6.3.1). 예전에는 머리의 작은 칩과
+          * 마우스를 올려야 보이는 설명뿐이라, 힌트를 사면 답이 달라진다는 것이 전달되지 않았다.
+          */}
+        <div className="tutor-hint-ladder">
+          <span className="tutor-hint-meter" aria-hidden="true">
+            {HINT_LEVELS.slice(1).map((level, index) => (
+              <i key={level.name} className={index < hintLevel ? 'is-on' : undefined} />
+            ))}
+          </span>
+          <strong className="tutor-hint-current">
+            힌트 {hintLevel}단계 · {HINT_LEVELS[hintLevel].name}
+          </strong>
+          <span className="tutor-hint-detail">
+            {hintLevel < MAX_HINT_LEVEL
+              ? `힌트를 쓰면 ${HINT_LEVELS[hintLevel + 1].name}까지 알려 줍니다.`
+              : '가장 구체적인 단계입니다.'}
+          </span>
+          {onRequestHint && hintLevel < MAX_HINT_LEVEL && (
+            <button
+              className="ui-button small tutor-hint-next"
+              type="button"
+              onClick={onRequestHint}
+              disabled={disabled}
+            >
+              {hintLevel + 1}단계 열기{hintPenalty ? ` −${hintPenalty}점` : ''}
+            </button>
+          )}
+        </div>
+        <div className="chat-messages" aria-live="polite" ref={messagesRef} tabIndex={-1} aria-label="튜터 대화">
           {messages.map((message, index) => (
             <div key={`${message.role}-${index}`} className={`chat-message ${message.role}`}>
-              <span className="chat-message-role">{message.role === 'user' ? '나' : '튜터'}</span>
+              <span className="chat-message-role">
+                {message.role === 'user' ? '나' : '튜터'}
+                {message.role === 'assistant' && message.hintLevel !== undefined
+                  ? ` · 힌트 ${hintLevelOf(message.hintLevel)}단계`
+                  : ''}
+              </span>
+              {message.mismatchedEnvironment && (
+                /*
+                 * 색이나 아이콘만으로 구분하지 않는다 (FE-17) — 두 환경 이름을 문장에
+                 * 그대로 쓴다. 아이콘은 장식이므로 스크린리더에서 숨긴다.
+                 */
+                <p className="chat-environment-mismatch">
+                  <AlertIcon />
+                  이 답변은 {getEnvironmentMeta(message.mismatchedEnvironment).label} 기준입니다
+                  (현재 세션: {environmentLabel}). 지금 환경에서 쓸 수 없는 명령이 섞여 있을 수
+                  있으니 그대로 따르지 마세요.
+                </p>
+              )}
               <ChatMessageContent text={message.text} />
+              {message.fallback && (
+                <p className="chat-fallback-note">
+                  AI 응답을 받지 못해 준비된 안내로 대체했습니다. 환경 관측 정보가 반영되지
+                  않았을 수 있습니다.
+                </p>
+              )}
+              <ChatMessageEvidence message={message} />
             </div>
           ))}
           {loading && (
             <div className="chat-message assistant chat-message-loading">
               <span className="chat-message-role">튜터</span>
               <span className="typing-indicator" aria-hidden="true"><span /><span /><span /></span>
-              <span>답변을 준비하고 있습니다...</span>
+              <span>
+                {isSlow
+                  ? `${environmentLabel} 환경 상태와 관련 문서를 분석 중입니다...`
+                  : '답변을 준비하고 있습니다...'}
+              </span>
+              {isCancellable && (
+                <button className="ui-button plain small chat-cancel-btn" type="button" onClick={cancelQuestion}>
+                  취소
+                </button>
+              )}
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
-        {error && <div className="chat-error">{error}</div>}
+        {/*
+          * 상태 문구는 한 곳에서만 낸다. 429 는 아래 제한 안내가 담당하고,
+          * 그때 error 는 비워 둔다 — 백엔드 detail 의 고정 숫자와 카운트다운이
+          * 함께 보이면 사용자에게 서로 다른 두 숫자가 동시에 보인다.
+          */}
+        {error && (
+          <div className="chat-error" role="alert">
+            <span>{error}</span>
+          </div>
+        )}
+        {isRateLimited && (
+          <div className="chat-rate-limit-note">
+            {/*
+              * 보이는 카운트다운은 live region 이 아니다 — 매초 바뀌는 숫자를 스크린리더가
+              * 매번 읽으면 다른 안내가 묻힌다. 제한이 걸린 순간 한 번만 알린다.
+              */}
+            <span aria-hidden="true">
+              {isCooldownExact
+                ? `질문 횟수 제한에 걸렸습니다. ${cooldown}초 후 다시 질문할 수 있습니다.`
+                : '질문 횟수 제한에 걸렸습니다. 잠시 후 다시 질문할 수 있습니다.'}
+            </span>
+            <span className="sr-only" role="status">
+              {cooldownAnnouncement}
+            </span>
+          </div>
+        )}
+        {/*
+          * 실패한 질문이 남아 있는 동안은 재전송 버튼을 계속 둔다.
+          * 제한 중에는 잠기고, 제한이 풀리면 그대로 다시 보낼 수 있다 —
+          * 사용자가 질문을 다시 타이핑하게 만들지 않는다 (FE-11).
+          */}
+        {retryQuestion && (
+          <div className="chat-retry-bar">
+            <button
+              className="ui-button small chat-retry-btn"
+              type="button"
+              disabled={isChatDisabled}
+              onClick={() => void ask(retryQuestion)}
+            >
+              {isRateLimited
+                ? isCooldownExact
+                  ? `${cooldown}초 후 재시도`
+                  : '잠시 후 재시도'
+                : '다시 질문'}
+            </button>
+          </div>
+        )}
         <form className="chat-form" onSubmit={submitQuestion}>
+          {/* label 이 없으면 스크린리더가 이 입력을 읽지 못한다 (FE-11 인수 조건). */}
+          <label className="sr-only" htmlFor={`tutor-input-${missionId}`}>
+            {environmentLabel} 훈련 질문 (Enter 로 전송)
+          </label>
           <input
+            id={`tutor-input-${missionId}`}
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={isChatDisabled ? '질문할 수 없는 상태입니다' : '어떤 명령으로 원인을 찾아야 하나요?'}
+            placeholder={
+              isRateLimited
+                ? '질문 횟수 제한 중입니다'
+                : isChatDisabled
+                  ? '질문할 수 없는 상태입니다'
+                  : '어떤 명령으로 원인을 찾아야 하나요?'
+            }
             disabled={isChatDisabled}
           />
-          <button type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
+          <button className="ui-button primary small" type="submit" disabled={isChatDisabled || !input.trim()}>질문</button>
         </form>
+        {/* 튜터 질문과 힌트 감점을 혼동하지 않게 관계를 밝힌다. 감점은 힌트 버튼에서만 생긴다. */}
+        <p className="tutor-note">질문은 감점 없음 · 점수는 시간이 지나거나 힌트를 쓸 때 깎입니다</p>
       </section>
     </>
   )

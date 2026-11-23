@@ -1,0 +1,12 @@
+{
+  "taxonomy_version": "v1",
+  "environments": [
+    "kubernetes",
+    "docker",
+    "linux"
+  ],
+  "active_scenario_environments": [
+    "kubernetes"
+  ],
+  "updated_at": "2026-08-27"
+}

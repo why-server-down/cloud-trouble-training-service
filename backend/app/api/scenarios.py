@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core import environments
+from app.core.config import settings
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -30,13 +32,22 @@ async def start_random_scenario(
             detail="유효하지 않은 난이도입니다. beginner / intermediate / advanced / expert 중 선택하세요",
         )
 
+    try:
+        environments.assert_implemented(body.environment)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     service = get_scenario_service()
     try:
         result = await service.start_random(
             db,
             current_user,
             body.difficulty,
-            allow_demo_unlock=body.demo_unlock,
+            environment=body.environment,
+            # 클라이언트가 보낸 demo_unlock 만으로 잠금을 풀 수 없게 한다. 서버 설정이
+            # 켜져 있을 때만 시연용 해제를 허용한다(그 경우 어차피 전부 unlocked 다).
+            allow_demo_unlock=body.demo_unlock and settings.DEMO_UNLOCK_AI_SCENARIOS,
+            randomize=body.randomize,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -44,10 +55,21 @@ async def start_random_scenario(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
     scenario = result["scenario"]
+    # 요청 환경과 생성된 시나리오 환경이 어긋나면 그대로 응답하지 않는다.
+    # 미구현 환경 요청을 kubernetes 로 fallback 하는 것을 막기 위한 방어선이다.
+    if scenario.environment != body.environment:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"요청 환경('{body.environment}')과 생성된 시나리오 환경"
+                f"('{scenario.environment}')이 일치하지 않습니다"
+            ),
+        )
     return ScenarioResponse(
         scenario_id=scenario.id,
         title=scenario.title,
         difficulty=scenario.difficulty,
+        environment=scenario.environment,
         student_brief=scenario.student_brief,
         time_limit_seconds=scenario.time_limit,
         base_score=scenario.base_score,
@@ -75,6 +97,7 @@ async def get_scenario_status(
         attempt_id=attempt.id,
         title=scenario.title,
         difficulty=scenario.difficulty,
+        environment=scenario.environment,
         student_brief=scenario.student_brief,
         elapsed_seconds=result["elapsed_seconds"],
         remaining_seconds=result["remaining_seconds"],
@@ -132,6 +155,10 @@ async def debug_resolve(
     db: AsyncSession = Depends(get_db),
 ):
     """Mock 전용: AI 시나리오 수동 해결 트리거."""
+    # 고정 미션의 /debug/resolve 와 같은 가드. mock 백엔드가 아니면 운영에서
+    # 장애를 고치지 않고 완료 처리할 수 있으므로 404 로 숨긴다.
+    if settings.VALIDATION_BACKEND != "mock":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     service = get_scenario_service()
     try:
         return await service.debug_resolve(db, current_user.id)

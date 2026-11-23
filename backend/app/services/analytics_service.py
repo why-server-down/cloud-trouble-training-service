@@ -6,6 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core import environments
+from app.core.config import settings
 from app.models import MissionAttempt, User
 
 
@@ -71,23 +73,61 @@ def calculate_tier(total_score: int) -> dict:
 
 
 class AnalyticsService:
-    async def _completed_attempts(self, db: AsyncSession, user_id: uuid.UUID) -> list[MissionAttempt]:
+    async def _completed_attempts(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        environment: str | None = None,
+    ) -> list[MissionAttempt]:
+        """완료된 시도만 모은다.
+
+        abandoned/failed 는 포함하지 않는다. 포기한 시도를 MTTR 에 넣으면
+        시간 지표가 실제 복구 능력을 나타내지 못한다.
+        """
+        conditions = [
+            MissionAttempt.user_id == user_id,
+            MissionAttempt.status == "completed",
+        ]
+        if environment is not None:
+            conditions.append(MissionAttempt.environment == environment)
+
         result = await db.execute(
             select(MissionAttempt)
             .options(selectinload(MissionAttempt.mission))
-            .where(
-                MissionAttempt.user_id == user_id,
-                MissionAttempt.status == "completed",
-            )
+            .where(*conditions)
             .order_by(MissionAttempt.end_time)
         )
         return list(result.scalars().all())
 
-    async def get_dashboard_stats(self, db: AsyncSession, user: User) -> dict:
-        completed = await self._completed_attempts(db, user.id)
+    @staticmethod
+    def _curve_key(attempt: MissionAttempt) -> str:
+        """학습 곡선에서 "같은 과제" 를 묶는 키.
+
+        mission_id 만 쓰면 AI 시나리오는 전부 None 으로 뭉쳐, 서로 다른 시나리오가
+        같은 미션을 반복 시도한 것처럼 집계된다.
+        """
+        if attempt.attempt_type == "ai_scenario":
+            return f"scenario:{attempt.scenario_id}"
+        return f"mission:{attempt.mission_id}"
+
+    async def get_dashboard_stats(
+        self, db: AsyncSession, user: User, environment: str | None = None
+    ) -> dict:
+        """통계. environment 를 주면 그 환경만, 없으면 전체를 집계한다."""
+        completed = await self._completed_attempts(db, user.id, environment)
         total_score = sum(attempt.final_score or 0 for attempt in completed)
         total_time = sum(self._completion_seconds(attempt) for attempt in completed)
         hints_used = sum(attempt.hints_used for attempt in completed)
+
+        # 전체 조회일 때만 환경별 분해를 함께 준다. 필터를 건 조회에서는
+        # 같은 값을 두 번 담을 이유가 없다.
+        by_environment = {}
+        if environment is None:
+            for env in environments.SUPPORTED_ENVIRONMENTS:
+                by_environment[env] = self._environment_stats(
+                    [a for a in completed if a.environment == env]
+                )
+
         return {
             "username": user.username,
             "total_score": total_score,
@@ -96,14 +136,62 @@ class AnalyticsService:
             "hints_used": hints_used,
             "current_tier": calculate_tier(total_score),
             "skill_scores": self._calculate_skill_scores(completed),
+            "environment": environment,
+            "environment_stats": by_environment,
         }
 
-    async def get_learning_curve(self, db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
-        completed = await self._completed_attempts(db, user_id)
-        attempts_by_mission: dict[uuid.UUID, int] = defaultdict(int)
+    def _environment_stats(self, completed: list[MissionAttempt]) -> dict:
+        """한 환경의 집계.
+
+        시도가 없으면 competency 를 null 로 둔다. 0 으로 두면 "해봤는데 못했다" 와
+        "아직 안 했다" 가 구분되지 않는다.
+        """
+        if not completed:
+            return {
+                "completed": 0,
+                "average_score": 0,
+                "average_mttr": 0,
+                "hints_used": 0,
+                "competency": None,
+            }
+
+        count = len(completed)
+        average_score = sum(a.final_score or 0 for a in completed) / count
+        average_mttr = sum(self._completion_seconds(a) for a in completed) / count
+        hints = sum(a.hints_used for a in completed)
+
+        return {
+            "completed": count,
+            "average_score": round(average_score),
+            "average_mttr": round(average_mttr),
+            "hints_used": hints,
+            "competency": self._competency(average_score, average_mttr, hints / count),
+        }
+
+    @staticmethod
+    def _competency(average_score: float, average_mttr: float, hints_per_completion: float) -> int:
+        """점수·속도·힌트를 합친 역량 지표.
+
+        speed 는 목표 복구 시간(TARGET_MTTR_SECONDS) 대비로 계산한다.
+        미션 time_limit 이 환경마다 달라 환경 설정값을 기준으로 삼는다.
+        """
+        def clamp(value: float) -> float:
+            return max(0.0, min(100.0, value))
+
+        target = max(settings.TARGET_MTTR_SECONDS, 1)
+        speed = clamp(100 - average_mttr / target * 50)
+        hint = clamp(100 - hints_per_completion * 15)
+        return round(0.5 * average_score + 0.3 * speed + 0.2 * hint)
+
+    async def get_learning_curve(
+        self, db: AsyncSession, user_id: uuid.UUID, environment: str | None = None
+    ) -> list[dict]:
+        completed = await self._completed_attempts(db, user_id, environment)
+        attempts_by_task: dict[str, int] = defaultdict(int)
         curve = []
         for attempt in completed:
-            attempts_by_mission[attempt.mission_id] += 1
+            key = self._curve_key(attempt)
+            attempts_by_task[key] += 1
             if attempt.attempt_type == "ai_scenario":
                 name = f"AI 시나리오 ({attempt.scenario_id and str(attempt.scenario_id)[:8]})"
             else:
@@ -113,7 +201,8 @@ class AnalyticsService:
                     "attempt_id": str(attempt.id),
                     "mission_id": str(attempt.mission_id),
                     "mission_name": name,
-                    "attempt_number": attempts_by_mission[attempt.mission_id],
+                    "environment": attempt.environment,
+                    "attempt_number": attempts_by_task[key],
                     "completion_time": self._completion_seconds(attempt),
                     "score": attempt.final_score or 0,
                     "hints_used": attempt.hints_used,

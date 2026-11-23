@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.environments import DEFAULT_ENVIRONMENT, EnvironmentId
 
 
 # Auth
@@ -16,8 +18,7 @@ class UserResponse(BaseModel):
     username: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Token(BaseModel):
@@ -32,23 +33,22 @@ class UserProfileResponse(BaseModel):
     missions_completed: int
     total_score: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Terminal
 class SessionCreate(BaseModel):
-    pass
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
 
 
 class SessionResponse(BaseModel):
     id: uuid.UUID
     namespace: str
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     created_at: datetime
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # WebSocket Messages
@@ -70,6 +70,19 @@ class ErrorMessage(BaseModel):
     code: str = "UNKNOWN"
 
 
+# Environments
+class EnvironmentItem(BaseModel):
+    id: EnvironmentId
+    status: str  # available | preparing
+    capabilities: list[str] = []
+    # 닫힌 환경에만 붙는다: not_deployed | not_implemented. 열린 환경은 None.
+    reason: Optional[str] = None
+
+
+class EnvironmentListResponse(BaseModel):
+    items: list[EnvironmentItem]
+
+
 # Mission
 class MissionResponse(BaseModel):
     id: uuid.UUID
@@ -77,13 +90,13 @@ class MissionResponse(BaseModel):
     level: int
     description: str
     chaos_type: str
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     base_score: int
     time_limit: int
     hint_penalty: int
     is_unlocked: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MissionAttemptCreate(BaseModel):
@@ -96,14 +109,14 @@ class MissionAttemptResponse(BaseModel):
     mission_id: Optional[uuid.UUID] = None
     attempt_type: str = "static_mission"
     scenario_id: Optional[uuid.UUID] = None
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     status: str
     start_time: datetime
     end_time: Optional[datetime] = None
     final_score: Optional[int] = None
     hints_used: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MissionStatusResponse(BaseModel):
@@ -120,21 +133,29 @@ class MissionCompleteResponse(BaseModel):
 
 # AI Chat
 class ChatRequest(BaseModel):
-    message: str
-    hint_level: int = 0  # 0~3 (소크라테스식 힌트 레벨)
+    # 프롬프트에는 2000자만 들어가지만 저장은 원문 전체였다. 입력 단계에서 막는다.
+    message: str = Field(min_length=1, max_length=2000)
+    # 서버는 attempt.hints_used 로 한 번 더 제한한다(아래 chat 라우터).
+    hint_level: int = Field(default=0, ge=0, le=3)  # 0~3 (소크라테스식 힌트 레벨)
 
 
 class ChatResponse(BaseModel):
     response: str
     hint_level: int
+    # 이 답변이 어느 환경을 근거로 만들어졌는지. TutorResult 에만 있고 여기서
+    # 빠져 있어, 프론트가 "요청 환경 != 응답 환경" 을 계약 오류로 잡을 수 없었다.
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     mission_name: Optional[str] = None
     sources: Optional[list[dict]] = None
     observations_used: Optional[list[str]] = None
+    token_usage: Optional[dict] = None
+    fallback_used: bool = False
 
 
 # AI Scenario
 class ScenarioGenerateRequest(BaseModel):
     difficulty: str  # beginner | intermediate | advanced | expert
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     randomize: bool = True
     demo_unlock: bool = False
 
@@ -143,14 +164,14 @@ class ScenarioResponse(BaseModel):
     scenario_id: uuid.UUID
     title: str
     difficulty: str
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     student_brief: str
     time_limit_seconds: int
     base_score: int
     hint_penalty: int
     safety_status: str = "accepted"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScenarioStatusResponse(BaseModel):
@@ -158,6 +179,7 @@ class ScenarioStatusResponse(BaseModel):
     attempt_id: uuid.UUID
     title: str
     difficulty: str
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
     student_brief: str
     elapsed_seconds: int
     remaining_seconds: int
@@ -170,6 +192,53 @@ class ScenarioCheckResponse(BaseModel):
     resolved: bool
     message: str
     score: Optional[int] = None
+
+
+# AI 계층 실행 계약 (BE-20)
+# AI 담당이 이 형태로 결과를 돌려주면 백엔드가 저장·표시한다.
+class TutorSource(BaseModel):
+    """튜터 답변의 근거. 표시 가능한 필드만 담는다."""
+
+    title: str
+    source_id: Optional[str] = None
+    # 외부 링크를 그대로 렌더링하지 않는다. 안전한 경로만 프론트가 anchor 로 만든다.
+    path: Optional[str] = None
+    environment: Optional[EnvironmentId] = None
+    similarity: Optional[float] = None
+
+
+class TutorResult(BaseModel):
+    """AI 튜터 응답 계약."""
+
+    message: str
+    hint_level: int = 0
+    environment: EnvironmentId = DEFAULT_ENVIRONMENT
+    sources: list[TutorSource] = []
+    # 답변에 실제로 쓰인 관측값의 이름. 정답이 아니라 무엇을 봤는지를 알린다.
+    observations_used: list[str] = []
+    # 운영 지표. 사용량과 지연을 추적한다(BE-23 메트릭과 연결된다).
+    token_usage: Optional[dict] = None
+    latency_ms: Optional[int] = None
+    latency_breakdown: Optional[dict[str, float]] = None
+    # 프로바이더 실패로 대체 응답을 준 경우
+    fallback_used: bool = False
+    error_code: Optional[str] = None
+
+
+class ValidationJudgment(BaseModel):
+    """LLM 검증 판정. **advisory 전용이다.**
+
+    점수를 승인하는 유일한 기준은 mechanical validation 이다. 이 판정은 설명을
+    돕기 위해 저장될 뿐, mechanical false 를 true 로 뒤집지 못한다.
+    LLM 이 오판하면 사용자가 고치지 않았는데도 완료 처리되기 때문이다.
+    """
+
+    resolved: bool
+    reason: str
+    confidence: float = 0.0
+    evidence: list[str] = []
+    advisory_only: bool = True
+    error_code: Optional[str] = None
 
 
 class UnlockStatusResponse(BaseModel):

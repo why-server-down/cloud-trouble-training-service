@@ -1,0 +1,12 @@
+# COPY . . 가 비밀값·대용량을 이미지 레이어에 넣지 않게 한다.
+.env
+.env.*
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+reports/
+.runtime/
+alembic/versions/__pycache__/
